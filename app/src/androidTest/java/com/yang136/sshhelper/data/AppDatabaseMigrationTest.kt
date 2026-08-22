@@ -116,4 +116,32 @@ class AppDatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate4To5_preservesHostsAndAddsProxyColumns() {
+        val name = "$databaseName-4-5"
+        helper.createDatabase(name, 4).apply {
+            execSQL("INSERT INTO hosts (id,name,hostname,port,username,authType,rememberCredential,privateKeyName,autoReconnect,createdAt,updatedAt,lastConnectedAt) VALUES (1,'旧主机','example.test',22,'root','PASSWORD',1,NULL,1,1,2,NULL)")
+            execSQL("INSERT INTO secrets (id,hostId,credentialIv,credentialCiphertext,passphraseIv,passphraseCiphertext,encryptionVersion) VALUES (1,1,X'0102',X'0304',NULL,NULL,1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate(name, 5, true, AppDatabase.MIGRATION_4_5).use { database ->
+            database.query("SELECT name, proxyType, proxyHost, proxyPort, proxyUsername FROM hosts WHERE id = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("旧主机", cursor.getString(0))
+                assertNull(cursor.getString(1))
+                assertNull(cursor.getString(2))
+                assertNull(cursor.getString(3))
+                assertNull(cursor.getString(4))
+            }
+            database.query("SELECT length(credentialCiphertext), proxyIv, proxyCiphertext FROM secrets WHERE hostId = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(2, cursor.getInt(0))
+                assertNull(cursor.getString(1))
+                assertNull(cursor.getString(2))
+            }
+        }
+    }
 }

@@ -8,8 +8,10 @@ import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.CommandSnippet
+import com.yang136.sshhelper.data.ProxyType
 import com.yang136.sshhelper.data.validationError
 import com.yang136.sshhelper.data.validateJumpRoute
+import com.yang136.sshhelper.data.validateProxy
 import com.yang136.sshhelper.data.TransferStatus
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionId
@@ -174,6 +176,11 @@ data class EditorState(
     val privateKeyName: String? = null,
     val autoReconnect: Boolean = false,
     val jumpHostId: Long? = null,
+    val proxyType: ProxyType? = null,
+    val proxyHost: String = "",
+    val proxyPort: String = "",
+    val proxyUsername: String = "",
+    val proxyPassword: String = "",
     val passphrase: String = "",
     val error: String? = null,
     val loaded: Boolean = false,
@@ -218,6 +225,10 @@ class HostEditorViewModel(
                     privateKeyName = it.privateKeyName,
                     autoReconnect = it.autoReconnect,
                     jumpHostId = it.jumpHostId,
+                    proxyType = it.proxyType,
+                    proxyHost = it.proxyHost.orEmpty(),
+                    proxyPort = it.proxyPort?.toString().orEmpty(),
+                    proxyUsername = it.proxyUsername.orEmpty(),
                     loaded = true,
                 )
             } ?: EditorState(loaded = true)
@@ -267,12 +278,20 @@ class HostEditorViewModel(
             privateKeyName = value.privateKeyName,
             autoReconnect = value.autoReconnect,
             jumpHostId = value.jumpHostId,
+            proxyType = value.proxyType,
+            proxyHost = value.proxyHost,
+            proxyPort = value.proxyPort.toIntOrNull(),
+            proxyUsername = value.proxyUsername,
         )
         profile.validationError()?.let {
             mutableState.value = value.copy(error = it)
             return null
         }
         validateJumpRoute(profile, hosts.value)?.let {
+            mutableState.value = value.copy(error = it)
+            return null
+        }
+        validateProxy(profile)?.let {
             mutableState.value = value.copy(error = it)
             return null
         }
@@ -286,7 +305,9 @@ class HostEditorViewModel(
             mutableState.value = value.copy(error = if (value.authType == AuthType.PASSWORD) "请输入要保存的密码" else "请选择私钥文件")
             return null
         }
-        return runCatching { container.hostRepository.save(profile, credential) }
+        return runCatching {
+            container.hostRepository.save(profile, credential, value.proxyPassword.takeIf(String::isNotEmpty))
+        }
             .onFailure { mutableState.value = value.copy(error = "保存失败：${it.message ?: "未知错误"}") }
             .getOrNull()
     }

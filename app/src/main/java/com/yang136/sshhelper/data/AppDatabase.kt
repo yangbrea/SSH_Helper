@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 class Converters {
     @TypeConverter fun authType(value: String): AuthType = AuthType.valueOf(value)
     @TypeConverter fun authType(value: AuthType): String = value.name
+    @TypeConverter fun proxyType(value: String?): ProxyType? = value?.let { ProxyType.valueOf(it) }
+    @TypeConverter fun proxyType(value: ProxyType?): String? = value?.name
     @TypeConverter fun transferDirection(value: String): TransferDirection = TransferDirection.valueOf(value)
     @TypeConverter fun transferDirection(value: TransferDirection): String = value.name
     @TypeConverter fun transferStatus(value: String): TransferStatus = TransferStatus.valueOf(value)
@@ -186,7 +188,7 @@ interface CommandSnippetDao {
         TransferJobEntity::class,
         PortForwardRuleEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -206,7 +208,7 @@ abstract class AppDatabase : RoomDatabase() {
             context.applicationContext,
             AppDatabase::class.java,
             "ssh_helper.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -288,6 +290,17 @@ abstract class AppDatabase : RoomDatabase() {
                     )""".trimIndent(),
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_port_forward_rules_hostId ON port_forward_rules(hostId)")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE hosts ADD COLUMN proxyType TEXT")
+                db.execSQL("ALTER TABLE hosts ADD COLUMN proxyHost TEXT")
+                db.execSQL("ALTER TABLE hosts ADD COLUMN proxyPort INTEGER")
+                db.execSQL("ALTER TABLE hosts ADD COLUMN proxyUsername TEXT")
+                db.execSQL("ALTER TABLE secrets ADD COLUMN proxyIv BLOB")
+                db.execSQL("ALTER TABLE secrets ADD COLUMN proxyCiphertext BLOB")
             }
         }
     }

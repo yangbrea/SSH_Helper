@@ -8,6 +8,8 @@ import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchException
 import com.jcraft.jsch.Proxy
+import com.jcraft.jsch.ProxyHTTP
+import com.jcraft.jsch.ProxySOCKS5
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
 import com.jcraft.jsch.UIKeyboardInteractive
@@ -120,10 +122,21 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
         try {
             val jump = if (route.jump != null) {
                 val jumpCredential = credentials.jump ?: error("缺少跳板机凭据")
-                connectJschSession(route.jump, jumpCredential, HostKeySubject.JUMP).also { jumpSession = it }
+                connectJschSession(
+                    route.jump,
+                    jumpCredential,
+                    HostKeySubject.JUMP,
+                    proxyPassword = credentials.jumpProxyPassword,
+                ).also { jumpSession = it }
             } else null
             mutableStage.value = ConnectionStage.TARGET_AUTH
-            val target = connectJschSession(route.target, credentials.target, HostKeySubject.TARGET, proxyVia = jump)
+            val target = connectJschSession(
+                route.target,
+                credentials.target,
+                HostKeySubject.TARGET,
+                proxyVia = jump,
+                proxyPassword = credentials.targetProxyPassword,
+            )
             session = target
             val newChannel = (target.openChannel("shell") as ChannelShell).apply {
                 setPtyType("xterm-256color")
@@ -156,13 +169,15 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
      * Opens one hop of the route. When [proxyVia] is a connected jump session, the new session's
      * transport is a `direct-tcpip` channel opened through the jump host, so the target SSH
      * handshake runs over the encrypted jump tunnel. Host keys of both hops are verified
-     * independently against the shared known_hosts store.
+     * independently against the shared known_hosts store. Each hop's own proxy configuration is
+     * applied to the direct connection from this device (the tunnel interior needs no proxy).
      */
     private fun connectJschSession(
         profile: HostProfile,
         credential: Credential,
         subject: HostKeySubject,
         proxyVia: Session? = null,
+        proxyPassword: String? = null,
     ): Session {
         val expected = runBlocking { knownHostDao.find(profile.hostname, profile.port) }
         val verifier = SessionHostKeyRepository(profile, expected, subject)
@@ -209,10 +224,26 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
                 tunnel.setHost(profile.hostname)
                 tunnel.setPort(profile.port)
                 setProxy(JumpHostProxy(tunnel))
+            } else {
+                profile.connectionProxy(proxyPassword)?.let { setProxy(it) }
             }
         }
         newSession.connect(SSH_CONNECT_TIMEOUT_MS)
         return newSession
+    }
+
+    private fun HostProfile.connectionProxy(password: String?): Proxy? {
+        val type = proxyType ?: return null
+        val host = proxyHost ?: return null
+        val port = proxyPort ?: return null
+        return when (type) {
+            com.yang136.sshhelper.data.ProxyType.HTTP -> ProxyHTTP(host, port).apply {
+                proxyUsername?.let { setUserPasswd(it, password.orEmpty()) }
+            }
+            com.yang136.sshhelper.data.ProxyType.SOCKS5 -> ProxySOCKS5(host, port).apply {
+                proxyUsername?.let { setUserPasswd(it, password.orEmpty()) }
+            }
+        }
     }
 
     /** Streams the target SSH handshake through a direct-tcpip channel on the jump session. */

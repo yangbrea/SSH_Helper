@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -132,6 +133,14 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                 hosts = allHosts,
                 onJumpChange = { id -> vm.update { it.copy(jumpHostId = id) } },
             )
+            ProxySection(
+                proxyType = state.proxyType,
+                proxyHost = state.proxyHost,
+                proxyPort = state.proxyPort,
+                proxyUsername = state.proxyUsername,
+                proxyPassword = state.proxyPassword,
+                onChange = { update -> vm.update(update) },
+            )
             if (state.rememberCredential && state.authType == AuthType.PASSWORD) {
                 OutlinedTextField(state.password, { vm.update { s -> s.copy(password = it) } }, Modifier.fillMaxWidth(), label = { Text(if (hostId == 0L) "密码" else "新密码（留空则不修改）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             }
@@ -225,6 +234,74 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
             },
             dismissButton = { TextButton(onClick = { vm.clearGeneratedKey() }) { Text("完成") } },
         )
+    }
+}
+
+@Composable
+private fun ProxySection(
+    proxyType: com.yang136.sshhelper.data.ProxyType?,
+    proxyHost: String,
+    proxyPort: String,
+    proxyUsername: String,
+    proxyPassword: String,
+    onChange: ((EditorState) -> EditorState) -> Unit,
+) {
+    val enabled = proxyType != null
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f),
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Storage, null, tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text("网络代理", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                    Text(
+                        when (proxyType) {
+                            null -> "直连"
+                            com.yang136.sshhelper.data.ProxyType.HTTP -> "HTTP 代理 · $proxyHost:$proxyPort"
+                            com.yang136.sshhelper.data.ProxyType.SOCKS5 -> "SOCKS5 代理 · $proxyHost:$proxyPort"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "收起" else "展开")
+            }
+            if (expanded) {
+                HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            null to "直连",
+                            com.yang136.sshhelper.data.ProxyType.HTTP to "HTTP",
+                            com.yang136.sshhelper.data.ProxyType.SOCKS5 to "SOCKS5",
+                        ).forEach { (type, label) ->
+                            FilterChip(
+                                selected = proxyType == type,
+                                onClick = { onChange { it.copy(proxyType = type) } },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+                    if (enabled) {
+                        OutlinedTextField(proxyHost, { onChange { s -> s.copy(proxyHost = it) } }, Modifier.fillMaxWidth(), label = { Text("代理服务器地址") }, placeholder = { Text("proxy.example.com 或 192.168.1.1") }, singleLine = true)
+                        OutlinedTextField(proxyPort, { onChange { s -> s.copy(proxyPort = it.filter(Char::isDigit).take(5)) } }, Modifier.fillMaxWidth(), label = { Text("代理端口") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        OutlinedTextField(proxyUsername, { onChange { s -> s.copy(proxyUsername = it) } }, Modifier.fillMaxWidth(), label = { Text("代理用户名（可选）") }, singleLine = true)
+                        if (proxyUsername.isNotBlank()) {
+                            OutlinedTextField(proxyPassword, { onChange { s -> s.copy(proxyPassword = it) } }, Modifier.fillMaxWidth(), label = { Text("代理密码（可选，保存时加密）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                        }
+                        Text("代理作用于手机到本主机（及跳板机）的直连段；已建立的跳板隧道内部不会再次套用代理。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
     }
 }
 

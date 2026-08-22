@@ -17,6 +17,8 @@ data class SshRoute(
 data class RouteCredentials(
     val target: Credential,
     val jump: Credential? = null,
+    val targetProxyPassword: String? = null,
+    val jumpProxyPassword: String? = null,
 )
 
 /** Progress of a route connection, used both by the UI and the session state. */
@@ -40,5 +42,9 @@ internal fun Credential.copyCredential(): Credential = when (this) {
     is Credential.PrivateKey -> Credential.PrivateKey(bytes.copyOf(), passphrase?.copyOf(), fileName)
 }
 
-internal fun RouteCredentials.copyDeep(): RouteCredentials =
-    RouteCredentials(target.copyCredential(), jump?.copyCredential())
+internal fun RouteCredentials.copyDeep(): RouteCredentials = RouteCredentials(
+    target.copyCredential(),
+    jump?.copyCredential(),
+    targetProxyPassword,
+    jumpProxyPassword,
+)

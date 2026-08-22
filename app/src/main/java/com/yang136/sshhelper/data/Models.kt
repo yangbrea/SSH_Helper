@@ -8,6 +8,8 @@ import androidx.room.PrimaryKey
 
 enum class AuthType { PASSWORD, PRIVATE_KEY }
 
+enum class ProxyType { HTTP, SOCKS5 }
+
 @Entity(
     tableName = "hosts",
     foreignKeys = [ForeignKey(
@@ -29,6 +31,10 @@ data class HostEntity(
     val privateKeyName: String? = null,
     @ColumnInfo(defaultValue = "0") val autoReconnect: Boolean = false,
     val jumpHostId: Long? = null,
+    val proxyType: ProxyType? = null,
+    val proxyHost: String? = null,
+    val proxyPort: Int? = null,
+    val proxyUsername: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val lastConnectedAt: Long? = null,
@@ -51,6 +57,8 @@ data class SecretEntity(
     val credentialCiphertext: ByteArray,
     val passphraseIv: ByteArray? = null,
     val passphraseCiphertext: ByteArray? = null,
+    val proxyIv: ByteArray? = null,
+    val proxyCiphertext: ByteArray? = null,
     @ColumnInfo(defaultValue = "1") val encryptionVersion: Int = 1,
 )
 
@@ -218,6 +226,10 @@ data class HostProfile(
     val privateKeyName: String? = null,
     val autoReconnect: Boolean = false,
     val jumpHostId: Long? = null,
+    val proxyType: ProxyType? = null,
+    val proxyHost: String? = null,
+    val proxyPort: Int? = null,
+    val proxyUsername: String? = null,
 )
 
 sealed interface Credential {
@@ -230,7 +242,8 @@ sealed interface Credential {
 }
 
 fun HostEntity.toProfile() = HostProfile(
-    id, name, hostname, port, username, authType, rememberCredential, privateKeyName, autoReconnect, jumpHostId,
+    id, name, hostname, port, username, authType, rememberCredential, privateKeyName,
+    autoReconnect, jumpHostId, proxyType, proxyHost, proxyPort, proxyUsername,
 )
 
 fun HostProfile.toEntity(existing: HostEntity? = null) = HostEntity(
@@ -244,6 +257,10 @@ fun HostProfile.toEntity(existing: HostEntity? = null) = HostEntity(
     privateKeyName = privateKeyName,
     autoReconnect = autoReconnect,
     jumpHostId = jumpHostId,
+    proxyType = proxyType,
+    proxyHost = proxyHost?.trim()?.takeIf(String::isNotEmpty),
+    proxyPort = proxyPort,
+    proxyUsername = proxyUsername?.trim()?.takeIf(String::isNotEmpty),
     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
     updatedAt = System.currentTimeMillis(),
     lastConnectedAt = existing?.lastConnectedAt,
@@ -294,4 +311,12 @@ fun HostProfile.validationError(): String? = when {
     port !in 1..65535 -> "端口必须在 1 到 65535 之间"
     username.isBlank() -> "请输入用户名"
     else -> null
+}
+
+/** Validates the connection proxy settings; returns null when no proxy is configured. */
+fun validateProxy(profile: HostProfile): String? {
+    val type = profile.proxyType ?: return null
+    if (profile.proxyHost.isNullOrBlank()) return "请输入代理服务器地址"
+    if (profile.proxyPort == null || profile.proxyPort !in 1..65535) return "代理端口必须在 1–65535 之间"
+    return null
 }

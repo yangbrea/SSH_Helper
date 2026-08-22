@@ -15,7 +15,7 @@ class HostRepository(
 
     suspend fun getHost(id: Long): HostProfile? = database.hostDao().get(id)?.toProfile()
 
-    suspend fun save(profile: HostProfile, credential: Credential?): Long {
+    suspend fun save(profile: HostProfile, credential: Credential?, proxyPassword: String? = null): Long {
         val dao = database.hostDao()
         val existing = if (profile.id == 0L) null else dao.get(profile.id)
         val id = if (existing == null) dao.insert(profile.toEntity()) else {
@@ -42,12 +42,16 @@ class HostRepository(
             }
             val encryptedPrimary: EncryptedValue
             val encryptedSecondary: EncryptedValue?
+            val encryptedProxy: EncryptedValue?
             val encryptionVersion: Int
             try {
                 val primaryResult = credentialVault.encrypt(id, profile.authType, "primary", primary)
                 encryptedPrimary = primaryResult.first
                 encryptionVersion = primaryResult.second
                 encryptedSecondary = secondary?.let { credentialVault.encrypt(id, profile.authType, "passphrase", it).first }
+                encryptedProxy = proxyPassword?.takeIf(String::isNotEmpty)?.let {
+                    credentialVault.encrypt(id, profile.authType, "proxy", it.encodeToByteArray()).first
+                }
             } finally {
                 primary.fill(0)
                 secondary?.fill(0)
@@ -60,11 +64,37 @@ class HostRepository(
                     credentialCiphertext = encryptedPrimary.ciphertext,
                     passphraseIv = encryptedSecondary?.iv,
                     passphraseCiphertext = encryptedSecondary?.ciphertext,
+                    proxyIv = encryptedProxy?.iv,
+                    proxyCiphertext = encryptedProxy?.ciphertext,
                     encryptionVersion = encryptionVersion,
                 )
             )
+        } else if (proxyPassword != null && proxyPassword.isNotEmpty()) {
+            // Credential not being saved this time, but the proxy password changed.
+            saveProxyPassword(id, profile.authType, proxyPassword)
         }
         return id
+    }
+
+    suspend fun saveProxyPassword(hostId: Long, authType: AuthType, password: String) {
+        val secret = database.secretDao().getForHost(hostId) ?: return
+        val encrypted = credentialVault.encrypt(hostId, authType, "proxy", password.encodeToByteArray()).first
+        database.secretDao().insert(
+            secret.copy(proxyIv = encrypted.iv, proxyCiphertext = encrypted.ciphertext),
+        )
+    }
+
+    /** Decrypts the stored proxy password for [profile]; null when none is saved. */
+    suspend fun proxyPasswordFor(profile: HostProfile): String? {
+        if (profile.proxyType == null || profile.proxyUsername.isNullOrBlank()) return null
+        val secret = database.secretDao().getForHost(profile.id) ?: return null
+        val iv = secret.proxyIv ?: return null
+        val ciphertext = secret.proxyCiphertext ?: return null
+        val bytes = credentialVault.decrypt(
+            profile.id, profile.authType, "proxy",
+            EncryptedValue(iv, ciphertext), secret.encryptionVersion,
+        )
+        return bytes.decodeToString().also { bytes.fill(0) }
     }
 
     suspend fun credentialFor(profile: HostProfile): Credential? {

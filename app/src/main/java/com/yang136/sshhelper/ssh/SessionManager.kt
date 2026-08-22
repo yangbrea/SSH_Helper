@@ -421,7 +421,13 @@ class DefaultSessionManager(
         update(runtime) { it.copy(needsCredential = false, needsVaultUnlock = false, reconnectAttempt = null) }
         // Store a deep copy for reconnect; the originals passed in are cleared below so the
         // stored route credentials survive for later automatic reconnects.
-        val stored = RouteCredentials(targetCredential.copyCredential(), jumpCredential?.copyCredential())
+        val targetProxyPassword = if (jumpSnapshot == null) hostRepository.proxyPasswordFor(runtime.state.value.profile) else null
+        val stored = RouteCredentials(
+            target = targetCredential.copyCredential(),
+            jump = jumpCredential?.copyCredential(),
+            targetProxyPassword = targetProxyPassword,
+            jumpProxyPassword = if (jumpSnapshot != null) hostRepository.proxyPasswordFor(jumpSnapshot) else null,
+        )
         replaceRouteCredentials(runtime, stored)
         try {
             runtime.ssh.connect(SshRoute(runtime.state.value.profile, jumpSnapshot), stored)
@@ -464,7 +470,12 @@ class DefaultSessionManager(
                 clearCredential(target)
                 return@forEach
             }
-            val stored = RouteCredentials(target.copyCredential(), jumpCredential?.copyCredential())
+            val stored = RouteCredentials(
+                target = target.copyCredential(),
+                jump = jumpCredential?.copyCredential(),
+                targetProxyPassword = if (jump == null) runCatching { hostRepository.proxyPasswordFor(state.profile) }.getOrNull() else null,
+                jumpProxyPassword = if (jump != null) runCatching { hostRepository.proxyPasswordFor(jump) }.getOrNull() else null,
+            )
             replaceRouteCredentials(runtime, stored)
             clearCredential(target)
             clearCredential(jumpCredential)
