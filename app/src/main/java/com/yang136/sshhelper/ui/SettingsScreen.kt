@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,11 +33,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +51,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
@@ -82,6 +88,10 @@ fun SettingsScreen(
     onThemePresetChange: (ThemePreset) -> Unit,
     onFontSizeChange: (Int) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
+    onAiBaseUrlChange: (String) -> Unit,
+    onAiApiKeyChange: (String) -> Unit,
+    onAiModelChange: (String) -> Unit,
+    onAiSendContextChange: (Boolean) -> Unit,
     vaultState: VaultState,
     canAuthenticate: Boolean,
     onEnableVault: () -> Unit,
@@ -92,6 +102,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     var confirmVaultReset by remember { mutableStateOf(false) }
+    var showApiKey by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
 
     Scaffold(
@@ -141,6 +152,56 @@ fun SettingsScreen(
                         if (vaultState is VaultState.Unavailable) {
                             Text("清除后无法恢复已保存的密码和私钥，需要逐台重新录入。主机配置与指纹不会删除。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
+                    }
+                }
+            }
+
+            item {
+                Text("AI 助手", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("终端页的悬浮气泡可结合最近的终端输出，向 AI 提问并获得命令建议。", style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(
+                            settings.aiBaseUrl,
+                            onAiBaseUrlChange,
+                            Modifier.fillMaxWidth(),
+                            label = { Text("服务地址") },
+                            placeholder = { Text("https://api.deepseek.com/v1") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            settings.aiApiKey,
+                            onAiApiKeyChange,
+                            Modifier.fillMaxWidth(),
+                            label = { Text("API Key") },
+                            singleLine = true,
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showApiKey) "隐藏" else "显示")
+                                }
+                            },
+                        )
+                        OutlinedTextField(
+                            settings.aiModel,
+                            onAiModelChange,
+                            Modifier.fillMaxWidth(),
+                            label = { Text("模型") },
+                            placeholder = { Text("deepseek-chat") },
+                            singleLine = true,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(settings.aiSendContext, onAiSendContextChange)
+                            Column {
+                                Text("发送最近终端输出作为上下文")
+                                Text("仅发送最近约 6KB 输出；关闭后只发送你的提问", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Text("API Key 以明文保存在本机 DataStore 中，仅用于请求你配置的服务地址。发送内容会离开本设备，请注意服务商的隐私政策。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

@@ -69,6 +69,7 @@ fun WorkspaceScreen(
     onFontSizeChange: (Int) -> Unit,
     onManageSnippets: () -> Unit,
     onOpenForwards: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
     onUnlockVault: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -117,6 +118,7 @@ fun WorkspaceScreen(
                     onManageSnippets = onManageSnippets,
                     onSwitchToFiles = { tab = WorkspaceTab.FILES },
                     onOpenForwards = onOpenForwards,
+                    onOpenSettings = onOpenSettings,
                     onUnlockVault = onUnlockVault,
                     onBack = onBack,
                     backEnabled = tab == WorkspaceTab.TERMINAL,

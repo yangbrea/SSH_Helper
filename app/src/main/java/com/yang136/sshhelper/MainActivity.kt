@@ -142,6 +142,10 @@ class MainActivity : FragmentActivity() {
                                 onThemePresetChange = settingsViewModel::setThemePreset,
                                 onFontSizeChange = settingsViewModel::setTerminalFontSize,
                                 onExtraKeysChange = settingsViewModel::setExtraKeys,
+                                onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
+                                onAiApiKeyChange = settingsViewModel::setAiApiKey,
+                                onAiModelChange = settingsViewModel::setAiModel,
+                                onAiSendContextChange = settingsViewModel::setAiSendContext,
                                 vaultState = vaultState,
                                 canAuthenticate = container.credentialVault.canAuthenticate(),
                                 onEnableVault = { requestVault(request = { container.credentialVault.enable() }) },
@@ -199,6 +203,7 @@ class MainActivity : FragmentActivity() {
                                 onFontSizeChange = settingsViewModel::setTerminalFontSize,
                                 onManageSnippets = { navController.navigate("snippets") },
                                 onOpenForwards = { hostId -> navController.navigate("forwards/$hostId") },
+                                onOpenSettings = { navController.navigate("settings") },
                                 onUnlockVault = { requestVault(request = { container.credentialVault.unlock() }) },
                                 onBack = navController::popBackStack,
                             )

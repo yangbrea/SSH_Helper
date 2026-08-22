@@ -108,6 +108,7 @@ import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
+import com.yang136.sshhelper.ai.AiContext
 import com.yang136.sshhelper.settings.ExtraKeyId
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
@@ -140,6 +141,7 @@ fun TerminalScreen(
     onManageSnippets: () -> Unit,
     onSwitchToFiles: () -> Unit,
     onOpenForwards: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
     onUnlockVault: () -> Unit,
     onBack: () -> Unit,
     backEnabled: Boolean = true,
@@ -310,10 +312,13 @@ fun TerminalScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        Column(
+        Box(
             Modifier.fillMaxSize().padding(padding)
                 .consumeWindowInsets(padding)
-                .imePadding()
+                .imePadding(),
+        ) {
+        Column(
+            Modifier.fillMaxSize()
                 .background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))),
         ) {
             val session = current
@@ -398,6 +403,17 @@ fun TerminalScreen(
                     TextButton(onClick = { current?.let { sessionsViewModel.reconnect(it.id) } }) { Text("重新连接") }
                 }
                 else -> Unit
+            }
+        }
+            current?.let { session ->
+                AiBubble(
+                    session = session,
+                    settings = settings,
+                    recentContext = { sessionsViewModel.recentOutput(session.id, AiContext.DEFAULT_CONTEXT_BYTES) },
+                    onFillTerminal = controller::pasteText,
+                    onOpenSettings = onOpenSettings,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                )
             }
         }
     }

@@ -64,6 +64,7 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
     fun create(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId? =
         manager.create(profile, feature)
     fun output(id: SessionId) = manager.output(id)
+    fun recentOutput(id: SessionId, maxBytes: Int): ByteArray = manager.recentOutput(id, maxBytes)
     fun enableFeature(id: SessionId, feature: SessionFeature) = manager.enableFeature(id, feature)
     fun connect(id: SessionId, credential: Credential, remember: Boolean) = viewModelScope.launch { manager.connect(id, credential, remember) }
     fun send(id: SessionId, bytes: ByteArray) = viewModelScope.launch { manager.write(id, bytes) }
@@ -157,6 +158,22 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setExtraKeys(keys: List<ExtraKeyId>) = viewModelScope.launch {
         container.settingsRepository.setExtraKeys(keys)
+    }
+
+    fun setAiBaseUrl(url: String) = viewModelScope.launch {
+        container.settingsRepository.setAiBaseUrl(url)
+    }
+
+    fun setAiApiKey(key: String) = viewModelScope.launch {
+        container.settingsRepository.setAiApiKey(key)
+    }
+
+    fun setAiModel(model: String) = viewModelScope.launch {
+        container.settingsRepository.setAiModel(model)
+    }
+
+    fun setAiSendContext(enabled: Boolean) = viewModelScope.launch {
+        container.settingsRepository.setAiSendContext(enabled)
     }
 
     companion object {

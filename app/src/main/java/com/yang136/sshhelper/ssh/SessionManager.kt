@@ -186,6 +186,10 @@ class DefaultSessionManager(
         return runtime.output.onSubscription { emit(runtime.snapshot()) }
     }
 
+    /** Raw tail of the session scrollback, used as AI context. */
+    fun recentOutput(id: SessionId, maxBytes: Int): ByteArray =
+        runtime(id)?.snapshot()?.bytes?.takeLast(maxBytes)?.toByteArray() ?: ByteArray(0)
+
     override suspend fun connect(id: SessionId, credential: Credential, remember: Boolean) {
         val runtime = runtime(id) ?: return clearCredential(credential)
         runtime.reconnectJob?.cancel()
