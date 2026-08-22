@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -69,9 +70,11 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
     val app = context.applicationContext as SshHelperApplication
     val vm: HostEditorViewModel = viewModel(factory = HostEditorViewModel.factory(app.container, hostId))
     val state by vm.state.collectAsStateWithLifecycle()
+    val generatedKey by vm.generatedKey.collectAsStateWithLifecycle()
     val vaultState by app.container.credentialVault.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var confirmDiscard by remember { mutableStateOf(false) }
+    var showGenerateKeyDialog by remember { mutableStateOf(false) }
     val requestBack = {
         if (state.isDirty) confirmDiscard = true else onBack()
     }
@@ -133,9 +136,17 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                 OutlinedTextField(state.password, { vm.update { s -> s.copy(password = it) } }, Modifier.fillMaxWidth(), label = { Text(if (hostId == 0L) "密码" else "新密码（留空则不修改）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             }
             if (state.authType == AuthType.PRIVATE_KEY) {
-                Button(onClick = { keyPicker.launch(arrayOf("application/*", "text/*")) }) {
-                    Icon(Icons.Default.Key, null)
-                    Text(if (state.privateKeyName == null) " 选择私钥文件" else " ${state.privateKeyName}")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { keyPicker.launch(arrayOf("application/*", "text/*")) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.Key, null)
+                        Text(if (state.privateKeyName == null) " 选择私钥文件" else " ${state.privateKeyName}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(onClick = { showGenerateKeyDialog = true }, modifier = Modifier.weight(1f)) {
+                        Text("生成密钥对")
+                    }
                 }
                 if (state.rememberCredential) {
                     OutlinedTextField(state.passphrase, { vm.update { s -> s.copy(passphrase = it) } }, Modifier.fillMaxWidth(), label = { Text("私钥口令（可选）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
@@ -159,6 +170,60 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
             text = { Text("当前修改尚未保存，返回后将丢失这些内容。") },
             confirmButton = { TextButton(onClick = onBack) { Text("放弃修改") } },
             dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("继续编辑") } },
+        )
+    }
+
+    if (showGenerateKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showGenerateKeyDialog = false },
+            title = { Text("生成 ed25519 密钥对？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("将在本机生成密钥对。私钥只保存在本应用，保存主机时由凭据保险库加密；公钥需要你手动添加到服务器。")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showGenerateKeyDialog = false
+                    vm.generateKeyPair()
+                }) { Text("生成") }
+            },
+            dismissButton = { TextButton(onClick = { showGenerateKeyDialog = false }) { Text("取消") } },
+        )
+    }
+
+    generatedKey?.let { key ->
+        AlertDialog(
+            onDismissRequest = { vm.clearGeneratedKey() },
+            title = { Text("公钥已生成") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("把下面这行添加到服务器的 ~/.ssh/authorized_keys：")
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Text(
+                            key.publicKey,
+                            Modifier.padding(10.dp),
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text("指纹 ${key.fingerprint}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("私钥已作为本主机的认证凭据，保存主机时加密存入保险库。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("SSH public key", key.publicKey))
+                    vm.clearGeneratedKey()
+                }) { Text("复制公钥") }
+            },
+            dismissButton = { TextButton(onClick = { vm.clearGeneratedKey() }) { Text("完成") } },
         )
     }
 }

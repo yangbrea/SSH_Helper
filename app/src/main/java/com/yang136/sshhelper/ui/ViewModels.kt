@@ -18,6 +18,8 @@ import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
 import com.yang136.sshhelper.settings.ExtraKeyId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -178,6 +180,11 @@ data class EditorState(
     val isDirty: Boolean = false,
 )
 
+data class GeneratedKeyState(
+    val publicKey: String,
+    val fingerprint: String,
+)
+
 internal fun EditorState.applyUserEdit(transform: (EditorState) -> EditorState): EditorState =
     transform(this).copy(error = null, isDirty = true)
 
@@ -192,6 +199,8 @@ class HostEditorViewModel(
         SharingStarted.Eagerly,
         emptyList(),
     )
+    private val mutableGeneratedKey = MutableStateFlow<GeneratedKeyState?>(null)
+    val generatedKey: StateFlow<GeneratedKeyState?> = mutableGeneratedKey.asStateFlow()
     private var privateKeyBytes: ByteArray? = null
 
     init {
@@ -223,6 +232,26 @@ class HostEditorViewModel(
         privateKeyBytes?.fill(0)
         privateKeyBytes = bytes
         update { it.copy(privateKeyName = name) }
+    }
+
+    fun generateKeyPair() = viewModelScope.launch(Dispatchers.Default) {
+        val generated = com.yang136.sshhelper.security.KeyGenerator.generateEd25519()
+        withContext(Dispatchers.Main) {
+            privateKeyBytes?.fill(0)
+            privateKeyBytes = generated.privateKey
+            update {
+                it.copy(
+                    authType = AuthType.PRIVATE_KEY,
+                    privateKeyName = "生成的 ed25519 密钥",
+                    error = null,
+                )
+            }
+            mutableGeneratedKey.value = GeneratedKeyState(generated.publicKey, generated.fingerprint)
+        }
+    }
+
+    fun clearGeneratedKey() {
+        mutableGeneratedKey.value = null
     }
 
     suspend fun save(): Long? {

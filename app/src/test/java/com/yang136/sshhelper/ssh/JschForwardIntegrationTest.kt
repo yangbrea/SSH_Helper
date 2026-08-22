@@ -14,10 +14,12 @@ import java.net.Socket
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.sshd.server.SshServer
 import org.apache.sshd.server.auth.password.PasswordAuthenticator
 import org.apache.sshd.server.forward.AcceptAllForwardingFilter
@@ -89,7 +91,14 @@ class JschForwardIntegrationTest {
         } finally {
             handle.close()
         }
-        assertTrue("port must be released after close", runCatching { Socket("127.0.0.1", handle.actualListenPort) }.isFailure)
+        // JSch deregisters the listener asynchronously; poll until the port is actually released.
+        val released = withTimeoutOrNull(3_000) {
+            while (runCatching { Socket("127.0.0.1", handle.actualListenPort) }.isSuccess) {
+                delay(50)
+            }
+            true
+        }
+        assertTrue("port must be released after close", released != null)
     }
 
     @Test
