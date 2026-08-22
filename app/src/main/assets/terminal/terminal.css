@@ -1,0 +1,29 @@
+html,
+body {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #07131f;
+}
+
+#terminal {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 0;
+  overflow: hidden;
+  background: #07131f;
+}
+
+#terminal > .xterm {
+  box-sizing: border-box;
+  padding: 8px 6px 6px;
+}
+
+.xterm, .xterm-screen, .xterm-viewport {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
