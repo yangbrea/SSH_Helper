@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -61,6 +62,8 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ssh.SessionId
+import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.data.TransferStatus
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +80,8 @@ fun HostsScreen(
     onFiles: (HostProfile) -> Boolean,
     onForwards: (Long) -> Unit,
     sessions: List<ManagedSessionState>,
+    onOpenSession: (SessionId) -> Unit,
+    onCloseSession: (SessionId) -> Unit,
     onCloseHostSessions: (Long, () -> Unit) -> Unit,
     onSettings: () -> Unit,
     onSnippets: () -> Unit,
@@ -95,6 +100,15 @@ fun HostsScreen(
     var hostMenu by remember { mutableStateOf<Long?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
     var sessionLimitReached by remember { mutableStateOf(false) }
+    var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
+
+    // 会话按当前模式分开显示:终端页只列终端会话,文件管理只列文件会话。
+    val visibleSessions = sessions.filter { session ->
+        when (mode) {
+            HomeMode.TERMINAL -> SessionFeature.SHELL in session.features
+            HomeMode.FILES -> SessionFeature.SFTP in session.features
+        }
+    }
 
     BackHandler { confirmExit = true }
     LaunchedEffect(deleteError) { deleteError?.let { snackbar.showSnackbar(it); vm.clearDeleteError() } }
@@ -158,7 +172,7 @@ fun HostsScreen(
             ExtendedFloatingActionButton(onClick = onAdd, icon = { Icon(Icons.Default.Add, null) }, text = { Text("添加主机") })
         },
     ) { padding ->
-        if (hosts.isEmpty()) {
+        if (hosts.isEmpty() && visibleSessions.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Computer, null, tint = MaterialTheme.colorScheme.primary)
@@ -173,6 +187,56 @@ fun HostsScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (visibleSessions.isNotEmpty()) {
+                    item {
+                        Text(
+                            when (mode) {
+                                HomeMode.TERMINAL -> "终端会话 · ${visibleSessions.size}/8"
+                                HomeMode.FILES -> "文件会话 · ${visibleSessions.size}/8"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    items(visibleSessions, key = { "session-${it.id.value}" }) { session ->
+                        Card(
+                            onClick = { onOpenSession(session.id) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)),
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                    Text(session.displayName, fontWeight = FontWeight.Medium)
+                                    Text(session.connection.hostListLabel(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        buildList {
+                                            session.jumpProfile?.let { add("经跳板机 · ${it.name}") }
+                                        }.joinToString(" · "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                IconButton(onClick = { closingSession = session }) { Icon(Icons.Default.Close, "关闭会话") }
+                            }
+                        }
+                    }
+                    item {
+                        Text(
+                            when (mode) {
+                                HomeMode.TERMINAL -> "服务器"
+                                HomeMode.FILES -> "服务器"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
                 items(hosts, key = { it.id }) { host ->
                     val primary = if (mode == HomeMode.TERMINAL) {
                         { if (!onConnect(host)) sessionLimitReached = true }
@@ -264,8 +328,17 @@ fun HostsScreen(
         AlertDialog(
             onDismissRequest = { sessionLimitReached = false },
             title = { Text("已达到会话上限") },
-            text = { Text("最多可同时保留 8 个会话，请返回终端并关闭一个会话。") },
+            text = { Text("最多可同时保留 8 个会话，请先关闭一个会话。") },
             confirmButton = { TextButton(onClick = { sessionLimitReached = false }) { Text("知道了") } },
+        )
+    }
+    closingSession?.let { session ->
+        AlertDialog(
+            onDismissRequest = { closingSession = null },
+            title = { Text("关闭会话？") },
+            text = { Text("将断开并关闭“${session.displayName}”，终端输出也会被清除。") },
+            confirmButton = { TextButton(onClick = { onCloseSession(session.id); closingSession = null }) { Text("断开并关闭") } },
+            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
         )
     }
 }
@@ -274,3 +347,11 @@ private val activeTransferStates = setOf(
     TransferStatus.QUEUED, TransferStatus.RUNNING, TransferStatus.PAUSED,
     TransferStatus.WAITING_NETWORK, TransferStatus.WAITING_UNLOCK,
 )
+
+private fun com.yang136.sshhelper.ssh.ConnectionState.hostListLabel(): String = when (this) {
+    com.yang136.sshhelper.ssh.ConnectionState.Idle -> "准备连接"
+    com.yang136.sshhelper.ssh.ConnectionState.Connecting -> "连接中"
+    is com.yang136.sshhelper.ssh.ConnectionState.Connected -> "已连接 · $label"
+    is com.yang136.sshhelper.ssh.ConnectionState.Disconnected -> "已断开 · $reason"
+    is com.yang136.sshhelper.ssh.ConnectionState.Error -> "连接失败 · $message"
+}

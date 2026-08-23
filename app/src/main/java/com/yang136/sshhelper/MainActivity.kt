@@ -104,7 +104,7 @@ class MainActivity : FragmentActivity() {
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onConnect = { host ->
                                     sessionsViewModel.create(host, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${id.value}")
+                                        navController.navigate("terminal/${host.id}/${id.value}")
                                         true
                                     } ?: false
                                 },
@@ -116,6 +116,16 @@ class MainActivity : FragmentActivity() {
                                 },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
                                 sessions = sessions,
+                                onOpenSession = { id ->
+                                    sessions.firstOrNull { it.id == id }?.let { session ->
+                                        if (SessionFeature.SFTP in session.features) {
+                                            navController.navigate("files/${id.value}")
+                                        } else {
+                                            navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        }
+                                    }
+                                },
+                                onCloseSession = sessionsViewModel::close,
                                 onCloseHostSessions = sessionsViewModel::closeForHost,
                                 onSettings = { navController.navigate("settings") },
                                 onSnippets = { navController.navigate("snippets") },
@@ -172,12 +182,15 @@ class MainActivity : FragmentActivity() {
                             )
                         }
                         composable(
-                            route = "terminal/{sessionId}",
-                            arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+                            route = "terminal/{hostId}/{sessionId}",
+                            arguments = listOf(
+                                navArgument("hostId") { type = NavType.LongType },
+                                navArgument("sessionId") { type = NavType.StringType },
+                            ),
                         ) { entry ->
-                            val sessionId = entry.arguments?.getString("sessionId").orEmpty()
                             TerminalScreen(
-                                initialSessionId = sessionId,
+                                initialSessionId = entry.arguments?.getString("sessionId").orEmpty(),
+                                hostId = entry.arguments?.getLong("hostId") ?: 0L,
                                 sessionsViewModel = sessionsViewModel,
                                 snippets = snippets,
                                 settings = settings,
@@ -201,10 +214,7 @@ class MainActivity : FragmentActivity() {
                             )
                             SftpScreen(
                                 viewModel = sftpViewModel,
-                                onBack = {
-                                    sessionsViewModel.close(id)
-                                    navController.popBackStack()
-                                },
+                                onBack = navController::popBackStack,
                                 onUnlockVault = { requestVault(request = { container.credentialVault.unlock() }) },
                             )
                         }

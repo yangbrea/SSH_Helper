@@ -132,6 +132,7 @@ import android.view.WindowInsets as AndroidWindowInsets
 @Composable
 fun TerminalScreen(
     initialSessionId: String?,
+    hostId: Long,
     sessionsViewModel: SessionsViewModel,
     snippets: List<CommandSnippet>,
     settings: AppSettings,
@@ -147,15 +148,8 @@ fun TerminalScreen(
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
     val sessions by sessionsViewModel.sessions.collectAsStateWithLifecycle()
-    // 本页只服务一个主机:由入口会话推导主机 id,页面内可多开该主机的终端标签页。
+    val hostSessions = sessions.filter { it.profile.id == hostId }
     val initialId = initialSessionId?.let(::SessionId)
-    var resolvedHostId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(initialSessionId, sessions) {
-        if (resolvedHostId == null) {
-            resolvedHostId = sessions.firstOrNull { it.id == initialId }?.profile?.id
-        }
-    }
-    val hostSessions = resolvedHostId?.let { id -> sessions.filter { it.profile.id == id } } ?: emptyList()
     var activeId by remember { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
     val controller = remember { TerminalController() }
@@ -178,12 +172,6 @@ fun TerminalScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
     var aiHidden by remember { mutableStateOf(false) }
-
-    // 退出终端页 = 关闭本页所属主机的全部会话,再返回主页。主页不再暴露会话,避免泄漏。
-    fun exitTerminal() {
-        hostSessions.forEach { sessionsViewModel.close(it.id) }
-        onBack()
-    }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
@@ -240,12 +228,12 @@ fun TerminalScreen(
             controller.close()
         }
     }
-    BackHandler(onBack = ::exitTerminal)
+    BackHandler(onBack = onBack)
 
     fun closeTab(id: SessionId) {
         val remaining = hostSessions.filterNot { it.id == id }
         if (remaining.isEmpty()) {
-            exitTerminal()
+            onBack()
         } else if (activeId == id) {
             activeId = remaining.first().id
         }
@@ -284,7 +272,7 @@ fun TerminalScreen(
                         )
                     }
                 },
-                navigationIcon = { IconButton(onClick = ::exitTerminal) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
                     IconButton(onClick = { showSearch = !showSearch; controller.clearSelection(); if (!showSearch) controller.clearSearch() }) { Icon(Icons.Default.Search, "搜索") }
                     IconButton(onClick = { controller.clearSelection(); controller.clearSearch(); showSearch = false; showSnippets = true }) { Icon(Icons.Default.Code, "快捷命令") }
@@ -329,23 +317,31 @@ fun TerminalScreen(
             Modifier.fillMaxSize()
                 .background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))),
         ) {
-            val session = current
-            if (session == null) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("暂无终端会话", style = MaterialTheme.typography.titleMedium)
-                        Text("回到首页打开新终端", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // WebView 常驻:首帧即创建,避免渲染循环等待就绪时丢失输出;空态只作为覆盖层。
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                TerminalWebView(
+                    controller = controller,
+                    onInput = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
+                    onResize = { columns, rows -> current?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+                    onReady = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (current == null) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("暂无终端会话", style = MaterialTheme.typography.titleMedium)
+                            Text("回到首页打开新终端", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
-            } else {
-            TerminalWebView(
-                controller = controller,
-                onInput = { sessionsViewModel.send(session.id, it) },
-                onResize = { columns, rows -> sessionsViewModel.resize(session.id, columns, rows) },
-                onReady = {},
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
+            }
+            val session = current
+            if (session != null) {
             if (showSearch) {
                 TerminalSearchBar(
                     query = searchText,

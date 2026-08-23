@@ -3,14 +3,12 @@ package com.yang136.sshhelper.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -35,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.ai.AiContext
 import com.yang136.sshhelper.ai.AiException
@@ -53,7 +49,6 @@ import com.yang136.sshhelper.ai.AiRequest
 import com.yang136.sshhelper.ai.OkHttpAiClient
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.ssh.ManagedSessionState
-import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -74,8 +69,6 @@ fun AiBubble(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
     var input by remember { mutableStateOf("") }
     var response by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -121,19 +114,7 @@ fun AiBubble(
         }
     }
 
-    Box(
-        modifier = modifier
-            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-            .pointerInput(expanded) {
-                if (!expanded) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        offsetX += dragAmount.x
-                        offsetY += dragAmount.y
-                    }
-                }
-            },
-    ) {
+    Box(modifier = modifier) {
         if (expanded) {
             Surface(
                 modifier = Modifier.widthIn(max = 340.dp).heightIn(max = 460.dp),
