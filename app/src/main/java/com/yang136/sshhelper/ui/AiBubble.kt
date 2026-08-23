@@ -76,7 +76,7 @@ fun AiBubble(
     var expanded by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var response by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var streaming by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // 折叠气泡的拖动偏移:只影响气泡自身,展开面板固定在右下角,不跟随偏移。
     var bubbleOffsetX by remember { mutableFloatStateOf(0f) }
@@ -86,12 +86,12 @@ fun AiBubble(
 
     fun send() {
         val text = input.trim()
-        if (text.isEmpty() || loading) return
+        if (text.isEmpty() || streaming) return
         if (settings.aiApiKey.isBlank()) {
             error = "未配置 API Key，请先在设置中填写"
             return
         }
-        loading = true
+        streaming = true
         error = null
         response = null
         scope.launch {
@@ -102,7 +102,7 @@ fun AiBubble(
                     if (terminalContext.isNotBlank()) append("最近终端输出：\n$terminalContext\n\n")
                     append("用户：$text")
                 }
-                val result = aiClient.ask(
+                val result = aiClient.stream(
                     AiRequest(
                         baseUrl = settings.aiBaseUrl,
                         apiKey = settings.aiApiKey,
@@ -110,14 +110,18 @@ fun AiBubble(
                         systemPrompt = systemPrompt,
                         userMessage = userMessage,
                     ),
+                    onDelta = { delta ->
+                        val current = response.orEmpty()
+                        response = current + delta
+                    },
                 )
-                response = result.text
+                response = result
             } catch (failure: AiException) {
                 error = failure.message
             } catch (failure: Exception) {
                 error = "请求失败：${failure.message ?: "未知错误"}"
             } finally {
-                loading = false
+                streaming = false
             }
         }
     }
@@ -142,7 +146,7 @@ fun AiBubble(
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
-                            loading -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            streaming && response.isNullOrEmpty() -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(Modifier.size(28.dp))
                             }
                             error != null -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,18 +157,21 @@ fun AiBubble(
                             }
                             response != null -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(response.orEmpty(), style = MaterialTheme.typography.bodyMedium)
-                                val command = AiContext.extractCommand(response.orEmpty())
-                                if (command != null) {
-                                    FilledTonalButton(onClick = { onFillTerminal(command) }) {
-                                        Icon(Icons.Default.ContentPaste, null, Modifier.size(16.dp))
-                                        Text("填入终端", Modifier.padding(start = 6.dp))
+                                // 回答结束后才给出命令入口,流式期间不显示。
+                                if (!streaming) {
+                                    val command = AiContext.extractCommand(response.orEmpty())
+                                    if (command != null) {
+                                        FilledTonalButton(onClick = { onFillTerminal(command) }) {
+                                            Icon(Icons.Default.ContentPaste, null, Modifier.size(16.dp))
+                                            Text("填入终端", Modifier.padding(start = 6.dp))
+                                        }
+                                    } else {
+                                        Text(
+                                            "回答中没有可执行的命令，可复制文本自行处理。",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
                                     }
-                                } else {
-                                    Text(
-                                        "回答中没有可执行的命令，可复制文本自行处理。",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
                                 }
                             }
                             else -> Text(
@@ -182,7 +189,7 @@ fun AiBubble(
                             placeholder = { Text("输入问题…") },
                             maxLines = 3,
                         )
-                        IconButton(onClick = ::send, enabled = input.isNotBlank() && !loading) {
+                        IconButton(onClick = ::send, enabled = input.isNotBlank() && !streaming) {
                             Icon(Icons.Default.Send, "发送", tint = MaterialTheme.colorScheme.primary)
                         }
                     }

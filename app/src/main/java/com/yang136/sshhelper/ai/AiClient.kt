@@ -21,11 +21,13 @@ data class AiRequest(
     val timeoutSeconds: Long = 90,
 )
 
-data class AiResponse(val text: String)
-
-/** OpenAI-compatible single-turn chat completion client. */
+/** OpenAI-compatible streaming chat completion client (SSE, single turn). */
 interface AiClient {
-    suspend fun ask(request: AiRequest): AiResponse
+    /**
+     * Streams the completion, invoking [onDelta] with each text increment (called on the IO
+     * dispatcher). Returns the full accumulated text.
+     */
+    suspend fun stream(request: AiRequest, onDelta: (String) -> Unit): String
 }
 
 class OkHttpAiClient(
@@ -35,7 +37,7 @@ class OkHttpAiClient(
         .build(),
 ) : AiClient {
 
-    override suspend fun ask(request: AiRequest): AiResponse = withContext(Dispatchers.IO) {
+    override suspend fun stream(request: AiRequest, onDelta: (String) -> Unit): String = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
             put("model", request.model)
             put("messages", JSONArray().apply {
@@ -49,7 +51,7 @@ class OkHttpAiClient(
                 })
             })
             put("temperature", 0.3)
-            put("stream", false)
+            put("stream", true)
         }
         val httpRequest = Request.Builder()
             .url(request.baseUrl.trim().trimEnd('/') + "/chat/completions")
@@ -57,24 +59,44 @@ class OkHttpAiClient(
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
+
         client.newCall(httpRequest).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
+            val body = response.body
             if (!response.isSuccessful) {
-                throw AiException("请求失败（HTTP ${response.code}）：${responseBody.take(200)}")
+                val detail = body?.string().orEmpty()
+                throw AiException("请求失败（HTTP ${response.code}）：${detail.take(200)}")
             }
-            try {
-                val json = JSONObject(responseBody)
-                val content = json.getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .optString("content")
-                if (content.isBlank()) throw AiException("模型返回为空")
-                AiResponse(content.trim())
-            } catch (error: AiException) {
-                throw error
-            } catch (error: Exception) {
-                throw AiException("无法解析模型响应：${error.message ?: "未知错误"}")
+            body ?: throw AiException("请求失败：响应为空")
+            val text = body.charStream().useLines { lines ->
+                val builder = StringBuilder()
+                for (line in lines) {
+                    val trimmed = line.trim()
+                    if (!trimmed.startsWith("data:")) continue
+                    val data = trimmed.removePrefix("data:").trim()
+                    if (data == "[DONE]") break
+                    val delta = parseDelta(data)
+                    if (delta.isNotEmpty()) {
+                        builder.append(delta)
+                        onDelta(delta)
+                    }
+                }
+                builder
             }
+            if (text.isEmpty()) throw AiException("模型返回为空")
+            return@withContext text.toString()
+        }
+    }
+
+    private fun parseDelta(data: String): String {
+        return try {
+            val json = JSONObject(data)
+            json.getJSONArray("choices")
+                .getJSONObject(0)
+                .optJSONObject("delta")
+                ?.optString("content")
+                .orEmpty()
+        } catch (error: Exception) {
+            throw AiException("无法解析模型响应：${error.message ?: "未知错误"}")
         }
     }
 }

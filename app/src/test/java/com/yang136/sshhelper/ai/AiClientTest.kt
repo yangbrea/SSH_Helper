@@ -42,25 +42,39 @@ class AiClientTest {
     )
 
     @Test
-    fun parsesChatCompletionResponse() = runBlocking {
+    fun streamsDeltasAndReturnsFullText() = runBlocking {
         server.enqueue(
             MockResponse()
-                .setHeader("Content-Type", "application/json")
-                .setBody("""{"choices":[{"message":{"role":"assistant","content":"df -h"}}]}"""),
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(
+                    """
+                    data: {"choices":[{"delta":{"role":"assistant"}}]}
+
+                    data: {"choices":[{"delta":{"content":"df "}}]}
+
+                    data: {"choices":[{"delta":{"content":"-h"}}]}
+
+                    data: [DONE]
+
+                    """.trimIndent(),
+                ),
         )
-        val result = client.ask(request())
-        assertEquals("df -h", result.text)
+        val deltas = mutableListOf<String>()
+        val result = client.stream(request()) { deltas.add(it) }
+
+        assertEquals(listOf("df ", "-h"), deltas)
+        assertEquals("df -h", result)
 
         val recorded = server.takeRequest()
         assertEquals("Bearer test-key", recorded.getHeader("Authorization"))
-        assertTrue("请求体应包含模型与消息", recorded.body.readUtf8().contains("\"model\":\"deepseek-chat\""))
+        assertTrue("请求体应开启流式", recorded.body.readUtf8().contains("\"stream\":true"))
     }
 
     @Test
     fun surfacesHttpErrorWithBody() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401).setBody("invalid key"))
         try {
-            client.ask(request())
+            client.stream(request()) {}
             fail("应抛出 AiException")
         } catch (error: AiException) {
             assertTrue(error.message.orEmpty().contains("401"))
@@ -68,10 +82,23 @@ class AiClientTest {
     }
 
     @Test
-    fun surfacesMalformedResponse() = runBlocking {
-        server.enqueue(MockResponse().setBody("not json"))
+    fun emptyStreamIsReportedAsEmptyResponse() = runBlocking {
+        server.enqueue(MockResponse().setBody("plain text, no data events"))
         try {
-            client.ask(request())
+            client.stream(request()) {}
+            fail("应抛出 AiException")
+        } catch (error: AiException) {
+            assertTrue(error.message.orEmpty().contains("返回为空"))
+        }
+    }
+
+    @Test
+    fun malformedDeltaIsReported() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody("data: not-json\n\ndata: [DONE]\n\n"),
+        )
+        try {
+            client.stream(request()) {}
             fail("应抛出 AiException")
         } catch (error: AiException) {
             assertTrue(error.message.orEmpty().contains("无法解析"))
