@@ -3,12 +3,14 @@ package com.yang136.sshhelper.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -33,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.ai.AiContext
 import com.yang136.sshhelper.ai.AiException
@@ -49,6 +53,7 @@ import com.yang136.sshhelper.ai.AiRequest
 import com.yang136.sshhelper.ai.OkHttpAiClient
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -73,6 +78,9 @@ fun AiBubble(
     var response by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 折叠气泡的拖动偏移:只影响气泡自身,展开面板固定在右下角,不跟随偏移。
+    var bubbleOffsetX by remember { mutableFloatStateOf(0f) }
+    var bubbleOffsetY by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     val aiClient = remember { OkHttpAiClient() }
 
@@ -172,15 +180,28 @@ fun AiBubble(
                 }
             }
         } else {
-            Surface(
-                modifier = Modifier.size(54.dp)
-                    .combinedClickable(onClick = { expanded = true }, onLongClick = onClose),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shadowElevation = 8.dp,
+            // 折叠气泡可拖动;展开面板固定在右下角,不随气泡偏移。
+            Box(
+                Modifier
+                    .offset { IntOffset(bubbleOffsetX.roundToInt(), bubbleOffsetY.roundToInt()) }
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            bubbleOffsetX += dragAmount.x
+                            bubbleOffsetY += dragAmount.y
+                        }
+                    },
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.AutoAwesome, "打开 AI 助手", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Surface(
+                    modifier = Modifier.size(54.dp)
+                        .combinedClickable(onClick = { expanded = true }, onLongClick = onClose),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 8.dp,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.AutoAwesome, "打开 AI 助手", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
             }
         }

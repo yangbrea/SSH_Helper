@@ -254,13 +254,6 @@ fun HostsScreen(
                                 Text(host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                                 Text("${host.username}@${host.hostname}:${host.port}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (mode == HomeMode.TERMINAL) {
-                                // 从终端入口直接切到文件管理并打开该主机
-                                IconButton(onClick = {
-                                    mode = HomeMode.FILES
-                                    if (!onFiles(host)) sessionLimitReached = true
-                                }) { Icon(Icons.Default.Folder, "文件管理") }
-                            }
                             Box {
                                 IconButton(onClick = { hostMenu = host.id }) { Icon(Icons.Default.MoreVert, "更多操作") }
                                 DropdownMenu(expanded = hostMenu == host.id, onDismissRequest = { hostMenu = null }) {
