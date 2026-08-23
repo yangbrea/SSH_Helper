@@ -97,7 +97,7 @@ fun AiBubble(
         scope.launch {
             try {
                 val terminalContext = if (settings.aiSendContext) AiContext.recentTerminalText(recentContext()) else ""
-                val systemPrompt = "你是嵌入在 SSH 终端里的 AI 助手。结合给定的终端上下文回答；当用户需要命令时，直接给出可执行命令，保持简洁。"
+                val systemPrompt = "你是嵌入在 SSH 终端里的 AI 助手。结合给定的终端上下文回答问题；如果给出可执行命令，必须用单独的三反引号代码块包裹，解释性文字写在代码块外；没有可执行命令时不要输出代码块。"
                 val userMessage = buildString {
                     if (terminalContext.isNotBlank()) append("最近终端输出：\n$terminalContext\n\n")
                     append("用户：$text")
@@ -153,9 +153,18 @@ fun AiBubble(
                             }
                             response != null -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(response.orEmpty(), style = MaterialTheme.typography.bodyMedium)
-                                FilledTonalButton(onClick = { onFillTerminal(AiContext.extractCommand(response.orEmpty())) }) {
-                                    Icon(Icons.Default.ContentPaste, null, Modifier.size(16.dp))
-                                    Text("填入终端", Modifier.padding(start = 6.dp))
+                                val command = AiContext.extractCommand(response.orEmpty())
+                                if (command != null) {
+                                    FilledTonalButton(onClick = { onFillTerminal(command) }) {
+                                        Icon(Icons.Default.ContentPaste, null, Modifier.size(16.dp))
+                                        Text("填入终端", Modifier.padding(start = 6.dp))
+                                    }
+                                } else {
+                                    Text(
+                                        "回答中没有可执行的命令，可复制文本自行处理。",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                             else -> Text(

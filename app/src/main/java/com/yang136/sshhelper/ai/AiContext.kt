@@ -25,16 +25,31 @@ object AiContext {
     }
 
     /**
-     * Extracts the command to fill into the terminal from an AI answer: the first fenced code
-     * block wins; otherwise the whole answer is returned so the user can judge.
+     * Extracts the command to fill into the terminal from an AI answer, or null when the answer
+     * contains no explicit command. The first fenced code block wins; a single bare command line
+     * (ASCII, no comment prefix) is also accepted. Prose — multi-line or containing Chinese text —
+     * yields null, so explanatory text is never pasted into the terminal.
      */
-    fun extractCommand(answer: String): String {
+    fun extractCommand(answer: String): String? {
         val fenced = Regex("```(?:[\\w+-]*\\n)?([\\s\\S]*?)```").find(answer)
         val block = fenced?.groupValues?.get(1)?.trim()
         if (!block.isNullOrBlank()) return block
-        // A single shell-looking line with no explanation is used as-is.
-        val singleLine = answer.trim().lines().singleOrNull()
-        return singleLine?.takeIf { !it.startsWith("#") && !it.startsWith("//") } ?: answer.trim()
+        val singleLine = answer.trim().lines().singleOrNull()?.trim()
+        if (!singleLine.isNullOrBlank() &&
+            !singleLine.startsWith("#") &&
+            !singleLine.startsWith("//") &&
+            !containsCjk(singleLine)
+        ) {
+            return singleLine
+        }
+        return null
+    }
+
+    private fun containsCjk(text: String): Boolean {
+        for (character in text) {
+            if (character in '\u4e00'..'\u9fff') return true
+        }
+        return false
     }
 
     const val DEFAULT_CONTEXT_BYTES = 6 * 1024

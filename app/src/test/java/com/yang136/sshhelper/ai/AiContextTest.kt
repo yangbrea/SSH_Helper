@@ -44,7 +44,24 @@ class AiContextTest {
     }
 
     @Test
-    fun extractCommandFallsBackToSingleLine() {
+    fun extractCommandAcceptsSingleBareLine() {
         assertEquals("df -h", AiContext.extractCommand("df -h"))
+    }
+
+    @Test
+    fun extractCommandReturnsNullForProseWithoutCodeBlock() {
+        val prose = "磁盘空间不足通常是日志或缓存占用的。你可以先查看 /var 目录的大小分布，再清理无用的日志文件。"
+        assertEquals(null, AiContext.extractCommand(prose))
+    }
+
+    @Test
+    fun extractCommandReturnsNullForSingleCommentLine() {
+        assertEquals(null, AiContext.extractCommand("# 这是注释不是命令"))
+        assertEquals(null, AiContext.extractCommand("// 注释"))
+    }
+
+    @Test
+    fun extractCommandReturnsNullForBlankAnswer() {
+        assertEquals(null, AiContext.extractCommand("   "))
     }
 }
