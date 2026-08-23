@@ -64,4 +64,43 @@ class AiContextTest {
     fun extractCommandReturnsNullForBlankAnswer() {
         assertEquals(null, AiContext.extractCommand("   "))
     }
+
+    @Test
+    fun parseSegmentsSplitsProseAndCodeBlocks() {
+        val answer = "先看磁盘：\n\n```bash\ndf -h\n```\n\n再清理。"
+        val segments = parseSegments(answer)
+        assertEquals(3, segments.size)
+        assertTrue(segments[0].text.contains("先看磁盘"))
+        assertTrue(!segments[0].isCode)
+        assertTrue(segments[1].isCode)
+        assertTrue(segments[1].text.contains("df -h"))
+        assertTrue(segments[2].text.contains("再清理"))
+        assertTrue(!segments[2].isCode)
+    }
+
+    @Test
+    fun parseSegmentsHandlesMultipleBlocksAndLanguageTag() {
+        val answer = "```bash\nls\n```\n中间\n```sh\npwd\n```"
+        val segments = parseSegments(answer)
+        assertEquals(3, segments.size)
+        assertEquals(true, segments[0].isCode)
+        assertTrue("语言标注应被剥离", !segments[0].text.contains("bash"))
+        assertEquals("ls", segments[0].text.trim())
+        assertTrue(!segments[1].isCode)
+        assertTrue(segments[1].text.contains("中间"))
+        assertEquals(true, segments[2].isCode)
+        assertEquals("pwd", segments[2].text.trim())
+    }
+
+    @Test
+    fun parseSegmentsPlainProse() {
+        val segments = parseSegments("只是一段普通说明文字。")
+        assertEquals(1, segments.size)
+        assertTrue(!segments[0].isCode)
+    }
+
+    @Test
+    fun parseSegmentsBlankAnswer() {
+        assertEquals(emptyList<AnswerSegment>(), parseSegments("   "))
+    }
 }
