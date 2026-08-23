@@ -139,9 +139,7 @@ private fun CompactPaneSwitcher(pane: MobilePane, enabled: Boolean, onPane: (Mob
 fun SftpScreen(
     viewModel: SftpViewModel,
     onBack: () -> Unit,
-    onSwitchToTerminal: () -> Unit,
     onUnlockVault: () -> Unit,
-    backEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -186,7 +184,7 @@ fun SftpScreen(
             else -> onBack()
         }
     }
-    BackHandler(enabled = backEnabled, onBack = handleBack)
+    BackHandler(onBack = handleBack)
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it) } }
 
     val rootPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -196,10 +194,8 @@ fun SftpScreen(
         }
     }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    // Only ask for notification access once the file panel is actually on screen, so opening a
-    // terminal session never triggers a permission prompt on its own.
-    LaunchedEffect(backEnabled) {
-        if (backEnabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
@@ -215,7 +211,6 @@ fun SftpScreen(
                 },
                 navigationIcon = { IconButton(onClick = handleBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
-                    IconButton(onClick = onSwitchToTerminal) { Icon(Icons.Default.Terminal, "切换到终端") }
                     IconButton(onClick = { showTransfers = true }) {
                         Box { Icon(Icons.Default.Download, "传输任务"); if (transfers.any { it.status.isActive() }) Text(transfers.count { it.status.isActive() }.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
                     }

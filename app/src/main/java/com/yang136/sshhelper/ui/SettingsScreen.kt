@@ -155,6 +155,7 @@ fun SettingsScreen(
     onAiApiKeyChange: (String) -> Unit,
     onAiModelChange: (String) -> Unit,
     onAiSendContextChange: (Boolean) -> Unit,
+    onAiShowBubbleChange: (Boolean) -> Unit,
     vaultState: VaultState,
     canAuthenticate: Boolean,
     onEnableVault: () -> Unit,
@@ -215,7 +216,7 @@ fun SettingsScreen(
             when (SettingsTab.entries[page]) {
                 SettingsTab.APPEARANCE -> AppearanceTab(settings, onThemeModeChange, onThemePresetChange)
                 SettingsTab.TERMINAL -> TerminalTab(settings, onFontSizeChange, onExtraKeysChange)
-                SettingsTab.AI -> AiTab(settings, showApiKey, { showApiKey = it }, onAiBaseUrlChange, onAiApiKeyChange, onAiModelChange, onAiSendContextChange)
+                SettingsTab.AI -> AiTab(settings, showApiKey, { showApiKey = it }, onAiBaseUrlChange, onAiApiKeyChange, onAiModelChange, onAiSendContextChange, onAiShowBubbleChange)
                 SettingsTab.SECURITY -> SecurityTab(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, onClearUnavailableVault, { confirmVaultReset = true })
                 SettingsTab.ABOUT -> AboutTab()
             }
@@ -385,11 +386,19 @@ private fun AiTab(
     onAiApiKeyChange: (String) -> Unit,
     onAiModelChange: (String) -> Unit,
     onAiSendContextChange: (Boolean) -> Unit,
+    onAiShowBubbleChange: (Boolean) -> Unit,
 ) {
     SettingsScaffoldList {
         item {
             SectionTitle("AI 助手", "终端页悬浮气泡")
             SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(settings.aiShowBubble, onAiShowBubbleChange)
+                    Column {
+                        Text("在终端页显示 AI 悬浮窗")
+                        Text("关闭后需要重新开启才会显示", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Text("悬浮气泡可结合最近的终端输出，向 AI 提问并获得命令建议。", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     settings.aiBaseUrl,

@@ -1,6 +1,8 @@
 package com.yang136.sshhelper.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.HighlightOff
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ContentPaste
@@ -56,8 +59,10 @@ import kotlinx.coroutines.launch
 /**
  * In-app floating bubble on the terminal page. Collapsed it is a draggable pill; expanded it is a
  * single-turn chat panel whose suggestions can be pasted into the current terminal input line.
- * No agent loop, no automatic command execution.
+ * No agent loop, no automatic command execution. Long-press the collapsed pill or tap the close
+ * button in the panel to hide the bubble for this terminal session.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AiBubble(
     session: ManagedSessionState?,
@@ -65,6 +70,7 @@ fun AiBubble(
     recentContext: () -> ByteArray,
     onFillTerminal: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -143,6 +149,7 @@ fun AiBubble(
                             Text(session?.displayName ?: "未连接", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { expanded = false }) { Icon(Icons.Default.Close, "收起") }
+                        IconButton(onClick = onClose) { Icon(Icons.Default.HighlightOff, "关闭悬浮窗") }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
@@ -185,8 +192,8 @@ fun AiBubble(
             }
         } else {
             Surface(
-                onClick = { expanded = true },
-                modifier = Modifier.size(54.dp),
+                modifier = Modifier.size(54.dp)
+                    .combinedClickable(onClick = { expanded = true }, onLongClick = onClose),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shadowElevation = 8.dp,

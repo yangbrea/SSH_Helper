@@ -132,26 +132,31 @@ import android.view.WindowInsets as AndroidWindowInsets
 @Composable
 fun TerminalScreen(
     initialSessionId: String?,
-    hostId: Long,
     sessionsViewModel: SessionsViewModel,
     snippets: List<CommandSnippet>,
     settings: AppSettings,
     terminalPalette: TerminalPalette,
     onFontSizeChange: (Int) -> Unit,
     onManageSnippets: () -> Unit,
-    onSwitchToFiles: () -> Unit,
     onOpenForwards: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     onUnlockVault: () -> Unit,
     onBack: () -> Unit,
-    backEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
     val sessions by sessionsViewModel.sessions.collectAsStateWithLifecycle()
-    val hostSessions = sessions.filter { it.profile.id == hostId }
-    var activeId by remember { mutableStateOf(initialSessionId?.let(::SessionId)) }
+    // 本页只服务一个主机:由入口会话推导主机 id,页面内可多开该主机的终端标签页。
+    val initialId = initialSessionId?.let(::SessionId)
+    var resolvedHostId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(initialSessionId, sessions) {
+        if (resolvedHostId == null) {
+            resolvedHostId = sessions.firstOrNull { it.id == initialId }?.profile?.id
+        }
+    }
+    val hostSessions = resolvedHostId?.let { id -> sessions.filter { it.profile.id == id } } ?: emptyList()
+    var activeId by remember { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
     val controller = remember { TerminalController() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -172,6 +177,13 @@ fun TerminalScreen(
     var ctrlArmed by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
+    var aiHidden by remember { mutableStateOf(false) }
+
+    // 退出终端页 = 关闭本页所属主机的全部会话,再返回主页。主页不再暴露会话,避免泄漏。
+    fun exitTerminal() {
+        hostSessions.forEach { sessionsViewModel.close(it.id) }
+        onBack()
+    }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
@@ -228,13 +240,12 @@ fun TerminalScreen(
             controller.close()
         }
     }
-    BackHandler(enabled = backEnabled, onBack = onBack)
+    BackHandler(onBack = ::exitTerminal)
 
     fun closeTab(id: SessionId) {
         val remaining = hostSessions.filterNot { it.id == id }
         if (remaining.isEmpty()) {
-            // Leave the terminal immediately; SSH cleanup continues in the activity-scoped ViewModel.
-            onBack()
+            exitTerminal()
         } else if (activeId == id) {
             activeId = remaining.first().id
         }
@@ -273,11 +284,8 @@ fun TerminalScreen(
                         )
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                navigationIcon = { IconButton(onClick = ::exitTerminal) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
-                    IconButton(onClick = onSwitchToFiles, enabled = current != null) {
-                        Icon(Icons.Default.Folder, "文件管理")
-                    }
                     IconButton(onClick = { showSearch = !showSearch; controller.clearSelection(); if (!showSearch) controller.clearSearch() }) { Icon(Icons.Default.Search, "搜索") }
                     IconButton(onClick = { controller.clearSelection(); controller.clearSearch(); showSearch = false; showSnippets = true }) { Icon(Icons.Default.Code, "快捷命令") }
                     IconButton(onClick = { if (hasSelection) controller.copySelection() else controller.enterSelectionMode() }) {
@@ -405,15 +413,18 @@ fun TerminalScreen(
                 else -> Unit
             }
         }
-            current?.let { session ->
-                AiBubble(
-                    session = session,
-                    settings = settings,
-                    recentContext = { sessionsViewModel.recentOutput(session.id, AiContext.DEFAULT_CONTEXT_BYTES) },
-                    onFillTerminal = controller::pasteText,
-                    onOpenSettings = onOpenSettings,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
-                )
+            if (settings.aiShowBubble && !aiHidden) {
+                current?.let { session ->
+                    AiBubble(
+                        session = session,
+                        settings = settings,
+                        recentContext = { sessionsViewModel.recentOutput(session.id, AiContext.DEFAULT_CONTEXT_BYTES) },
+                        onFillTerminal = controller::pasteText,
+                        onOpenSettings = onOpenSettings,
+                        onClose = { aiHidden = true },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                    )
+                }
             }
         }
     }

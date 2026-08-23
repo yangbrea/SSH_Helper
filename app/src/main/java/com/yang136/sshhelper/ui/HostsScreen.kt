@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
@@ -37,6 +36,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -48,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,12 +61,12 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.ssh.ManagedSessionState
-import com.yang136.sshhelper.ssh.SessionId
-import com.yang136.sshhelper.ssh.SessionFeature
-import com.yang136.sshhelper.ssh.isActive
 import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.data.TransferStatus
 import androidx.compose.ui.platform.LocalContext
+
+/** 主页的两个入口模式:终端 / 文件管理。 */
+enum class HomeMode { TERMINAL, FILES }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,8 +77,6 @@ fun HostsScreen(
     onFiles: (HostProfile) -> Boolean,
     onForwards: (Long) -> Unit,
     sessions: List<ManagedSessionState>,
-    onOpenSession: (SessionId) -> Unit,
-    onCloseSession: (SessionId) -> Unit,
     onCloseHostSessions: (Long, () -> Unit) -> Unit,
     onSettings: () -> Unit,
     onSnippets: () -> Unit,
@@ -88,15 +88,13 @@ fun HostsScreen(
     val vm: HostsViewModel = viewModel(factory = HostsViewModel.factory(app.container))
     val hosts by vm.hosts.collectAsStateWithLifecycle()
     val transfers by app.container.transferManager.jobs.collectAsStateWithLifecycle()
-    val forwardStates by app.container.forwardManager.states.collectAsStateWithLifecycle()
-    val forwardRules by app.container.forwardManager.rules.collectAsStateWithLifecycle()
     val deleteError by vm.deleteError.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var mode by rememberSaveable { mutableStateOf(HomeMode.TERMINAL) }
     var deleting by remember { mutableStateOf<HostProfile?>(null) }
     var hostMenu by remember { mutableStateOf<Long?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
     var sessionLimitReached by remember { mutableStateOf(false) }
-    var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
 
     BackHandler { confirmExit = true }
     LaunchedEffect(deleteError) { deleteError?.let { snackbar.showSnackbar(it); vm.clearDeleteError() } }
@@ -104,7 +102,19 @@ fun HostsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("SSH Helper", fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Column {
+                        Text("SSH Helper", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            when (mode) {
+                                HomeMode.TERMINAL -> "选择主机打开终端"
+                                HomeMode.FILES -> "选择主机管理文件"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = onVaultClick) {
                         Icon(
@@ -128,11 +138,27 @@ fun HostsScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = mode == HomeMode.TERMINAL,
+                    onClick = { mode = HomeMode.TERMINAL },
+                    icon = { Icon(Icons.Default.Terminal, null) },
+                    label = { Text("终端") },
+                )
+                NavigationBarItem(
+                    selected = mode == HomeMode.FILES,
+                    onClick = { mode = HomeMode.FILES },
+                    icon = { Icon(Icons.Default.Folder, null) },
+                    label = { Text("文件管理") },
+                )
+            }
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = onAdd, icon = { Icon(Icons.Default.Add, null) }, text = { Text("添加主机") })
         },
     ) { padding ->
-        if (hosts.isEmpty() && sessions.isEmpty()) {
+        if (hosts.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Computer, null, tint = MaterialTheme.colorScheme.primary)
@@ -147,44 +173,14 @@ fun HostsScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (sessions.isNotEmpty()) {
-                    item {
-                        Text("活动会话 · ${sessions.size}/8", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    }
-                    items(sessions, key = { "session-${it.id.value}" }) { session ->
-                        Card(
-                            onClick = { onOpenSession(session.id) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)),
-                        ) {
-                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
-                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                    Text(session.displayName, fontWeight = FontWeight.Medium)
-                                    Text(session.connection.hostListLabel(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        buildList {
-                                            if (SessionFeature.SHELL in session.features) add("终端")
-                                            if (SessionFeature.SFTP in session.features) add("文件")
-                                            session.jumpProfile?.let { add("经跳板机 · ${it.name}") }
-                                            val transferCount = transfers.count { it.hostId == session.profile.id && it.status in activeTransferStates }
-                                            if (transferCount > 0) add("传输中 $transferCount")
-                                            val forwardCount = forwardRules.count { it.hostId == session.profile.id && forwardStates[it.id]?.isActive() == true }
-                                            if (forwardCount > 0) add("转发 $forwardCount 条")
-                                        }.joinToString(" · "),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                                IconButton(onClick = { closingSession = session }) { Icon(Icons.Default.Close, "关闭会话") }
-                            }
-                        }
-                    }
-                    item { Text("服务器", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp)) }
-                }
                 items(hosts, key = { it.id }) { host ->
+                    val primary = if (mode == HomeMode.TERMINAL) {
+                        { if (!onConnect(host)) sessionLimitReached = true }
+                    } else {
+                        { if (!onFiles(host)) sessionLimitReached = true }
+                    }
                     Card(
-                        onClick = { if (!onConnect(host)) sessionLimitReached = true },
+                        onClick = primary,
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)),
                     ) {
@@ -194,7 +190,13 @@ fun HostsScreen(
                                 Text(host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                                 Text("${host.username}@${host.hostname}:${host.port}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            IconButton(onClick = { if (!onFiles(host)) sessionLimitReached = true }) { Icon(Icons.Default.Folder, "打开文件") }
+                            if (mode == HomeMode.TERMINAL) {
+                                // 从终端入口直接切到文件管理并打开该主机
+                                IconButton(onClick = {
+                                    mode = HomeMode.FILES
+                                    if (!onFiles(host)) sessionLimitReached = true
+                                }) { Icon(Icons.Default.Folder, "文件管理") }
+                            }
                             Box {
                                 IconButton(onClick = { hostMenu = host.id }) { Icon(Icons.Default.MoreVert, "更多操作") }
                                 DropdownMenu(expanded = hostMenu == host.id, onDismissRequest = { hostMenu = null }) {
@@ -262,17 +264,8 @@ fun HostsScreen(
         AlertDialog(
             onDismissRequest = { sessionLimitReached = false },
             title = { Text("已达到会话上限") },
-            text = { Text("最多可同时保留 8 个会话，请先关闭一个活动会话。") },
+            text = { Text("最多可同时保留 8 个会话，请返回终端并关闭一个会话。") },
             confirmButton = { TextButton(onClick = { sessionLimitReached = false }) { Text("知道了") } },
-        )
-    }
-    closingSession?.let { session ->
-        AlertDialog(
-            onDismissRequest = { closingSession = null },
-            title = { Text("关闭会话？") },
-            text = { Text("将断开并关闭“${session.displayName}”，终端输出也会被清除。") },
-            confirmButton = { TextButton(onClick = { onCloseSession(session.id); closingSession = null }) { Text("断开并关闭") } },
-            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
         )
     }
 }
@@ -281,11 +274,3 @@ private val activeTransferStates = setOf(
     TransferStatus.QUEUED, TransferStatus.RUNNING, TransferStatus.PAUSED,
     TransferStatus.WAITING_NETWORK, TransferStatus.WAITING_UNLOCK,
 )
-
-private fun com.yang136.sshhelper.ssh.ConnectionState.hostListLabel(): String = when (this) {
-    com.yang136.sshhelper.ssh.ConnectionState.Idle -> "准备连接"
-    com.yang136.sshhelper.ssh.ConnectionState.Connecting -> "连接中"
-    is com.yang136.sshhelper.ssh.ConnectionState.Connected -> "已连接 · $label"
-    is com.yang136.sshhelper.ssh.ConnectionState.Disconnected -> "已断开 · $reason"
-    is com.yang136.sshhelper.ssh.ConnectionState.Error -> "连接失败 · $message"
-}

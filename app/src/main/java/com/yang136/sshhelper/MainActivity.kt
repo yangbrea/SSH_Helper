@@ -31,8 +31,9 @@ import com.yang136.sshhelper.ui.SessionsViewModel
 import com.yang136.sshhelper.ui.SnippetsViewModel
 import com.yang136.sshhelper.ui.HostsViewModel
 import com.yang136.sshhelper.ui.SnippetsScreen
-import com.yang136.sshhelper.ui.WorkspaceScreen
-import com.yang136.sshhelper.ui.WorkspaceTab
+import com.yang136.sshhelper.ui.TerminalScreen
+import com.yang136.sshhelper.ui.SftpScreen
+import com.yang136.sshhelper.ui.SftpViewModel
 import com.yang136.sshhelper.ui.ForwardScreen
 import com.yang136.sshhelper.security.VaultAction
 import com.yang136.sshhelper.security.VaultResult
@@ -103,24 +104,18 @@ class MainActivity : FragmentActivity() {
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onConnect = { host ->
                                     sessionsViewModel.create(host, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("workspace/${host.id}?tab=terminal&session=${id.value}")
+                                        navController.navigate("terminal/${id.value}")
                                         true
                                     } ?: false
                                 },
                                 onFiles = { host ->
                                     sessionsViewModel.create(host, SessionFeature.SFTP)?.let { id ->
-                                        navController.navigate("workspace/${host.id}?tab=files&fsession=${id.value}")
+                                        navController.navigate("files/${id.value}")
                                         true
                                     } ?: false
                                 },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
                                 sessions = sessions,
-                                onOpenSession = { id ->
-                                    sessions.firstOrNull { it.id == id }?.profile?.id?.let { hostId ->
-                                        navController.navigate("workspace/$hostId?tab=terminal&session=${id.value}")
-                                    }
-                                },
-                                onCloseSession = sessionsViewModel::close,
                                 onCloseHostSessions = sessionsViewModel::closeForHost,
                                 onSettings = { navController.navigate("settings") },
                                 onSnippets = { navController.navigate("snippets") },
@@ -146,6 +141,7 @@ class MainActivity : FragmentActivity() {
                                 onAiApiKeyChange = settingsViewModel::setAiApiKey,
                                 onAiModelChange = settingsViewModel::setAiModel,
                                 onAiSendContextChange = settingsViewModel::setAiSendContext,
+                                onAiShowBubbleChange = settingsViewModel::setAiShowBubble,
                                 vaultState = vaultState,
                                 canAuthenticate = container.credentialVault.canAuthenticate(),
                                 onEnableVault = { requestVault(request = { container.credentialVault.enable() }) },
@@ -176,26 +172,12 @@ class MainActivity : FragmentActivity() {
                             )
                         }
                         composable(
-                            route = "workspace/{hostId}?tab={tab}&session={session}&fsession={fsession}",
-                            arguments = listOf(
-                                navArgument("hostId") { type = NavType.LongType },
-                                navArgument("tab") { type = NavType.StringType; defaultValue = "terminal" },
-                                navArgument("session") { type = NavType.StringType; defaultValue = "" },
-                                navArgument("fsession") { type = NavType.StringType; defaultValue = "" },
-                            ),
+                            route = "terminal/{sessionId}",
+                            arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
                         ) { entry ->
-                            val workspaceHostId = entry.arguments?.getLong("hostId") ?: 0L
-                            val workspaceTab = if (entry.arguments?.getString("tab") == "files") WorkspaceTab.FILES else WorkspaceTab.TERMINAL
-                            val workspaceSession = entry.arguments?.getString("session").orEmpty()
-                                .takeIf(String::isNotBlank)?.let(::SessionId)
-                            val workspaceFilesSession = entry.arguments?.getString("fsession").orEmpty()
-                                .takeIf(String::isNotBlank)?.let(::SessionId)
-                            WorkspaceScreen(
-                                hostId = workspaceHostId,
-                                initialTab = workspaceTab,
-                                initialSessionId = workspaceSession,
-                                initialFilesSessionId = workspaceFilesSession,
-                                hosts = hosts,
+                            val sessionId = entry.arguments?.getString("sessionId").orEmpty()
+                            TerminalScreen(
+                                initialSessionId = sessionId,
                                 sessionsViewModel = sessionsViewModel,
                                 snippets = snippets,
                                 settings = settings,
@@ -206,6 +188,24 @@ class MainActivity : FragmentActivity() {
                                 onOpenSettings = { navController.navigate("settings") },
                                 onUnlockVault = { requestVault(request = { container.credentialVault.unlock() }) },
                                 onBack = navController::popBackStack,
+                            )
+                        }
+                        composable(
+                            route = "files/{sessionId}",
+                            arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+                        ) { entry ->
+                            val id = SessionId(entry.arguments?.getString("sessionId").orEmpty())
+                            val sftpViewModel: SftpViewModel = viewModel(
+                                key = "sftp-${id.value}",
+                                factory = SftpViewModel.factory(container, id),
+                            )
+                            SftpScreen(
+                                viewModel = sftpViewModel,
+                                onBack = {
+                                    sessionsViewModel.close(id)
+                                    navController.popBackStack()
+                                },
+                                onUnlockVault = { requestVault(request = { container.credentialVault.unlock() }) },
                             )
                         }
                         composable(

@@ -176,6 +176,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.setAiSendContext(enabled)
     }
 
+    fun setAiShowBubble(enabled: Boolean) = viewModelScope.launch {
+        container.settingsRepository.setAiShowBubble(enabled)
+    }
+
     companion object {
         fun factory(container: AppContainer) = simpleFactory { SettingsViewModel(container) }
     }

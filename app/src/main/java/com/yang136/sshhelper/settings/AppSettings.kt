@@ -28,6 +28,7 @@ data class AppSettings(
     val aiApiKey: String = "",
     val aiModel: String = "deepseek-chat",
     val aiSendContext: Boolean = true,
+    val aiShowBubble: Boolean = true,
 )
 
 interface SettingsRepository {
@@ -41,6 +42,7 @@ interface SettingsRepository {
     suspend fun setAiApiKey(key: String)
     suspend fun setAiModel(model: String)
     suspend fun setAiSendContext(enabled: Boolean)
+    suspend fun setAiShowBubble(enabled: Boolean)
 }
 
 private val Context.settingsDataStore by preferencesDataStore(name = "app_settings")
@@ -64,6 +66,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 aiApiKey = preferences[AI_API_KEY].orEmpty(),
                 aiModel = preferences[AI_MODEL] ?: "deepseek-chat",
                 aiSendContext = preferences[AI_SEND_CONTEXT] ?: true,
+                aiShowBubble = preferences[AI_SHOW_BUBBLE] ?: true,
             )
         }
 
@@ -99,6 +102,10 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         dataStore.edit { it[AI_SEND_CONTEXT] = enabled }
     }
 
+    override suspend fun setAiShowBubble(enabled: Boolean) {
+        dataStore.edit { it[AI_SHOW_BUBBLE] = enabled }
+    }
+
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
@@ -108,6 +115,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val AI_API_KEY = stringPreferencesKey("ai_api_key")
         val AI_MODEL = stringPreferencesKey("ai_model")
         val AI_SEND_CONTEXT = booleanPreferencesKey("ai_send_context")
+        val AI_SHOW_BUBBLE = booleanPreferencesKey("ai_show_bubble")
     }
 }
 
