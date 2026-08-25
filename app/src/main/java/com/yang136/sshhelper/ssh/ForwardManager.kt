@@ -81,7 +81,7 @@ class DefaultForwardManager(
      * 保险库解锁可解除）或 "transient"（超时/网络类，网络恢复事件也可解除）。
      * 防止 reconcile 反复创建失败会话直至占满 MAX_MANAGED_SESSIONS。
      */
-    private val blockedReason = ConcurrentHashMap<Long, String>()
+    private val failureGate = ForwardFailureGate()
     /** 逐规则互斥：startRule / stop / reconcile / restore 对同一规则的操作必须原子。 */
     private val ruleMutexes = ConcurrentHashMap<Long, Mutex>()
     /** 每主机创建互斥：防止恢复与 reconcile 为同一主机并发创建多个 SSH 会话。 */
@@ -178,7 +178,7 @@ class DefaultForwardManager(
             withRuleLock(rule.id) {
                 // 锁内复核持久化意图：读取快照之后用户可能已点击停止。
                 if (rule.id !in readPersistedRuleIds()) return@withRuleLock
-                blockedReason.remove(rule.id) // 解锁/恢复是显式重试事件
+                failureGate.allowExplicitRetry(rule.id) // 解锁/恢复是显式重试事件
                 desired[rule.id] = true
                 startRuleLocked(rule)
             }
@@ -208,7 +208,7 @@ class DefaultForwardManager(
     }
 
     override suspend fun start(id: Long) = withRuleLock(id) {
-        blockedReason.remove(id) // 用户显式重试：解除失败阻断
+        failureGate.allowExplicitRetry(id) // 用户显式重试：解除失败阻断
         desired[id] = true
         persistDesired(id, true)
         // 用 DAO 加载规则，避免冷启动时 rules.value 仍是初始空列表。
@@ -218,7 +218,7 @@ class DefaultForwardManager(
 
     override suspend fun stop(id: Long) = withRuleLock(id) {
         desired[id] = false
-        blockedReason.remove(id)
+        failureGate.allowExplicitRetry(id)
         persistDesired(id, false)
         bindings.remove(id)
         closeHandle(id)
@@ -345,7 +345,7 @@ class DefaultForwardManager(
         // The user closed the session: forwarding stops for good, and an auto-created
         // session may be reclaimed by the sweep above.
         desired[ruleId] = false
-        blockedReason.remove(ruleId)
+        failureGate.allowExplicitRetry(ruleId)
         persistDesired(ruleId, false)
         bindings.remove(ruleId)
         closeHandle(ruleId)
@@ -363,7 +363,7 @@ class DefaultForwardManager(
         if (handles.containsKey(rule.id)) return
         if (desired[rule.id] != true) return
         // 首次连接失败阻断：等待用户重试 / 保险库解锁 / 网络恢复事件，不再自动重建。
-        if (blockedReason[rule.id] != null) return
+        if (failureGate.isBlocked(rule.id)) return
         setState(rule.id, ForwardState.Starting)
         val sessionId = bindings[rule.id] ?: resolveSession(rule.hostId, rule.id)?.also { bound ->
             bindings[rule.id] = bound
@@ -419,7 +419,7 @@ class DefaultForwardManager(
                     // 首次连接失败：回收会话槽位并阻断自动重试，避免 reconcile
                     // 反复创建失败会话直至占满 MAX_MANAGED_SESSIONS。
                     val message = state.connection.message
-                    discardFailedSession(created, ruleId, failureKind(message))
+                    discardFailedSession(created, ruleId, classifyForwardFailure(message))
                     setState(ruleId, ForwardState.Failed("首次连接失败：${message.take(60)}"))
                     return@withHostCreateLock null
                 }
@@ -431,31 +431,25 @@ class DefaultForwardManager(
             delay(100)
         }
         // 轮询超时：会话可能停滞在 Connecting；回收并阻断（transient，网络事件可解除）。
-        discardFailedSession(created, ruleId, "transient")
+        discardFailedSession(created, ruleId, ForwardFailureKind.TRANSIENT)
         setState(ruleId, ForwardState.Failed("连接超时，已停止自动重试"))
         null
     }
 
-    /** 连接失败类别：认证/私钥/主机密钥错误 → auth（防账号锁定），其余 → transient。 */
-    private fun failureKind(message: String): String =
-        if (message.contains("认证") || message.contains("私钥") || message.contains("主机")) "auth" else "transient"
-
     /** 丢弃失败的创建会话：解除占用并关闭会话回收槽位，按类别阻断自动重试。 */
-    private fun discardFailedSession(sessionId: SessionId, ruleId: Long, kind: String) {
+    private fun discardFailedSession(sessionId: SessionId, ruleId: Long, kind: ForwardFailureKind) {
         createdSessions.remove(sessionId)
         bindings.entries.filter { it.value == sessionId }.forEach { (id, _) ->
             bindings.remove(id)
-            if (id != ruleId) blockedReason[id] = "transient"
+            if (id != ruleId) failureGate.block(id, ForwardFailureKind.TRANSIENT)
         }
         scope.launch { sessions.close(sessionId) }
-        blockedReason[ruleId] = kind
+        failureGate.block(ruleId, kind)
     }
 
     /** 网络恢复事件：解除 transient 类失败阻断并主动重试（auth 类需用户显式操作）。 */
     private fun unblockTransientForwardFailures() {
-        val unblocked = blockedReason.entries.filter { it.value == "transient" }.map { it.key }
-        unblocked.forEach { id ->
-            blockedReason.remove(id)
+        failureGate.allowNetworkRetry().forEach { id ->
             scope.launch {
                 val rule = dao.get(id)?.toModel() ?: return@launch
                 startRule(rule)
