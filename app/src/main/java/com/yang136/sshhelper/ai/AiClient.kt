@@ -28,16 +28,6 @@ class AiHttpException(
     val streamStarted: Boolean,
 ) : AiException("请求失败（HTTP $statusCode）：${responseDetail.take(200)}")
 
-/** Legacy single-turn request retained only until the old bubble is replaced. */
-data class AiRequest(
-    val baseUrl: String,
-    val apiKey: String,
-    val model: String,
-    val systemPrompt: String,
-    val userMessage: String,
-    val timeoutSeconds: Long = 90,
-)
-
 interface AiClient {
     fun stream(request: AiChatRequest): Flow<AiStreamEvent>
 }
@@ -187,30 +177,6 @@ class OkHttpAiClient(
             }
         }
         return events
-    }
-
-    /** Temporary adapter used by the old single-turn UI during the staged refactor. */
-    suspend fun stream(request: AiRequest, onDelta: (String) -> Unit): String {
-        val builder = StringBuilder()
-        stream(
-            AiChatRequest(
-                baseUrl = request.baseUrl,
-                apiKey = request.apiKey,
-                model = request.model,
-                messages = listOf(
-                    AiChatMessage(AiMessageRole.SYSTEM, request.systemPrompt),
-                    AiChatMessage(AiMessageRole.USER, request.userMessage),
-                ),
-                timeoutSeconds = request.timeoutSeconds,
-                enableTools = false,
-            ),
-        ).collect { event ->
-            if (event is AiStreamEvent.TextDelta) {
-                builder.append(event.text)
-                onDelta(event.text)
-            }
-        }
-        return builder.toString()
     }
 
     private companion object {

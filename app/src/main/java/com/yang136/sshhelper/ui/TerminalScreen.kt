@@ -108,7 +108,6 @@ import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
-import com.yang136.sshhelper.ai.AiContext
 import com.yang136.sshhelper.settings.ExtraKeyId
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
@@ -413,9 +412,15 @@ fun TerminalScreen(
                 current?.let { session ->
                     AiBubble(
                         session = session,
+                        stateFlow = sessionsViewModel.aiState(session.id),
                         settings = settings,
-                        recentContext = { sessionsViewModel.recentOutput(session.id, AiContext.DEFAULT_CONTEXT_BYTES) },
+                        onSend = { sessionsViewModel.sendAi(session.id, it, settings) },
+                        onConfirmCommand = { sessionsViewModel.confirmAiCommand(session.id, it) },
                         onFillTerminal = controller::pasteText,
+                        onCancelGeneration = { sessionsViewModel.cancelAiGeneration(session.id) },
+                        onInterruptCommand = { sessionsViewModel.interruptAiCommand(session.id) },
+                        onStopWaiting = { sessionsViewModel.stopAiWaiting(session.id) },
+                        onClear = { sessionsViewModel.clearAi(session.id) },
                         onOpenSettings = onOpenSettings,
                         onClose = { aiHidden = true },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
