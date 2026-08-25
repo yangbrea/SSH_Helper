@@ -29,6 +29,11 @@ data class AppSettings(
     val aiModel: String = "deepseek-chat",
     val aiSendContext: Boolean = true,
     val aiShowBubble: Boolean = true,
+    /**
+     * 锁屏（保险库锁定）后，已启动的转发隧道是否保留内存中的重连凭据并继续自动重连。
+     * 开启时凭据的生命周期 = 隧道生命周期；关闭时断线后必须回应用解锁才能恢复。
+     */
+    val forwardReconnectAfterLock: Boolean = true,
 )
 
 interface SettingsRepository {
@@ -43,6 +48,7 @@ interface SettingsRepository {
     suspend fun setAiModel(model: String)
     suspend fun setAiSendContext(enabled: Boolean)
     suspend fun setAiShowBubble(enabled: Boolean)
+    suspend fun setForwardReconnectAfterLock(enabled: Boolean)
 }
 
 private val Context.settingsDataStore by preferencesDataStore(name = "app_settings")
@@ -67,6 +73,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 aiModel = preferences[AI_MODEL] ?: "deepseek-chat",
                 aiSendContext = preferences[AI_SEND_CONTEXT] ?: true,
                 aiShowBubble = preferences[AI_SHOW_BUBBLE] ?: true,
+                forwardReconnectAfterLock = preferences[FORWARD_RECONNECT_AFTER_LOCK] ?: true,
             )
         }
 
@@ -106,6 +113,10 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         dataStore.edit { it[AI_SHOW_BUBBLE] = enabled }
     }
 
+    override suspend fun setForwardReconnectAfterLock(enabled: Boolean) {
+        dataStore.edit { it[FORWARD_RECONNECT_AFTER_LOCK] = enabled }
+    }
+
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
@@ -116,6 +127,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val AI_MODEL = stringPreferencesKey("ai_model")
         val AI_SEND_CONTEXT = booleanPreferencesKey("ai_send_context")
         val AI_SHOW_BUBBLE = booleanPreferencesKey("ai_show_bubble")
+        val FORWARD_RECONNECT_AFTER_LOCK = booleanPreferencesKey("forward_reconnect_after_lock")
     }
 }
 

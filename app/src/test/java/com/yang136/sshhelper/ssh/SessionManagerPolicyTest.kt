@@ -3,6 +3,7 @@ package com.yang136.sshhelper.ssh
 import com.yang136.sshhelper.data.Credential
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionManagerPolicyTest {
@@ -12,6 +13,8 @@ class SessionManagerPolicyTest {
         assertEquals("主机 2", sessionDisplayName("主机", 2))
         assertEquals(8, MAX_MANAGED_SESSIONS)
         assertArrayEquals(intArrayOf(2, 5, 10), AUTO_RECONNECT_DELAYS_SECONDS)
+        // Forwarding tunnels retry indefinitely with capped backoff until they come back.
+        assertArrayEquals(intArrayOf(2, 5, 10, 30, 60, 120, 300), FORWARD_RECONNECT_DELAYS_SECONDS)
     }
 
     @Test
@@ -34,5 +37,15 @@ class SessionManagerPolicyTest {
         assertEquals(true, DisconnectCause.KEEPALIVE_TIMEOUT.isAutoReconnectEligible())
         assertEquals(false, DisconnectCause.REMOTE_SHELL_EXIT.isAutoReconnectEligible())
         assertEquals(false, DisconnectCause.USER.isAutoReconnectEligible())
+    }
+
+    @Test
+    fun forwardSessionMonitoringAndHostKeyTimeoutsAreBounded() {
+        assertEquals(5_000L, TRANSPORT_WATCH_INTERVAL_MS)
+        assertEquals(60_000L, HOST_KEY_CONFIRM_TIMEOUT_MS)
+        // 重连退避抖动保持在 ±20% 内。
+        repeat(100) {
+            assertTrue("backoff 抖动越界: ${backoffMillis(10)}", backoffMillis(10) in 8_000L..12_000L)
+        }
     }
 }

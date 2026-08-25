@@ -36,8 +36,13 @@ class AppContainer(application: Application) {
     val hostRepository = HostRepository(database, credentialVault)
     val snippetRepository = SnippetRepository(database)
     val settingsRepository = DataStoreSettingsRepository(application)
-    val sessionManager = DefaultSessionManager(application, hostRepository, database.knownHostDao(), credentialVault = credentialVault)
+    val sessionManager = DefaultSessionManager(application, hostRepository, database.knownHostDao(), credentialVault = credentialVault, settings = settingsRepository)
     val transferManager = DefaultTransferManager(application, database, hostRepository, sessionManager, credentialVault)
     val forwardManager = DefaultForwardManager(application, database, hostRepository, sessionManager, credentialVault)
+
+    init {
+        // 凭据租约按"活动转发"判定：会话管理器查询转发管理器当前活跃转发的会话。
+        sessionManager.forwardActivityProvider = { forwardManager.activeForwardSessionIds() }
+    }
     val sftpRepository = SftpRepository(application, database)
 }

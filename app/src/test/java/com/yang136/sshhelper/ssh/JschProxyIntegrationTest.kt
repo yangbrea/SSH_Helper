@@ -68,6 +68,7 @@ class JschProxyIntegrationTest {
             session.connect(
                 SshRoute(profile, null),
                 RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = true,
             )
         }
         withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
@@ -101,6 +102,7 @@ class JschProxyIntegrationTest {
             session.connect(
                 SshRoute(profile, null),
                 RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = true,
             )
         }
         withTimeout(15_000) { connection.await() }

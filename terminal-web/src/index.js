@@ -74,6 +74,8 @@ let ctrlArmed = false;
 let keepCursorVisibleForIme = false;
 let keyboardFocusAllowed = false;
 let suppressSyntheticMouseUntil = 0;
+/** 本次触摸手势结束时是否请求了键盘：合成 mousedown 不得再 blur 掉刚聚焦的文本框。 */
+let lastTouchRequestedKeyboard = false;
 let outputGeneration = 0;
 const moveThreshold = 12;
 
@@ -170,8 +172,11 @@ function handleTouchStart(event) {
   if (event.touches.length !== 1) return;
   event.preventDefault();
   keyboardFocusAllowed = false;
+  lastTouchRequestedKeyboard = false;
   suppressSyntheticMouseUntil = performance.now() + 700;
-  terminal.blur();
+  // 注意：这里不能 blur。一旦 blur，Android 软键盘会随之关闭，随后 onRequestKeyboard
+  // 再重新聚焦会造成"先关再开"的闪烁，并与系统 IME 动画竞争导致输入丢失。
+  // 键盘只应在真正开始滚动/选择时收起（见 handleTouchMove / beginSelection）。
   const touch = event.touches[0];
   const point = pointFromTouch(touch);
   touchState = {
@@ -208,6 +213,9 @@ function handleTouchMove(event) {
     return;
   }
   if (touchState.moved) {
+    // 用户真正开始滚动：此时收起键盘（focus 属于上一次点击的请求，滚动不再需要）。
+    terminal.blur();
+    window.AndroidTerminal?.onHideKeyboard();
     const point = touchState.point;
     const rowHeight = point?.rowHeight || 18;
     const rows = Math.trunc((touchState.lastY - touch.clientY) / rowHeight);
@@ -248,6 +256,8 @@ function handleTouchEnd(event) {
     const buffer = terminal.buffer.active;
     const cursorAbsoluteRow = buffer.baseY + buffer.cursorY;
     if (point && point.absoluteRow === cursorAbsoluteRow) {
+      // 同步置位：随后的合成 mousedown 会据此跳过 blur，保证输入不丢失。
+      lastTouchRequestedKeyboard = true;
       window.AndroidTerminal?.onRequestKeyboard();
     }
   }
@@ -266,6 +276,13 @@ terminal.element?.addEventListener('touchcancel', () => {
 // WebView may synthesize a mouse down after a touch gesture. xterm focuses its hidden textarea
 // on mouse down, which would otherwise show the IME even after a scroll.
 terminal.element?.addEventListener('mousedown', event => {
+  if (lastTouchRequestedKeyboard) {
+    // 本次点击已请求键盘：保持 textarea 焦点，绝不能 blur（否则键入内容丢失）。
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    lastTouchRequestedKeyboard = false;
+    return;
+  }
   if (performance.now() < suppressSyntheticMouseUntil || event.sourceCapabilities?.firesTouchEvents) {
     event.preventDefault();
     event.stopImmediatePropagation();

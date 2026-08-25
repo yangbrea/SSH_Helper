@@ -31,6 +31,7 @@ import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Properties
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
@@ -40,6 +41,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +50,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -72,6 +75,12 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
     @Volatile private var writer: OutputStream? = null
     private var readerJob: Job? = null
 
+    /** 串行化 connect/disconnect/close，杜绝并发连接交错导致 JSch 会话/线程泄漏。 */
+    private val lifecycleMutex = Mutex()
+    @Volatile private var closed = false
+    /** 当前连接是否带有 shell 通道（转发专用会话不创建 shell/PTY）。 */
+    @Volatile private var shellEnabled = false
+
     override suspend fun openSftpClient(): SftpClient = withContext(Dispatchers.IO) {
         val activeSession = session?.takeIf(Session::isConnected) ?: error("SSH 连接不可用")
         val sftp = activeSession.openChannel("sftp") as ChannelSftp
@@ -86,13 +95,19 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
                 val targetHost = request.targetHost ?: error("缺少目标主机")
                 val targetPort = request.targetPort ?: error("缺少目标端口")
                 val actual = active.setPortForwardingL(request.bindAddress, request.listenPort, targetHost, targetPort)
-                SimpleForwardHandle(actual) { active.delPortForwardingL(actual) }
+                // 注销必须按注册时的 bind 地址进行：delPortForwardingL(int) 固定按
+                // "127.0.0.1" 查找（JSch 字节码确认），0.0.0.0 等绑定会抛
+                // JSchException("not registered")。会话断开时 JSch 已自行卸载转发
+                // （Session.disconnect → PortWatcher.delPort），因此整体静默忽略。
+                SimpleForwardHandle(actual) {
+                    runCatching { active.delPortForwardingL(request.bindAddress, actual) }
+                }
             }
             ForwardType.REMOTE -> {
                 val targetHost = request.targetHost ?: error("缺少目标主机")
                 val targetPort = request.targetPort ?: error("缺少目标端口")
                 active.setPortForwardingR(request.bindAddress, request.listenPort, targetHost, targetPort)
-                SimpleForwardHandle(request.listenPort) { active.delPortForwardingR(request.listenPort) }
+                SimpleForwardHandle(request.listenPort) { runCatching { active.delPortForwardingR(request.listenPort) } }
             }
             ForwardType.DYNAMIC -> {
                 val server = Socks5Server(active, request.bindAddress, request.listenPort)
@@ -106,16 +121,24 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
         override val actualListenPort: Int,
         private val onClose: () -> Unit,
     ) : ForwardHandle {
-        @Volatile private var closed = false
+        private val closed = AtomicBoolean(false)
         override fun close() {
-            if (!closed) {
-                closed = true
-                onClose()
+            // 幂等 + 异常兜底：JSch 会话被自行清理后注销会抛 JSchException，
+            // 直接忽略，避免未捕获异常经协程传播导致进程崩溃。
+            if (closed.compareAndSet(false, true)) {
+                runCatching { onClose() }
             }
         }
     }
 
-    override suspend fun connect(route: SshRoute, credentials: RouteCredentials) = withContext(Dispatchers.IO) {
+    override suspend fun connect(route: SshRoute, credentials: RouteCredentials, openShell: Boolean) = withContext(Dispatchers.IO) {
+        lifecycleMutex.withLock {
+            if (closed) return@withLock
+            connectLocked(route, credentials, openShell)
+        }
+    }
+
+    private suspend fun connectLocked(route: SshRoute, credentials: RouteCredentials, openShell: Boolean) {
         disconnectInternal("正在重新连接", DisconnectCause.UNKNOWN, publishState = false)
         mutableStage.value = if (route.jump != null) ConnectionStage.JUMP_AUTH else ConnectionStage.TARGET_AUTH
         mutableState.value = ConnectionState.Connecting
@@ -138,18 +161,37 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
                 proxyPassword = credentials.targetProxyPassword,
             )
             session = target
-            val newChannel = (target.openChannel("shell") as ChannelShell).apply {
-                setPtyType("xterm-256color")
-                setPtySize(80, 24, 0, 0)
+            // 转发专用会话（PORT_FORWARD）不创建 shell/PTY：只允许 TCP forwarding 的
+            // SSH 账号可用，且服务端关闭空闲 shell 不会误判为传输断开。
+            val input = if (openShell) {
+                val newChannel = (target.openChannel("shell") as ChannelShell).apply {
+                    setPtyType("xterm-256color")
+                    setPtySize(80, 24, 0, 0)
+                }
+                writer = newChannel.outputStream
+                channel = newChannel
+                newChannel.connect(SSH_CONNECT_TIMEOUT_MS)
+                shellEnabled = true
+                newChannel.inputStream
+            } else {
+                writer = null
+                channel = null
+                shellEnabled = false
+                null
             }
-            val input = newChannel.inputStream
-            writer = newChannel.outputStream
-            channel = newChannel
-            newChannel.connect(SSH_CONNECT_TIMEOUT_MS)
+            // 连接建立期间会话被 close()：立即拆除刚建立的会话，避免 JSch 会话泄漏。
+            if (closed) {
+                disconnectInternal("应用已关闭连接", DisconnectCause.APP_CLOSED, publishState = false)
+                return
+            }
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Connected(connectedLabel(route))
-            readerJob = scope.launch { readOutput(input) }
+            readerJob = scope.launch {
+                val stream = input
+                if (stream != null) readOutput(stream) else watchTransport()
+            }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             val pendingHostKey = mutableHostKeyRequest.value
             disconnectInternal("连接失败", DisconnectCause.UNKNOWN, publishState = false)
             if (pendingHostKey?.issue == HostKeyIssue.CHANGED) {
@@ -157,6 +199,27 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
             }
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Error(error.toChineseMessage())
+        }
+    }
+
+    /**
+     * 无 shell 会话的传输监视：JSch 传输失败时 Session.run() 内部会调用 disconnect()
+     * （isConnected 翻转为 false），这里轮询兜底检测并发布断连事件，替代 shell 读取。
+     */
+    private suspend fun watchTransport() {
+        while (true) {
+            delay(TRANSPORT_WATCH_INTERVAL_MS)
+            val active = session
+            if (active == null) {
+                if (mutableState.value is ConnectionState.Connected) return
+                continue
+            }
+            if (!active.isConnected && mutableState.value is ConnectionState.Connected) {
+                publishUnexpectedDisconnect(
+                    ConnectionState.Disconnected("SSH 传输连接已中断", DisconnectCause.TRANSPORT_CLOSED),
+                )
+                return
+            }
         }
     }
 
@@ -280,6 +343,8 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
     }
 
     override suspend fun write(data: ByteArray) = withContext(Dispatchers.IO) {
+        // 无 shell 的转发会话没有终端输入通道，直接忽略。
+        if (!shellEnabled) return@withContext
         var failure: Throwable? = null
         writeMutex.withLock {
             val output = writer
@@ -306,6 +371,7 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
     }
 
     override suspend fun resize(columns: Int, rows: Int) = withContext(Dispatchers.IO) {
+        if (!shellEnabled) return@withContext
         val safeColumns = columns.coerceIn(2, 500)
         val safeRows = rows.coerceIn(2, 300)
         runCatching { channel?.takeIf { it.isConnected }?.setPtySize(safeColumns, safeRows, 0, 0) }
@@ -313,7 +379,9 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
     }
 
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
-        disconnectInternal("连接已关闭", DisconnectCause.USER, publishState = true)
+        lifecycleMutex.withLock {
+            disconnectInternal("连接已关闭", DisconnectCause.USER, publishState = true)
+        }
     }
 
     private suspend fun disconnectInternal(reason: String, cause: DisconnectCause, publishState: Boolean) {
@@ -326,6 +394,7 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
         channel = null
         session = null
         jumpSession = null
+        shellEnabled = false
 
         // Closing the channel must happen before waiting for the reader. A coroutine
         // cancellation alone cannot interrupt InputStream.read(), and closing the
@@ -388,6 +457,32 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
     }
 
     override fun close() {
+        closed = true
+        // 先解除可能阻塞在主机密钥确认上的等待：连接线程持锁等待 decision 时，
+        // 直接 complete(false) 使其立即结束，避免关闭线程等锁最多 60 秒。
+        hostKeyDecision.getAndSet(null)?.complete(false)
+        mutableHostKeyRequest.value = null
+        if (lifecycleMutex.tryLock()) {
+            try {
+                closeLocked()
+            } finally {
+                lifecycleMutex.unlock()
+            }
+        } else {
+            // 有 connect/disconnect 在途：绝不能与在途操作并发修改字段（窄窗口竞态）。
+            // 在后台线程等待锁，让在途操作先结束再执行完整清理。close 调用稀少，
+            // 临时线程可接受；closeLocked 内的 scope.cancel() 对等待方无害。
+            Thread {
+                runBlocking { lifecycleMutex.withLock { closeLocked() } }
+            }.apply {
+                isDaemon = true
+                name = "ssh-helper-session-close"
+                start()
+            }
+        }
+    }
+
+    private fun closeLocked() {
         hostKeyDecision.getAndSet(null)?.complete(false)
         mutableHostKeyRequest.value = null
         val activeChannel = channel
@@ -399,6 +494,7 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
         channel = null
         session = null
         jumpSession = null
+        shellEnabled = false
         runCatching { activeChannel?.disconnect() }
         runCatching { activeSession?.disconnect() }
         runCatching { activeJump?.disconnect() }
@@ -447,7 +543,10 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
             val decision = CompletableDeferred<Boolean>()
             hostKeyDecision.set(decision)
             mutableHostKeyRequest.value = request
-            val accepted = runBlocking { decision.await() }
+            // 超时按拒绝处理：用户启动后锁屏、服务停止等场景不能让连接线程无限挂起。
+            val accepted = runBlocking {
+                withTimeoutOrNull(HOST_KEY_CONFIRM_TIMEOUT_MS) { decision.await() }
+            } ?: false
             mutableHostKeyRequest.value = null
             if (!accepted) return HostKeyRepository.NOT_INCLUDED
             runBlocking {
@@ -546,3 +645,7 @@ private fun Throwable.safeMessage(): String = message?.takeIf(String::isNotBlank
 internal const val SSH_CONNECT_TIMEOUT_MS = 15_000
 internal const val SSH_KEEPALIVE_INTERVAL_MS = 20_000
 internal const val SSH_KEEPALIVE_MAX_MISSES = 3
+/** 无 shell 转发会话的传输监视轮询间隔。 */
+internal const val TRANSPORT_WATCH_INTERVAL_MS = 5_000L
+/** 未知主机密钥确认超时；超时按拒绝处理。 */
+internal const val HOST_KEY_CONFIRM_TIMEOUT_MS = 60_000L

@@ -152,6 +152,7 @@ class MainActivity : FragmentActivity() {
                                 onAiModelChange = settingsViewModel::setAiModel,
                                 onAiSendContextChange = settingsViewModel::setAiSendContext,
                                 onAiShowBubbleChange = settingsViewModel::setAiShowBubble,
+                                onForwardReconnectAfterLockChange = settingsViewModel::setForwardReconnectAfterLock,
                                 vaultState = vaultState,
                                 canAuthenticate = container.credentialVault.canAuthenticate(),
                                 onEnableVault = { requestVault(request = { container.credentialVault.enable() }) },

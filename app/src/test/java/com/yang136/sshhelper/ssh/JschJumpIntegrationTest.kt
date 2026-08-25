@@ -78,6 +78,7 @@ class JschJumpIntegrationTest {
             session.connect(
                 SshRoute(target, jump),
                 RouteCredentials(Credential.Password("secret-target".toCharArray()), Credential.Password("secret-jump".toCharArray())),
+                openShell = true,
             )
         }
 
@@ -112,6 +113,7 @@ class JschJumpIntegrationTest {
             session.connect(
                 SshRoute(target, jump),
                 RouteCredentials(Credential.Password("secret-target".toCharArray()), Credential.Password("wrong".toCharArray())),
+                openShell = true,
             )
         }
         withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first { it.subject == HostKeySubject.JUMP } }

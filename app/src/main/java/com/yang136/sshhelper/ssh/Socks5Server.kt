@@ -7,7 +7,9 @@ import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -15,6 +17,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `direct-tcpip` channel on the connected SSH session, so destination resolution happens on the
  * final SSH server (useful for private DNS). UDP and BIND commands are rejected; no traffic
  * content, destination data, or request logs are recorded.
+ *
+ * Concurrency is bounded: at most [MAX_CONCURRENT_CONNECTIONS] live connections; excess
+ * connections are closed immediately instead of unbounded thread growth. All sockets/channels
+ * are tracked and closed on [close].
  */
 class Socks5Server(
     private val sshSession: Session,
@@ -26,6 +32,8 @@ class Socks5Server(
         Thread(runnable, "ssh-helper-socks5").apply { isDaemon = true }
     }
     private val closed = AtomicBoolean(false)
+    private val connections = ConcurrentHashMap.newKeySet<Socket>()
+    private val slots = Semaphore(MAX_CONCURRENT_CONNECTIONS)
 
     @Volatile
     var actualPort: Int = listenPort
@@ -44,11 +52,25 @@ class Socks5Server(
             } catch (error: Exception) {
                 if (closed.get()) return else continue
             }
-            executor.submit { handle(socket) }
+            if (!slots.tryAcquire()) {
+                // 并发连接数已达上限：直接拒绝，避免线程与内存膨胀。
+                runCatching { socket.close() }
+                continue
+            }
+            connections.add(socket)
+            try {
+                executor.submit { handle(socket) }
+            } catch (error: Throwable) {
+                // close() 与 accept 的竞态：executor 已关闭，丢弃该连接。
+                slots.release()
+                connections.remove(socket)
+                runCatching { socket.close() }
+            }
         }
     }
 
     private fun handle(socket: Socket) {
+        var tunnel: ChannelDirectTCPIP? = null
         try {
             socket.soTimeout = 30_000
             val input = DataInputStream(socket.getInputStream())
@@ -101,12 +123,13 @@ class Socks5Server(
 
             // Same wiring as JSch's own local forwarding: hand the client socket streams to the
             // direct-tcpip channel; connect() only opens it and starts the channel's pump thread.
-            val tunnel = sshSession.openChannel("direct-tcpip") as ChannelDirectTCPIP
-            tunnel.setHost(host)
-            tunnel.setPort(port)
-            tunnel.setInputStream(socket.getInputStream())
-            tunnel.setOutputStream(socket.getOutputStream())
-            tunnel.connect(TUNNEL_CONNECT_TIMEOUT_MS)
+            val channel = sshSession.openChannel("direct-tcpip") as ChannelDirectTCPIP
+            tunnel = channel
+            channel.setHost(host)
+            channel.setPort(port)
+            channel.setInputStream(socket.getInputStream())
+            channel.setOutputStream(socket.getOutputStream())
+            channel.connect(TUNNEL_CONNECT_TIMEOUT_MS)
             // Success reply: VER REP RSV ATYP=IPv4 BND.ADDR BND.PORT.
             output.writeByte(SOCKS_VERSION)
             output.writeByte(0x00)
@@ -116,12 +139,18 @@ class Socks5Server(
             output.writeShort(0)
             output.flush()
             // Keep the client connection alive until the channel's run loop ends.
-            while (!tunnel.isClosed && !closed.get()) {
+            while (!channel.isClosed && !closed.get()) {
                 Thread.sleep(50)
             }
             runCatching { socket.close() }
         } catch (_: Exception) {
             runCatching { socket.close() }
+        } finally {
+            // 无论正常结束、异常还是服务器关闭，都释放资源与并发名额。
+            runCatching { tunnel?.disconnect() }
+            runCatching { socket.close() }
+            connections.remove(socket)
+            slots.release()
         }
     }
 
@@ -142,6 +171,9 @@ class Socks5Server(
     fun close() {
         if (closed.compareAndSet(false, true)) {
             runCatching { serverSocket.close() }
+            // 关闭所有仍在活动的客户端连接，使各自 handle() 的忙等循环退出。
+            connections.forEach { runCatching { it.close() } }
+            connections.clear()
             executor.shutdownNow()
         }
     }
@@ -149,5 +181,6 @@ class Socks5Server(
     private companion object {
         const val SOCKS_VERSION = 0x05
         const val TUNNEL_CONNECT_TIMEOUT_MS = 15_000
+        const val MAX_CONCURRENT_CONNECTIONS = 64
     }
 }

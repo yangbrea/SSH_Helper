@@ -69,6 +69,7 @@ class JschForwardIntegrationTest {
             session.connect(
                 SshRoute(profile, null),
                 RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = true,
             )
         }
         withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
@@ -138,6 +139,101 @@ class JschForwardIntegrationTest {
                 output.write(ByteArray(4)); output.writeShort(0); output.flush()
                 assertEquals(0x05, input.readUnsignedByte())
                 assertEquals(0x07, input.readUnsignedByte())
+            }
+        } finally {
+            handle.close()
+        }
+    }
+
+    @Test
+    fun localForwardOnWildcardBindRegistersAndStopsIdempotently() = runBlocking {
+        connectSession()
+        // 0.0.0.0 绑定：注销必须按注册时的 bind 地址进行，否则 JSch 会抛
+        // JSchException("not registered") 并（在旧代码中）导致进程崩溃。
+        val handle = session.registerForward(
+            ForwardRequest(ForwardType.LOCAL, "0.0.0.0", 0, "127.0.0.1", echo.port),
+        )
+        try {
+            assertTrue(handle.actualListenPort > 0)
+            Socket("127.0.0.1", handle.actualListenPort).use { socket ->
+                echoRoundTrip(socket, "wildcard-bind")
+            }
+        } finally {
+            handle.close() // 第一次：按 0.0.0.0 注销，不得抛异常
+            handle.close() // 第二次：幂等关闭，也不得抛异常
+        }
+    }
+
+    @Test
+    fun closeHandleAfterSessionDisconnectDoesNotThrow() = runBlocking {
+        connectSession()
+        val handle = session.registerForward(
+            ForwardRequest(ForwardType.LOCAL, "127.0.0.1", 0, "127.0.0.1", echo.port),
+        )
+        // JSch 会随会话断开自动卸载本地转发（Session.disconnect → PortWatcher.delPort），
+        // 之后应用再关闭句柄必须静默忽略（回归：此前 JSchException 逃出协程导致崩溃）。
+        session.disconnect()
+        handle.close()
+        handle.close()
+        assertTrue(session.state.value is ConnectionState.Disconnected)
+    }
+
+    @Test
+    fun forwardOnlySessionRegistersForwardWithoutShell() = runBlocking {
+        // 转发专用会话不创建 shell/PTY：仅允许 forwarding 的账号也能工作。
+        val profile = HostProfile(
+            name = "test", hostname = "127.0.0.1", port = server.port,
+            username = "test", authType = AuthType.PASSWORD,
+        )
+        val connection = async {
+            session.connect(
+                SshRoute(profile, null),
+                RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = false,
+            )
+        }
+        withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
+        session.respondToHostKey(true)
+        withTimeout(10_000) { connection.await() }
+        assertTrue(session.state.value is ConnectionState.Connected)
+        val handle = session.registerForward(
+            ForwardRequest(ForwardType.LOCAL, "127.0.0.1", 0, "127.0.0.1", echo.port),
+        )
+        try {
+            Socket("127.0.0.1", handle.actualListenPort).use { socket ->
+                echoRoundTrip(socket, "no-shell-forward")
+            }
+        } finally {
+            handle.close()
+        }
+    }
+
+    @Test
+    fun concurrentConnectIsSerializedAndRecovers() = runBlocking {
+        val profile = HostProfile(
+            name = "test", hostname = "127.0.0.1", port = server.port,
+            username = "test", authType = AuthType.PASSWORD,
+        )
+        val credentials = RouteCredentials(Credential.Password("secret".toCharArray()), null)
+        val first = async {
+            session.connect(SshRoute(profile, null), credentials, openShell = true)
+        }
+        val second = async {
+            session.connect(SshRoute(profile, null), credentials, openShell = true)
+        }
+        // 生命周期锁串行化：第一个连接完成主机密钥确认后，第二个复用已保存指纹。
+        withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
+        session.respondToHostKey(true)
+        withTimeout(10_000) { first.await() }
+        withTimeout(10_000) { second.await() }
+        assertTrue("并发连接后必须处于 Connected，实际 ${session.state.value}", session.state.value is ConnectionState.Connected)
+        // 连接可正常承载转发流量。
+        val handle = session.registerForward(
+            ForwardRequest(ForwardType.LOCAL, "127.0.0.1", 0, "127.0.0.1", echo.port),
+        )
+        try {
+            Socket("127.0.0.1", handle.actualListenPort).use { socket ->
+                echoRoundTrip(socket, "concurrent-ok")
             }
         } finally {
             handle.close()

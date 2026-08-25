@@ -180,6 +180,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.setAiShowBubble(enabled)
     }
 
+    fun setForwardReconnectAfterLock(enabled: Boolean) = viewModelScope.launch {
+        container.settingsRepository.setForwardReconnectAfterLock(enabled)
+    }
+
     companion object {
         fun factory(container: AppContainer) = simpleFactory { SettingsViewModel(container) }
     }

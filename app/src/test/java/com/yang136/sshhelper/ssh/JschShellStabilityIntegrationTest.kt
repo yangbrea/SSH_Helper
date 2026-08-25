@@ -64,6 +64,7 @@ class JschShellStabilityIntegrationTest {
             session.connect(
                 SshRoute(profile, null),
                 RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = true,
             )
         }
         withTimeout(5_000) { hostKey.await() }

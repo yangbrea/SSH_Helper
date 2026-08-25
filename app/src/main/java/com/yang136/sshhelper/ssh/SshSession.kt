@@ -45,7 +45,7 @@ interface SshSession {
     val hostKeyRequest: StateFlow<HostKeyRequest?>
     val stage: StateFlow<ConnectionStage>
 
-    suspend fun connect(route: SshRoute, credentials: RouteCredentials)
+    suspend fun connect(route: SshRoute, credentials: RouteCredentials, openShell: Boolean = true)
     suspend fun write(data: ByteArray)
     suspend fun resize(columns: Int, rows: Int)
     suspend fun disconnect()

@@ -50,6 +50,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -156,6 +157,7 @@ fun SettingsScreen(
     onAiModelChange: (String) -> Unit,
     onAiSendContextChange: (Boolean) -> Unit,
     onAiShowBubbleChange: (Boolean) -> Unit,
+    onForwardReconnectAfterLockChange: (Boolean) -> Unit,
     vaultState: VaultState,
     canAuthenticate: Boolean,
     onEnableVault: () -> Unit,
@@ -217,7 +219,7 @@ fun SettingsScreen(
                 SettingsTab.APPEARANCE -> AppearanceTab(settings, onThemeModeChange, onThemePresetChange)
                 SettingsTab.TERMINAL -> TerminalTab(settings, onFontSizeChange, onExtraKeysChange)
                 SettingsTab.AI -> AiTab(settings, showApiKey, { showApiKey = it }, onAiBaseUrlChange, onAiApiKeyChange, onAiModelChange, onAiSendContextChange, onAiShowBubbleChange)
-                SettingsTab.SECURITY -> SecurityTab(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, onClearUnavailableVault, { confirmVaultReset = true })
+                SettingsTab.SECURITY -> SecurityTab(settings.forwardReconnectAfterLock, onForwardReconnectAfterLockChange, vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, onClearUnavailableVault, { confirmVaultReset = true })
                 SettingsTab.ABOUT -> AboutTab()
             }
         }
@@ -444,6 +446,8 @@ private fun AiTab(
 
 @Composable
 private fun SecurityTab(
+    forwardReconnectAfterLock: Boolean,
+    onForwardReconnectAfterLockChange: (Boolean) -> Unit,
     vaultState: VaultState,
     canAuthenticate: Boolean,
     onEnableVault: () -> Unit,
@@ -479,6 +483,14 @@ private fun SecurityTab(
                 }
                 if (vaultState is VaultState.Unavailable) {
                     Text("清除后无法恢复已保存的密码和私钥，需要逐台重新录入。主机配置与指纹不会删除。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(forwardReconnectAfterLock, onForwardReconnectAfterLockChange)
+                    Column {
+                        Text("锁屏后允许活动转发隧道自动重连")
+                        Text("开启时已启动隧道的凭据保存在内存中，生命周期与隧道相同；关闭时锁屏后断线需回应用解锁才能恢复", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
