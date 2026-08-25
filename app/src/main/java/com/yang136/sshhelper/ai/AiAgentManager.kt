@@ -32,6 +32,7 @@ class AiAgentManager(
         var generationJob: Job? = null,
         var commandJob: Job? = null,
         var lastSettings: AppSettings? = null,
+        var analyzePartialSuggestionId: String? = null,
     )
 
     private data class ToolBuilder(
@@ -108,6 +109,15 @@ class AiAgentManager(
 
     fun stopWaiting(sessionId: SessionId) {
         commandRunner.stopWaiting(sessionId)
+    }
+
+    fun analyzePartial(sessionId: SessionId, suggestionId: String) {
+        val conversation = conversations[sessionId] ?: return
+        synchronized(conversation.guard) {
+            if (conversation.mutableState.value.runningSuggestionId != suggestionId) return
+            conversation.analyzePartialSuggestionId = suggestionId
+            commandRunner.stopWaiting(sessionId)
+        }
     }
 
     fun clear(sessionId: SessionId) {
@@ -237,7 +247,13 @@ class AiAgentManager(
                 applyCommandResult(conversation, suggestion.id, partial)
             }
             applyCommandResult(conversation, suggestion.id, result)
-            shouldContinue = result.exitCode != null && result.status in setOf(CommandExecutionStatus.SUCCEEDED, CommandExecutionStatus.FAILED)
+            val partialRequested = synchronized(conversation.guard) {
+                (conversation.analyzePartialSuggestionId == suggestion.id).also {
+                    if (it) conversation.analyzePartialSuggestionId = null
+                }
+            }
+            shouldContinue = partialRequested ||
+                (result.exitCode != null && result.status in setOf(CommandExecutionStatus.SUCCEEDED, CommandExecutionStatus.FAILED))
             if (shouldContinue) appendCommandResultHistory(conversation, suggestion, result)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -302,6 +318,7 @@ class AiAgentManager(
                 exitCode = result.exitCode,
                 status = result.status,
                 truncated = result.truncated,
+                message = result.message,
             )
             val existingIndex = updatedEntries.indexOfFirst { entry ->
                 entry.blocks.any { it is AiContentBlock.CommandResult && it.suggestionId == suggestionId }

@@ -75,6 +75,8 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
     fun cancelAiGeneration(id: SessionId) = container.aiAgentManager.cancelGeneration(id)
     fun interruptAiCommand(id: SessionId) = container.aiAgentManager.interruptCommand(id)
     fun stopAiWaiting(id: SessionId) = container.aiAgentManager.stopWaiting(id)
+    fun analyzePartialAiOutput(id: SessionId, suggestionId: String) =
+        container.aiAgentManager.analyzePartial(id, suggestionId)
     fun clearAi(id: SessionId) = container.aiAgentManager.clear(id)
     fun enableFeature(id: SessionId, feature: SessionFeature) = manager.enableFeature(id, feature)
     fun connect(id: SessionId, credential: Credential, remember: Boolean) = viewModelScope.launch { manager.connect(id, credential, remember) }

@@ -62,6 +62,7 @@ class AiBubbleTest {
                     onCancelGeneration = {},
                     onInterruptCommand = {},
                     onStopWaiting = {},
+                    onAnalyzePartial = {},
                     onClear = {},
                     onOpenSettings = {},
                     onClose = {},

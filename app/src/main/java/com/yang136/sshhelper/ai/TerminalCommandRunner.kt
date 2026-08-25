@@ -6,6 +6,9 @@ import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionManager
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -89,22 +92,21 @@ class TerminalCommandRunner internal constructor(
             confirmedShells.remove(sessionId)
             return TerminalCommandResult(CommandExecutionStatus.DISCONNECTED, "", "", message = "SSH 会话未连接")
         }
-        val shell = confirmedShells[sessionId] ?: probeShell(sessionId)?.also { confirmedShells[sessionId] = it }
-        if (shell !in SUPPORTED_SHELLS) {
-            return TerminalCommandResult(
-                CommandExecutionStatus.UNSUPPORTED_SHELL,
-                "",
-                "",
-                message = if (shell == null) "无法确认当前 Shell" else "当前 Shell（$shell）不支持自动采集",
-            )
-        }
-
         val signals = Channel<Signal>(Channel.UNLIMITED)
         val run = ActiveRun(signals)
         if (active.putIfAbsent(sessionId, run) != null) {
             return TerminalCommandResult(CommandExecutionStatus.FAILED, "", "", message = "该会话已有命令正在采集")
         }
         return try {
+            val shell = confirmedShells[sessionId] ?: probeShell(sessionId)?.also { confirmedShells[sessionId] = it }
+            if (shell !in SUPPORTED_SHELLS) {
+                return TerminalCommandResult(
+                    CommandExecutionStatus.UNSUPPORTED_SHELL,
+                    "",
+                    "",
+                    message = if (shell == null) "无法确认当前 Shell" else "当前 Shell（$shell）不支持自动采集",
+                )
+            }
             collectCommand(sessionId, command, timeoutMillis, signals, onUpdate)
         } finally {
             active.remove(sessionId, run)
@@ -227,6 +229,8 @@ class TerminalCommandRunner internal constructor(
         val collector = launch(start = CoroutineStart.UNDISPATCHED) {
             var baseline = Long.MAX_VALUE
             val lineBuffer = StringBuilder()
+            val decoder = Utf8ChunkDecoder()
+            var previousCr = false
             terminal.output(sessionId).collect { event ->
                 when (event) {
                     is TerminalOutputEvent.Snapshot -> {
@@ -234,10 +238,25 @@ class TerminalCommandRunner internal constructor(
                         if (!ready.isCompleted) ready.complete(baseline)
                     }
                     is TerminalOutputEvent.Chunk -> if (event.sequence > baseline) {
-                        lineBuffer.append(AiContext.stripAnsi(event.bytes.toString(Charsets.UTF_8)).replace('\r', '\n'))
+                        decoder.decode(event.bytes).forEach { character ->
+                            when (character) {
+                                '\r' -> {
+                                    lineBuffer.append('\n')
+                                    previousCr = true
+                                }
+                                '\n' -> {
+                                    if (!previousCr) lineBuffer.append('\n')
+                                    previousCr = false
+                                }
+                                else -> {
+                                    previousCr = false
+                                    lineBuffer.append(character)
+                                }
+                            }
+                        }
                         while ('\n' in lineBuffer) {
                             val end = lineBuffer.indexOf("\n")
-                            val line = lineBuffer.substring(0, end)
+                            val line = AiContext.stripAnsi(lineBuffer.substring(0, end))
                             lineBuffer.delete(0, end + 1)
                             if (line.startsWith(prefix) && !found.isCompleted) {
                                 found.complete(normalizeShell(line.removePrefix(prefix)))
@@ -276,21 +295,38 @@ private class CommandOutputCapture(
     private val output = HeadTailByteBuffer(32 * 1024, 32 * 1024)
     private val modelOutput = HeadTailByteBuffer(8 * 1024, 8 * 1024)
     private val lineBuffer = StringBuilder()
+    private val decoder = Utf8ChunkDecoder()
     private var capturing = false
+    private var previousCr = false
     var completedExitCode: Int? = null
         private set
     val totalCapturedBytes: Long get() = output.totalBytes
 
     fun append(bytes: ByteArray) {
-        lineBuffer.append(AiContext.stripAnsi(bytes.toString(Charsets.UTF_8)).replace("\r\n", "\n").replace('\r', '\n'))
+        decoder.decode(bytes).forEach { character ->
+            when (character) {
+                '\r' -> {
+                    lineBuffer.append('\n')
+                    previousCr = true
+                }
+                '\n' -> {
+                    if (!previousCr) lineBuffer.append('\n')
+                    previousCr = false
+                }
+                else -> {
+                    previousCr = false
+                    lineBuffer.append(character)
+                }
+            }
+        }
         while (true) {
             val end = lineBuffer.indexOf("\n")
             if (end < 0) break
-            processLine(lineBuffer.substring(0, end))
+            processLine(AiContext.stripAnsi(lineBuffer.substring(0, end)))
             lineBuffer.delete(0, end + 1)
         }
         if (lineBuffer.length > MAX_PENDING_LINE_CHARS) {
-            if (capturing) appendOutput(lineBuffer.substring(0, lineBuffer.length - MARKER_LOOKBEHIND).encodeToByteArray())
+            if (capturing) appendOutput(AiContext.stripAnsi(lineBuffer.substring(0, lineBuffer.length - MARKER_LOOKBEHIND)).encodeToByteArray())
             lineBuffer.delete(0, lineBuffer.length - MARKER_LOOKBEHIND)
         }
     }
@@ -358,4 +394,22 @@ private class HeadTailByteBuffer(private val headLimit: Int, private val tailLim
 
 private fun ArrayDeque<Byte>.toByteArrayFast(): ByteArray = ByteArray(size).also { target ->
     forEachIndexed { index, byte -> target[index] = byte }
+}
+
+/** Incremental UTF-8 decoder preserving a multibyte code point split across terminal chunks. */
+private class Utf8ChunkDecoder {
+    private val decoder = Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    private var pending = ByteArray(0)
+
+    fun decode(bytes: ByteArray): String {
+        val inputBytes = pending + bytes
+        val input = ByteBuffer.wrap(inputBytes)
+        val output = CharBuffer.allocate(inputBytes.size.coerceAtLeast(1))
+        decoder.decode(input, output, false)
+        pending = ByteArray(input.remaining()).also(input::get)
+        output.flip()
+        return output.toString()
+    }
 }

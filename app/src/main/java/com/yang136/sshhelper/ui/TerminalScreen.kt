@@ -420,6 +420,7 @@ fun TerminalScreen(
                         onCancelGeneration = { sessionsViewModel.cancelAiGeneration(session.id) },
                         onInterruptCommand = { sessionsViewModel.interruptAiCommand(session.id) },
                         onStopWaiting = { sessionsViewModel.stopAiWaiting(session.id) },
+                        onAnalyzePartial = { sessionsViewModel.analyzePartialAiOutput(session.id, it) },
                         onClear = { sessionsViewModel.clearAi(session.id) },
                         onOpenSettings = onOpenSettings,
                         onClose = { aiHidden = true },

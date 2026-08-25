@@ -102,6 +102,7 @@ fun AiBubble(
     onCancelGeneration: () -> Unit,
     onInterruptCommand: () -> Unit,
     onStopWaiting: () -> Unit,
+    onAnalyzePartial: (String) -> Unit,
     onClear: () -> Unit,
     onOpenSettings: () -> Unit,
     onClose: () -> Unit,
@@ -168,6 +169,7 @@ fun AiBubble(
                     onFillTerminal = onFillTerminal,
                     onInterruptCommand = onInterruptCommand,
                     onStopWaiting = onStopWaiting,
+                    onAnalyzePartial = onAnalyzePartial,
                     modifier = Modifier.weight(1f),
                 )
                 state.error?.let { error ->
@@ -240,6 +242,7 @@ private fun AgentConversation(
     onFillTerminal: (String) -> Unit,
     onInterruptCommand: () -> Unit,
     onStopWaiting: () -> Unit,
+    onAnalyzePartial: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -273,6 +276,7 @@ private fun AgentConversation(
                     onFillTerminal = onFillTerminal,
                     onInterruptCommand = onInterruptCommand,
                     onStopWaiting = onStopWaiting,
+                    onAnalyzePartial = onAnalyzePartial,
                 )
             }
         }
@@ -294,6 +298,7 @@ private fun AgentEntry(
     onFillTerminal: (String) -> Unit,
     onInterruptCommand: () -> Unit,
     onStopWaiting: () -> Unit,
+    onAnalyzePartial: (String) -> Unit,
 ) {
     val isUser = entry.role == AiMessageRole.USER
     Column(
@@ -319,6 +324,7 @@ private fun AgentEntry(
                     waitingForCommand,
                     onInterruptCommand,
                     onStopWaiting,
+                    onAnalyzePartial,
                 )
                 is AiContentBlock.Error -> Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
@@ -482,6 +488,7 @@ private fun CommandResultCard(
     waitingForCommand: Boolean,
     onInterruptCommand: () -> Unit,
     onStopWaiting: () -> Unit,
+    onAnalyzePartial: (String) -> Unit,
 ) {
     Surface(
         modifier = Modifier.testTag("agent_command_result"),
@@ -508,11 +515,13 @@ private fun CommandResultCard(
                 )
             }
             if (result.truncated) Text("输出过长，已保留首尾内容。", style = MaterialTheme.typography.labelSmall)
+            result.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer) }
             if (result.status == CommandExecutionStatus.TIMED_OUT && waitingForCommand) {
                 Text("等待已超时；命令仍可能在远端运行。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onInterruptCommand) { Text("发送 Ctrl-C") }
                     TextButton(onClick = onStopWaiting) { Text("停止采集") }
+                    TextButton(onClick = { onAnalyzePartial(result.suggestionId) }) { Text("分析已有输出") }
                 }
             }
         }

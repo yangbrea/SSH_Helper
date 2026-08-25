@@ -70,6 +70,7 @@ sealed interface AiContentBlock {
         val exitCode: Int? = null,
         val status: CommandExecutionStatus,
         val truncated: Boolean = false,
+        val message: String? = null,
     ) : AiContentBlock
     data class Error(
         override val id: String = UUID.randomUUID().toString(),

@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,6 +147,33 @@ class AiAgentManagerTest {
         assertTrue(client.requests[1].messages.any { it.role == AiMessageRole.TOOL && it.content.orEmpty().contains("/tmp") })
     }
 
+    @Test
+    fun timedOutOutputIsAnalyzedOnlyAfterExplicitUserChoice() = runBlocking {
+        val client = QueueAiClient(
+            listOf(
+                listOf(
+                    AiStreamEvent.ToolCallDelta(0, "call", "propose_terminal_command", "{\"command\":\"tail -f log\",\"summary\":\"观察日志\",\"expectedOutcome\":\"日志输出\"}"),
+                    AiStreamEvent.Completed("tool_calls"),
+                ),
+                listOf(AiStreamEvent.TextDelta("部分输出已分析"), AiStreamEvent.Completed()),
+            ),
+        )
+        val runner = TimeoutAgentRunner()
+        val manager = manager(MutableStateFlow(listOf(sessionState)), client, runner)
+
+        manager.send(id, "看日志", settings)
+        await { !manager.state(id).value.generating }
+        val suggestion = suggestions(manager).single()
+        manager.confirmCommand(id, suggestion.id)
+        await { manager.state(id).value.entries.any { entry -> entry.blocks.any { it is AiContentBlock.CommandResult && it.status == CommandExecutionStatus.TIMED_OUT } } }
+        assertEquals(1, client.requests.size)
+
+        manager.analyzePartial(id, suggestion.id)
+        await { client.requests.size == 2 && !manager.state(id).value.generating }
+
+        assertTrue(client.requests[1].messages.any { it.role == AiMessageRole.TOOL && it.content.orEmpty().contains("partial log") })
+    }
+
     private fun manager(
         sessions: MutableStateFlow<List<ManagedSessionState>>,
         client: AiClient,
@@ -197,4 +225,27 @@ private class FakeAgentRunner(
     override suspend fun interrupt(sessionId: SessionId) = Unit
     override fun stopWaiting(sessionId: SessionId) = Unit
     override fun clear(sessionId: SessionId) = Unit
+}
+
+private class TimeoutAgentRunner : TerminalAgentCommandRunner {
+    private val stop = CompletableDeferred<Unit>()
+
+    override suspend fun execute(
+        sessionId: SessionId,
+        command: String,
+        timeoutMillis: Long,
+        onUpdate: (TerminalCommandUpdate) -> Unit,
+    ): TerminalCommandResult {
+        onUpdate(
+            TerminalCommandUpdate.TimedOut(
+                TerminalCommandResult(CommandExecutionStatus.TIMED_OUT, "partial log", "partial log"),
+            ),
+        )
+        stop.await()
+        return TerminalCommandResult(CommandExecutionStatus.STOPPED, "partial log", "partial log")
+    }
+
+    override suspend fun interrupt(sessionId: SessionId) = Unit
+    override fun stopWaiting(sessionId: SessionId) { stop.complete(Unit) }
+    override fun clear(sessionId: SessionId) { stop.complete(Unit) }
 }

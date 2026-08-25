@@ -89,6 +89,26 @@ class TerminalCommandRunnerTest {
         assertTrue(result.uiOutput.encodeToByteArray().size < 66 * 1024)
         assertTrue(result.modelOutput.encodeToByteArray().size < 18 * 1024)
     }
+
+    @Test
+    fun decodesUtf8AndAnsiSequencesSplitAcrossChunks() = runBlocking {
+        val raw = "中文 \u001B[32mgreen\u001B[0m".encodeToByteArray()
+        val terminal = FakeTerminalIo(
+            rawCommandChunks = listOf(
+                raw.copyOfRange(0, 1),
+                raw.copyOfRange(1, 8),
+                raw.copyOfRange(8, 11),
+                raw.copyOfRange(11, raw.size),
+            ),
+        )
+        val runner = TerminalCommandRunner(terminal, defaultTimeoutMillis = 1_000, probeTimeoutMillis = 500)
+
+        val result = runner.execute(terminal.id, "printf output")
+
+        assertEquals("中文 green", result.uiOutput)
+        assertFalse(result.uiOutput.contains('\uFFFD'))
+        assertFalse(result.uiOutput.contains('\u001B'))
+    }
 }
 
 private class FakeTerminalIo(
@@ -96,6 +116,7 @@ private class FakeTerminalIo(
     private val completeCommands: Boolean = true,
     private val disconnectAfterCommand: Boolean = false,
     private val commandOutput: String = "\u001B[31mhello\u001B[0m\r\nworld",
+    private val rawCommandChunks: List<ByteArray>? = null,
 ) : TerminalIo {
     val id = SessionId("test")
     private val chunks = MutableSharedFlow<TerminalOutputEvent.Chunk>(extraBufferCapacity = 32)
@@ -130,7 +151,13 @@ private class FakeTerminalIo(
         val end = Regex("(__SH_HELPER_END_[a-f0-9]+__:)").find(text)?.groupValues?.get(1) ?: return
         emit(text + "\r\n") // PTY echo must not be captured.
         emit("noise before\r\n${begin.take(13)}")
-        emit(begin.drop(13) + "\r\n$commandOutput\r\n")
+        emit(begin.drop(13) + "\r\n")
+        if (rawCommandChunks != null) {
+            rawCommandChunks.forEach { emitBytes(it) }
+            emit("\r\n")
+        } else {
+            emit("$commandOutput\r\n")
+        }
         when {
             disconnectAfterCommand -> state.value = state.value.copy(connection = ConnectionState.Error("lost"))
             completeCommands -> {
@@ -141,6 +168,10 @@ private class FakeTerminalIo(
     }
 
     private suspend fun emit(text: String) {
-        chunks.emit(TerminalOutputEvent.Chunk(++sequence, text.encodeToByteArray()))
+        emitBytes(text.encodeToByteArray())
+    }
+
+    private suspend fun emitBytes(bytes: ByteArray) {
+        chunks.emit(TerminalOutputEvent.Chunk(++sequence, bytes))
     }
 }
