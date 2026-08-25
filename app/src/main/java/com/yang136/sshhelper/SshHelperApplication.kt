@@ -7,6 +7,9 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.yang136.sshhelper.data.AppDatabase
 import com.yang136.sshhelper.data.HostRepository
 import com.yang136.sshhelper.data.SnippetRepository
+import com.yang136.sshhelper.ai.AiAgentManager
+import com.yang136.sshhelper.ai.OkHttpAiClient
+import com.yang136.sshhelper.ai.TerminalCommandRunner
 import com.yang136.sshhelper.security.AndroidCredentialVault
 import com.yang136.sshhelper.settings.DataStoreSettingsRepository
 import com.yang136.sshhelper.ssh.DefaultSessionManager
@@ -37,6 +40,14 @@ class AppContainer(application: Application) {
     val snippetRepository = SnippetRepository(database)
     val settingsRepository = DataStoreSettingsRepository(application)
     val sessionManager = DefaultSessionManager(application, hostRepository, database.knownHostDao(), credentialVault = credentialVault, settings = settingsRepository)
+    val aiClient = OkHttpAiClient()
+    val terminalCommandRunner = TerminalCommandRunner(sessionManager)
+    val aiAgentManager = AiAgentManager(
+        sessions = sessionManager.sessions,
+        client = aiClient,
+        commandRunner = terminalCommandRunner,
+        recentOutput = sessionManager::recentOutput,
+    )
     val transferManager = DefaultTransferManager(application, database, hostRepository, sessionManager, credentialVault)
     val forwardManager = DefaultForwardManager(application, database, hostRepository, sessionManager, credentialVault)
 

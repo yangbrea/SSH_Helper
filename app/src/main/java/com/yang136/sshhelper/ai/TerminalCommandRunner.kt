@@ -45,11 +45,23 @@ private class SessionManagerTerminalIo(private val sessions: SessionManager) : T
     override suspend fun write(sessionId: SessionId, data: ByteArray) = sessions.write(sessionId, data)
 }
 
+interface TerminalAgentCommandRunner {
+    suspend fun execute(
+        sessionId: SessionId,
+        command: String,
+        timeoutMillis: Long,
+        onUpdate: (TerminalCommandUpdate) -> Unit,
+    ): TerminalCommandResult
+    suspend fun interrupt(sessionId: SessionId)
+    fun stopWaiting(sessionId: SessionId)
+    fun clear(sessionId: SessionId)
+}
+
 class TerminalCommandRunner internal constructor(
     private val terminal: TerminalIo,
     private val defaultTimeoutMillis: Long = 120_000,
     private val probeTimeoutMillis: Long = 8_000,
-) {
+) : TerminalAgentCommandRunner {
     constructor(sessions: SessionManager) : this(SessionManagerTerminalIo(sessions))
 
     private sealed interface Signal {
@@ -64,11 +76,11 @@ class TerminalCommandRunner internal constructor(
     private val confirmedShells = ConcurrentHashMap<SessionId, String>()
     private val random = SecureRandom()
 
-    suspend fun execute(
+    override suspend fun execute(
         sessionId: SessionId,
         command: String,
-        timeoutMillis: Long = defaultTimeoutMillis,
-        onUpdate: (TerminalCommandUpdate) -> Unit = {},
+        timeoutMillis: Long,
+        onUpdate: (TerminalCommandUpdate) -> Unit,
     ): TerminalCommandResult {
         validateCommand(command)?.let {
             return TerminalCommandResult(CommandExecutionStatus.FAILED, "", "", message = it)
@@ -100,15 +112,21 @@ class TerminalCommandRunner internal constructor(
         }
     }
 
-    suspend fun interrupt(sessionId: SessionId) {
+    suspend fun execute(
+        sessionId: SessionId,
+        command: String,
+        onUpdate: (TerminalCommandUpdate) -> Unit = {},
+    ): TerminalCommandResult = execute(sessionId, command, defaultTimeoutMillis, onUpdate)
+
+    override suspend fun interrupt(sessionId: SessionId) {
         if (active.containsKey(sessionId)) terminal.write(sessionId, byteArrayOf(3))
     }
 
-    fun stopWaiting(sessionId: SessionId) {
+    override fun stopWaiting(sessionId: SessionId) {
         active[sessionId]?.signals?.trySend(Signal.Stop)
     }
 
-    fun clear(sessionId: SessionId) {
+    override fun clear(sessionId: SessionId) {
         stopWaiting(sessionId)
         confirmedShells.remove(sessionId)
     }

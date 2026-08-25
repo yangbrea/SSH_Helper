@@ -65,6 +65,17 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
         manager.create(profile, feature)
     fun output(id: SessionId) = manager.output(id)
     fun recentOutput(id: SessionId, maxBytes: Int): ByteArray = manager.recentOutput(id, maxBytes)
+    fun aiState(id: SessionId) = container.aiAgentManager.state(id)
+    fun sendAi(id: SessionId, prompt: String, settings: AppSettings) = viewModelScope.launch {
+        container.aiAgentManager.send(id, prompt, settings)
+    }
+    fun confirmAiCommand(id: SessionId, suggestionId: String) = viewModelScope.launch {
+        container.aiAgentManager.confirmCommand(id, suggestionId)
+    }
+    fun cancelAiGeneration(id: SessionId) = container.aiAgentManager.cancelGeneration(id)
+    fun interruptAiCommand(id: SessionId) = container.aiAgentManager.interruptCommand(id)
+    fun stopAiWaiting(id: SessionId) = container.aiAgentManager.stopWaiting(id)
+    fun clearAi(id: SessionId) = container.aiAgentManager.clear(id)
     fun enableFeature(id: SessionId, feature: SessionFeature) = manager.enableFeature(id, feature)
     fun connect(id: SessionId, credential: Credential, remember: Boolean) = viewModelScope.launch { manager.connect(id, credential, remember) }
     fun send(id: SessionId, bytes: ByteArray) = viewModelScope.launch { manager.write(id, bytes) }
@@ -90,6 +101,7 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
         lastPtySizes.remove(id)
         // Closing one channel must never cancel transfers: they resolve their own SSH session
         // and are decoupled from any single terminal or file UI lifetime.
+        container.aiAgentManager.clear(id)
         manager.close(id)
         after?.invoke()
     }
@@ -99,13 +111,17 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
         lastPtySizes.clear()
         container.transferManager.jobs.value.filter { it.status in setOf(TransferStatus.QUEUED, TransferStatus.RUNNING, TransferStatus.PAUSED, TransferStatus.WAITING_NETWORK, TransferStatus.WAITING_UNLOCK) }
             .forEach { container.transferManager.cancel(it.id) }
+        manager.sessions.value.forEach { container.aiAgentManager.clear(it.id) }
         manager.closeAll()
         after?.invoke()
     }
     fun respondToHostKey(id: SessionId, accept: Boolean) = manager.respondToHostKey(id, accept)
     fun forgetChangedHostKey(id: SessionId) = viewModelScope.launch { manager.forgetChangedHostKey(id) }
     fun closeForHost(hostId: Long, after: () -> Unit) = viewModelScope.launch {
-        manager.sessions.value.filter { it.profile.id == hostId }.forEach { manager.close(it.id) }
+        manager.sessions.value.filter { it.profile.id == hostId }.forEach {
+            container.aiAgentManager.clear(it.id)
+            manager.close(it.id)
+        }
         after()
     }
 
