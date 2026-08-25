@@ -22,6 +22,7 @@ dependencyResolutionManagement {
                 includeGroupByRegex("androidx\\..*")
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google\\.android.*")
+                includeGroupByRegex("com\\.google\\.testing\\.platform.*")
             }
         }
     }
