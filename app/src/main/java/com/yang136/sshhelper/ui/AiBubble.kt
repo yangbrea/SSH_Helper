@@ -2,9 +2,12 @@ package com.yang136.sshhelper.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -31,6 +36,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -45,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,12 +62,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -80,6 +89,7 @@ import com.yang136.sshhelper.ai.AiConversationState
 import com.yang136.sshhelper.ai.AiMessageRole
 import com.yang136.sshhelper.ai.CommandExecutionStatus
 import com.yang136.sshhelper.ai.CommandRisk
+import kotlinx.coroutines.launch
 import com.yang136.sshhelper.ai.CommandSuggestion
 import com.yang136.sshhelper.ai.MarkdownBlock
 import com.yang136.sshhelper.ai.MarkdownContentParser
@@ -144,13 +154,20 @@ fun AiBubble(
     }
 
     if (expanded) {
+        // 注意：高度约束必须放在内容 Column 上，而不能放在 ModalBottomSheet 的
+        // modifier 上。fillMaxHeight 会压缩 sheet 内部约束，使锚点计算里
+        // fullHeight == sheetHeight，Expanded 偏移变成 0 → sheet 渲染在屏幕顶部
+        // （顶底反了）。内容自适应高度后，锚点 Expanded = fullHeight - sheetHeight
+        // 正常生效 → 贴底。
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { expanded = false },
             sheetState = sheetState,
-            modifier = Modifier.fillMaxHeight(0.86f),
+            // 内容区滑动不触发关闭（material3 1.4.0）；关闭只由顶部横杠拖动触发。
+            sheetGesturesEnabled = false,
+            dragHandle = { SheetDragHandle(sheetState) { expanded = false } },
         ) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.86f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 AgentHeader(
                     sessionName = session.displayName,
                     generating = state.generating,
@@ -209,6 +226,50 @@ fun AiBubble(
                 Button(onClick = { highRiskCommand = null; onConfirmCommand(suggestion.id) }) { Text("仍然执行") }
             },
             dismissButton = { TextButton(onClick = { highRiskCommand = null }) { Text("取消") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SheetDragHandle(
+    sheetState: SheetState,
+    onDismissRequest: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val dismissThreshold = with(density) { 60.dp.toPx() }
+    var dragDistance by remember { mutableFloatStateOf(0f) }
+    var dismissed by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        dragDistance = 0f
+                        dismissed = false
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        if (!dismissed) {
+                            dragDistance += dragAmount
+                            if (dragDistance > dismissThreshold) {
+                                dismissed = true
+                                scope.launch { sheetState.hide() }
+                                    .invokeOnCompletion { onDismissRequest() }
+                            }
+                        }
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(width = 36.dp, height = 4.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
         )
     }
 }
@@ -490,13 +551,22 @@ private fun CommandResultCard(
     onStopWaiting: () -> Unit,
     onAnalyzePartial: (String) -> Unit,
 ) {
+    // 默认折叠：执行期间 Partial 更新会持续刷新本卡片，折叠态只显示状态与首行，
+    // 避免把完整终端输出刷进面板。
+    var expanded by remember(result.suggestionId) { mutableStateOf(false) }
     Surface(
         modifier = Modifier.testTag("agent_command_result"),
         color = MaterialTheme.colorScheme.secondaryContainer,
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row {
+            Row(
+                Modifier.fillMaxWidth().clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("终端输出", Modifier.weight(1f), fontWeight = FontWeight.Bold)
                 Text(
                     buildString {
@@ -505,16 +575,35 @@ private fun CommandResultCard(
                     },
                     style = MaterialTheme.typography.labelSmall,
                 )
-            }
-            if (result.output.isNotBlank()) {
-                Text(
-                    result.output,
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                    if (expanded) "收起输出" else "展开输出",
+                    Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
             }
-            if (result.truncated) Text("输出过长，已保留首尾内容。", style = MaterialTheme.typography.labelSmall)
+            if (expanded) {
+                if (result.output.isNotBlank()) {
+                    Text(
+                        result.output,
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (result.truncated) Text("输出过长，已保留首尾内容。", style = MaterialTheme.typography.labelSmall)
+            } else if (result.output.isNotBlank()) {
+                // 折叠态首行预览：单行省略，不横向滚动。
+                Text(
+                    result.output.lineSequence().firstOrNull().orEmpty(),
+                    Modifier.fillMaxWidth(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
             result.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer) }
             if (result.status == CommandExecutionStatus.TIMED_OUT && waitingForCommand) {
                 Text("等待已超时；命令仍可能在远端运行。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
