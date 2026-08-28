@@ -126,6 +126,21 @@ internal fun settingsSummary(
     SettingsDestination.ABOUT -> "版本、功能与开源许可"
 }
 
+internal data class SettingsCategoryUiState(val destination: SettingsDestination, val summary: String)
+
+internal data class SettingsHomeUiState(val categories: List<SettingsCategoryUiState>)
+
+internal fun buildSettingsHomeUiState(
+    settings: AppSettings,
+    vault: String,
+    documentRoots: Int,
+    writebacks: Int,
+) = SettingsHomeUiState(
+    SettingsDestination.entries.map { destination ->
+        SettingsCategoryUiState(destination, settingsSummary(destination, settings, vault, documentRoots, writebacks))
+    },
+)
+
 internal data class AiSettingsDraft(val baseUrl: String, val apiKey: String, val model: String) {
     fun isDirty(settings: AppSettings): Boolean =
         baseUrl != settings.aiBaseUrl || apiKey != settings.aiApiKey || model != settings.aiModel
@@ -226,10 +241,7 @@ fun SettingsScreen(
     ) { padding ->
         when (selected) {
             null -> SettingsHome(
-                settings,
-                vaultState.displayName(),
-                roots.size,
-                writebacks.size,
+                buildSettingsHomeUiState(settings, vaultState.displayName(), roots.size, writebacks.size),
                 Modifier.padding(padding),
             ) { selectedId = it.id }
             SettingsDestination.APPEARANCE -> AppearanceSettings(settings, onThemeModeChange, onThemePresetChange, Modifier.padding(padding))
@@ -267,7 +279,7 @@ private fun SettingsPage(modifier: Modifier = Modifier, content: androidx.compos
 }
 
 @Composable
-private fun SettingsHome(settings: AppSettings, vault: String, roots: Int, writebacks: Int, modifier: Modifier, onDestination: (SettingsDestination) -> Unit) {
+private fun SettingsHome(state: SettingsHomeUiState, modifier: Modifier, onDestination: (SettingsDestination) -> Unit) {
     SettingsPage(modifier) {
         item {
             Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp)) {
@@ -275,10 +287,10 @@ private fun SettingsHome(settings: AppSettings, vault: String, roots: Int, write
                 Text("外观、连接、安全与工具都集中在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        SettingsDestination.entries.forEach { destination ->
-            item(destination.id) {
+        state.categories.forEach { category ->
+            item(category.destination.id) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                    PreferenceAction(destination.icon, destination.title, settingsSummary(destination, settings, vault, roots, writebacks), { onDestination(destination) })
+                    PreferenceAction(category.destination.icon, category.destination.title, category.summary, { onDestination(category.destination) })
                 }
             }
         }

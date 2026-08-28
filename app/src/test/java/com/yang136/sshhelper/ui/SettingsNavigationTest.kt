@@ -23,6 +23,9 @@ class SettingsNavigationTest {
         assertEquals("深色 · 经典琥珀", settingsSummary(SettingsDestination.APPEARANCE, settings, "已锁定", 2, 0))
         assertEquals("2 台主机已授权 · 3 个待恢复", settingsSummary(SettingsDestination.DOCUMENTS, settings, "已锁定", 2, 3))
         assertEquals("deepseek-chat · 已配置", settingsSummary(SettingsDestination.AI, settings, "已锁定", 2, 0))
+        val home = buildSettingsHomeUiState(settings, "已锁定", 2, 3)
+        assertEquals(SettingsDestination.entries.toList(), home.categories.map { it.destination })
+        assertEquals("2 台主机已授权 · 3 个待恢复", home.categories.first { it.destination == SettingsDestination.DOCUMENTS }.summary)
     }
 
     @Test
