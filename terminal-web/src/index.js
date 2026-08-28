@@ -14,10 +14,10 @@ const terminal = new Terminal({
   lineHeight: 1.15,
   scrollback: 10000,
   theme: {
-    background: '#07131f',
+    background: '#000000',
     foreground: '#dff8fb',
     cursor: '#22d3ee',
-    cursorAccent: '#07131f',
+    cursorAccent: '#000000',
     selectionBackground: '#155e7599',
     black: '#07131f',
     red: '#ff7b7b',
@@ -372,6 +372,8 @@ window.sshTerminal = {
     document.documentElement.style.background = value.theme.background;
     document.body.style.background = value.theme.background;
     terminalHost.style.background = value.theme.background;
+    // 终端背景统一由 --terminal-background 驱动（terminal.css 覆盖 viewport 与内边距区域）。
+    document.documentElement.style.setProperty('--terminal-background', value.theme.background);
     requestAnimationFrame(fitAndNotify);
   },
   enterSelectionMode() { setSelectionMode(true); },

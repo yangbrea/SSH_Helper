@@ -35,6 +35,9 @@ val Navy800 = Color(0xFF102B3D)
 val Cyan400 = Color(0xFF22D3EE)
 val Teal400 = Color(0xFF2DD4BF)
 
+/** 终端画布背景恒为纯黑，不随应用浅色/深色模式或预设变化。 */
+internal const val TERMINAL_BLACK = "#000000"
+
 @Immutable
 data class TerminalPalette(
     val background: String,
@@ -196,8 +199,9 @@ fun SshHelperTheme(
     val imageTokens = if (imageActive) imageThemeTokens(imageThemePalette, settings.imageThemeVariant) else null
     val dark = imageTokens?.dark ?: resolveDarkMode(settings.themeMode, systemDark)
     val colors = imageTokens?.let(::imageColorScheme) ?: colorScheme(settings.themePreset, dark)
-    // 图片只接管 Compose 界面；终端继续使用用户保存的预设和主题模式。
-    val terminal = terminalPaletteForSettings(settings, systemDark)
+    // 终端始终使用所选预设的深色调色板且背景恒为纯黑：图片主题与浅色模式只接管 Compose
+    // 界面，绝不改变终端画布的背景。
+    val terminal = terminalPaletteForTerminal(settings)
     val status = SshStatusColors(
         connected = if (dark) Color(0xFF62D69A) else Color(0xFF16734B),
         connecting = if (dark) Color(0xFF70C7FF) else Color(0xFF00658A),
@@ -256,8 +260,13 @@ internal fun resolveDarkMode(mode: ThemeMode, systemDark: Boolean): Boolean = wh
     ThemeMode.DARK -> true
 }
 
-internal fun terminalPaletteForSettings(settings: AppSettings, systemDark: Boolean): TerminalPalette =
-    terminalPalette(settings.themePreset, resolveDarkMode(settings.themeMode, systemDark))
+/**
+ * 终端调色板：无论应用处于浅色还是深色模式，始终取所选预设的深色调色板，
+ * 并把背景与光标底色强制为纯黑（终端背景保持黑色，文字保持浅色可读）。
+ */
+internal fun terminalPaletteForTerminal(settings: AppSettings): TerminalPalette =
+    terminalPalette(settings.themePreset, dark = true)
+        .let { it.copy(background = TERMINAL_BLACK, cursorAccent = TERMINAL_BLACK) }
 
 internal fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when (preset) {
     ThemePreset.OCEAN -> if (dark) OceanDark else OceanLight

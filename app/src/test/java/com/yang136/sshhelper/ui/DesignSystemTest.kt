@@ -52,4 +52,25 @@ class DesignSystemTest {
         assertEquals("#faf8f2", terminalPalette(ThemePreset.AMBER, false).background)
         assertEquals("#b8c4d6", terminalPalette(ThemePreset.VIOLET, true).cursor)
     }
+
+    @Test
+    fun terminalPalettes_lightAndDarkVariantsStayStable() {
+        val expected = mapOf(
+            (ThemePreset.OCEAN to true) to Triple("#07131f", "#dff8fb", "#22d3ee"),
+            (ThemePreset.OCEAN to false) to Triple("#f8fbfc", "#15242b", "#22d3ee"),
+            (ThemePreset.EMERALD to true) to Triple("#06130e", "#e2ffe9", "#35e07f"),
+            (ThemePreset.EMERALD to false) to Triple("#f8fbfc", "#15242b", "#35e07f"),
+            (ThemePreset.AMBER to true) to Triple("#0b0b0d", "#f2ecdd", "#d9b45f"),
+            (ThemePreset.AMBER to false) to Triple("#faf8f2", "#29251d", "#765b12"),
+            (ThemePreset.VIOLET to true) to Triple("#0d1117", "#e9eef5", "#b8c4d6"),
+            (ThemePreset.VIOLET to false) to Triple("#f5f7fa", "#1a2028", "#465a70"),
+        )
+        expected.forEach { (key, colors) ->
+            val (preset, dark) = key
+            val palette = terminalPalette(preset, dark)
+            assertEquals("${preset} dark=$dark 背景", colors.first, palette.background)
+            assertEquals("${preset} dark=$dark 前景", colors.second, palette.foreground)
+            assertEquals("${preset} dark=$dark 光标", colors.third, palette.cursor)
+        }
+    }
 }

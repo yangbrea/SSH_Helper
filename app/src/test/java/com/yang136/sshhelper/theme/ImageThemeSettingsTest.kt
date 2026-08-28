@@ -9,7 +9,7 @@ import com.yang136.sshhelper.settings.coerceImageOverlayStrength
 import com.yang136.sshhelper.settings.effectiveThemeMode
 import com.yang136.sshhelper.settings.defaultImageOverlayStrength
 import com.yang136.sshhelper.settings.parseThemeSource
-import com.yang136.sshhelper.ui.theme.terminalPaletteForSettings
+import com.yang136.sshhelper.ui.theme.terminalPaletteForTerminal
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -52,7 +52,7 @@ class ImageThemeSettingsTest {
     }
 
     @Test
-    fun `image theme never replaces saved terminal preset or mode`() {
+    fun `image theme never replaces saved terminal preset`() {
         val settings = AppSettings(
             themeMode = ThemeMode.DARK,
             themePreset = ThemePreset.AMBER,
@@ -60,9 +60,21 @@ class ImageThemeSettingsTest {
             imageThemeVariant = ImageThemeVariant.BRIGHT,
         )
 
-        val terminal = terminalPaletteForSettings(settings, systemDark = false)
+        val terminal = terminalPaletteForTerminal(settings)
 
-        assertEquals("#0b0b0d", terminal.background)
+        assertEquals("#000000", terminal.background)
+        assertEquals("#000000", terminal.cursorAccent)
         assertEquals("#d9b45f", terminal.cursor)
+    }
+
+    @Test
+    fun `terminal background stays black in every mode and preset`() {
+        ThemePreset.entries.forEach { preset ->
+            ThemeMode.entries.forEach { mode ->
+                val terminal = terminalPaletteForTerminal(AppSettings(themeMode = mode, themePreset = preset))
+                assertEquals("${preset}/${mode} 背景必须恒黑", "#000000", terminal.background)
+                assertEquals("${preset}/${mode} 光标底色必须恒黑", "#000000", terminal.cursorAccent)
+            }
+        }
     }
 }

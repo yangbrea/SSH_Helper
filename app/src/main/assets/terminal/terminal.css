@@ -6,7 +6,7 @@ body {
   padding: 0;
   overflow: hidden;
   overscroll-behavior: none;
-  background: #07131f;
+  background: var(--terminal-background, #000000);
 }
 
 #terminal {
@@ -15,7 +15,7 @@ body {
   box-sizing: border-box;
   padding: 0;
   overflow: hidden;
-  background: #07131f;
+  background: var(--terminal-background, #000000);
 }
 
 #terminal > .xterm {
@@ -26,4 +26,12 @@ body {
 .xterm, .xterm-screen, .xterm-viewport {
   touch-action: none;
   -webkit-touch-callout: none;
+}
+
+/* 覆盖 xterm.css 中 .xterm-viewport 的固定黑色背景：
+   终端背景统一由 --terminal-background 驱动（setAppearance 同步），
+   内边距区域与滚动视口始终与当前终端背景一致。 */
+#terminal > .xterm,
+.xterm .xterm-viewport {
+  background-color: var(--terminal-background, #000000);
 }

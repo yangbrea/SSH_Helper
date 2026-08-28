@@ -309,6 +309,7 @@ fun TerminalScreen(
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 TerminalWebView(
                     controller = controller,
+                    initialBackground = terminalPalette.background,
                     onInput = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
                     onResize = { columns, rows -> current?.let { sessionsViewModel.resize(it.id, columns, rows) } },
                     onReady = {},
@@ -1101,6 +1102,7 @@ private class TerminalBridge(
 @Composable
 private fun TerminalWebView(
     controller: TerminalController,
+    initialBackground: String,
     onInput: (ByteArray) -> Unit,
     onResize: (Int, Int) -> Unit,
     onReady: () -> Unit,
@@ -1113,7 +1115,8 @@ private fun TerminalWebView(
                 .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
                 .build()
             WebView(context).apply {
-                setBackgroundColor(Color.rgb(7, 19, 31))
+                // WebView 绑定时立即应用已保存的终端背景色，避免首帧深色闪烁。
+                setBackgroundColor(Color.parseColor(initialBackground))
                 isFocusable = true
                 isFocusableInTouchMode = true
                 settings.javaScriptEnabled = true
