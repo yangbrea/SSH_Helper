@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -18,10 +21,28 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    // Release signing reads credentials from ~/.android/ssh_helper-release.properties
+    // (kept outside the repo). Without that file the release build stays unsigned.
+    val releaseSigning = Properties().apply {
+        val file = File(System.getProperty("user.home"), ".android/ssh_helper-release.properties")
+        if (file.isFile) FileInputStream(file).use { load(it) }
+    }
+    signingConfigs {
+        if (releaseSigning.isNotEmpty()) {
+            create("release") {
+                storeFile = file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigning.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
