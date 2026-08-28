@@ -104,41 +104,63 @@ private val EmeraldLight = lightColorScheme(
 )
 
 private val AmberDark = darkColorScheme(
-    primary = Color(0xFFFFB84D),
-    secondary = Color(0xFFE8C07A),
-    background = Color(0xFF171007),
-    surface = Color(0xFF261A0A),
-    surfaceVariant = Color(0xFF3A2912),
-    onPrimary = Color(0xFF3D2700),
-    onBackground = Color(0xFFFFF1D6),
-    onSurface = Color(0xFFFFF1D6),
+    primary = Color(0xFFD9B45F),
+    secondary = Color(0xFFA98D50),
+    background = Color(0xFF0B0B0D),
+    surface = Color(0xFF15151A),
+    surfaceVariant = Color(0xFF22222B),
+    onPrimary = Color(0xFF241A00),
+    onBackground = Color(0xFFF2ECDD),
+    onSurface = Color(0xFFF2ECDD),
+    onSurfaceVariant = Color(0xFFB3AC9C),
+    surfaceContainer = Color(0xFF15151A),
+    surfaceContainerHigh = Color(0xFF202027),
+    outline = Color(0xFF7C7565),
 )
 
 private val AmberLight = lightColorScheme(
-    primary = Color(0xFF8A5700),
-    secondary = Color(0xFF735C2E),
-    background = Color(0xFFFFF9EF),
-    surface = Color.White,
-    surfaceVariant = Color(0xFFF3E5C9),
+    primary = Color(0xFF765B12),
+    secondary = Color(0xFF6E5F3C),
+    background = Color(0xFFFAF8F2),
+    surface = Color(0xFFFFFFFD),
+    surfaceVariant = Color(0xFFECE7DA),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF29251D),
+    onSurface = Color(0xFF29251D),
+    onSurfaceVariant = Color(0xFF625D51),
+    surfaceContainer = Color(0xFFF3F0E7),
+    surfaceContainerHigh = Color(0xFFECE7DA),
+    outline = Color(0xFF817A6B),
 )
 
 private val VioletDark = darkColorScheme(
-    primary = Color(0xFFB388FF),
-    secondary = Color(0xFFD0A6FF),
-    background = Color(0xFF100A1D),
-    surface = Color(0xFF1B1230),
-    surfaceVariant = Color(0xFF2D2048),
-    onPrimary = Color(0xFF2B0B5A),
-    onBackground = Color(0xFFEFE5FF),
-    onSurface = Color(0xFFEFE5FF),
+    primary = Color(0xFFB8C4D6),
+    secondary = Color(0xFF8FA7B8),
+    background = Color(0xFF0D1117),
+    surface = Color(0xFF161C24),
+    surfaceVariant = Color(0xFF232C37),
+    onPrimary = Color(0xFF202832),
+    onBackground = Color(0xFFE9EEF5),
+    onSurface = Color(0xFFE9EEF5),
+    onSurfaceVariant = Color(0xFFB7C1CE),
+    surfaceContainer = Color(0xFF161C24),
+    surfaceContainerHigh = Color(0xFF202833),
+    outline = Color(0xFF718090),
 )
 
 private val VioletLight = lightColorScheme(
-    primary = Color(0xFF7040B8),
-    secondary = Color(0xFF73558F),
-    background = Color(0xFFFAF7FF),
+    primary = Color(0xFF465A70),
+    secondary = Color(0xFF526B79),
+    background = Color(0xFFF5F7FA),
     surface = Color.White,
-    surfaceVariant = Color(0xFFECE2FA),
+    surfaceVariant = Color(0xFFE1E7ED),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF1A2028),
+    onSurface = Color(0xFF1A2028),
+    onSurfaceVariant = Color(0xFF515C68),
+    surfaceContainer = Color(0xFFEDF1F5),
+    surfaceContainerHigh = Color(0xFFE1E7ED),
+    outline = Color(0xFF6E7B89),
 )
 
 private val SshTypography = Typography(
@@ -188,18 +210,24 @@ internal fun resolveDarkMode(mode: ThemeMode, systemDark: Boolean): Boolean = wh
     ThemeMode.DARK -> true
 }
 
-private fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when (preset) {
+internal fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when (preset) {
     ThemePreset.OCEAN -> if (dark) OceanDark else OceanLight
     ThemePreset.EMERALD -> if (dark) EmeraldDark else EmeraldLight
     ThemePreset.AMBER -> if (dark) AmberDark else AmberLight
     ThemePreset.VIOLET -> if (dark) VioletDark else VioletLight
 }
 
-private fun terminalPalette(preset: ThemePreset, dark: Boolean): TerminalPalette = when (preset) {
+internal fun terminalPalette(preset: ThemePreset, dark: Boolean): TerminalPalette = when (preset) {
     ThemePreset.OCEAN -> oceanTerminalPalette(dark)
     ThemePreset.EMERALD -> terminalPaletteBase(dark, "#06130e", "#e2ffe9", "#35e07f", "#143d2a")
-    ThemePreset.AMBER -> terminalPaletteBase(dark, "#171007", "#fff1d6", "#ffb84d", "#4a3213")
-    ThemePreset.VIOLET -> terminalPaletteBase(dark, "#100a1d", "#efe5ff", "#b388ff", "#352354")
+    ThemePreset.AMBER -> terminalPaletteBase(
+        dark, "#0b0b0d", "#f2ecdd", "#d9b45f", "#4a4025",
+        "#faf8f2", "#29251d", "#765b12", "#ddd2b5",
+    )
+    ThemePreset.VIOLET -> terminalPaletteBase(
+        dark, "#0d1117", "#e9eef5", "#b8c4d6", "#344354",
+        "#f5f7fa", "#1a2028", "#465a70", "#ced8e3",
+    )
 }
 
 private fun oceanTerminalPalette(dark: Boolean): TerminalPalette =
@@ -211,22 +239,28 @@ private fun terminalPaletteBase(
     darkForeground: String,
     accent: String,
     selection: String,
+    lightBackground: String = "#f8fbfc",
+    lightForeground: String = "#15242b",
+    lightAccent: String = accent,
+    lightSelection: String = selection,
 ): TerminalPalette {
-    val background = if (dark) darkBackground else "#f8fbfc"
-    val foreground = if (dark) darkForeground else "#15242b"
+    val background = if (dark) darkBackground else lightBackground
+    val foreground = if (dark) darkForeground else lightForeground
+    val activeAccent = if (dark) accent else lightAccent
+    val activeSelection = if (dark) selection else lightSelection
     return TerminalPalette(
         background = background,
         foreground = foreground,
-        cursor = accent,
+        cursor = activeAccent,
         cursorAccent = background,
-        selectionBackground = "${selection}99",
+        selectionBackground = "${activeSelection}99",
         black = if (dark) darkBackground else "#263238",
         red = "#ff6b6b",
         green = "#2dcf86",
         yellow = "#d7a51e",
         blue = "#4d9df8",
         magenta = "#b878e8",
-        cyan = accent,
+        cyan = activeAccent,
         white = if (dark) darkForeground else "#e8eef0",
         brightBlack = "#607d8b",
         brightRed = "#ff9292",

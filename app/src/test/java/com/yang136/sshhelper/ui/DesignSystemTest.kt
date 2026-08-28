@@ -7,6 +7,8 @@ import com.yang136.sshhelper.settings.ThemePreset
 import com.yang136.sshhelper.ui.design.SshStatusColors
 import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.theme.resolveDarkMode
+import com.yang136.sshhelper.ui.theme.colorScheme
+import com.yang136.sshhelper.ui.theme.terminalPalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -39,5 +41,15 @@ class DesignSystemTest {
         assertFalse(resolveDarkMode(ThemeMode.LIGHT, true))
         assertTrue(resolveDarkMode(ThemeMode.DARK, false))
         assertEquals(ThemePreset.VIOLET, AppSettings(themePreset = ThemePreset.VIOLET).themePreset)
+    }
+
+    @Test
+    fun replacementPresets_keepStableEnumsAndUseNewPalettes() {
+        assertEquals("曜石金", ThemePreset.AMBER.displayName())
+        assertEquals("北境灰", ThemePreset.VIOLET.displayName())
+        assertEquals(Color(0xFFD9B45F), colorScheme(ThemePreset.AMBER, true).primary)
+        assertEquals(Color(0xFF0D1117), colorScheme(ThemePreset.VIOLET, true).background)
+        assertEquals("#faf8f2", terminalPalette(ThemePreset.AMBER, false).background)
+        assertEquals("#b8c4d6", terminalPalette(ThemePreset.VIOLET, true).cursor)
     }
 }

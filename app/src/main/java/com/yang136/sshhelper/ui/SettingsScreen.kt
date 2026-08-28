@@ -154,8 +154,8 @@ private data class ThemePreview(val preset: ThemePreset, val background: Color, 
 private val themePreviews = listOf(
     ThemePreview(ThemePreset.OCEAN, Color(0xFF07131F), Color(0xFF22D3EE)),
     ThemePreview(ThemePreset.EMERALD, Color(0xFF06130E), Color(0xFF35E07F)),
-    ThemePreview(ThemePreset.AMBER, Color(0xFF171007), Color(0xFFFFB84D)),
-    ThemePreview(ThemePreset.VIOLET, Color(0xFF100A1D), Color(0xFFB388FF)),
+    ThemePreview(ThemePreset.AMBER, Color(0xFF0B0B0D), Color(0xFFD9B45F)),
+    ThemePreview(ThemePreset.VIOLET, Color(0xFF0D1117), Color(0xFFB8C4D6)),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -495,5 +495,5 @@ private fun VaultState.displayName(): String = when (this) {
 }
 
 internal fun ThemeMode.displayName(): String = when (this) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "浅色"; ThemeMode.DARK -> "深色" }
-internal fun ThemePreset.displayName(): String = when (this) { ThemePreset.OCEAN -> "深海蓝"; ThemePreset.EMERALD -> "矩阵绿"; ThemePreset.AMBER -> "经典琥珀"; ThemePreset.VIOLET -> "星云紫" }
+internal fun ThemePreset.displayName(): String = when (this) { ThemePreset.OCEAN -> "深海蓝"; ThemePreset.EMERALD -> "矩阵绿"; ThemePreset.AMBER -> "曜石金"; ThemePreset.VIOLET -> "北境灰" }
 private fun <T> List<T>.swap(first: Int, second: Int): List<T> = toMutableList().apply { val value = this[first]; this[first] = this[second]; this[second] = value }
