@@ -62,6 +62,8 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.security.VaultState
+import com.yang136.sshhelper.ui.design.SshSectionHeader
+import com.yang136.sshhelper.ui.design.SshTopAppBar
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,6 +82,10 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
     val requestBack = {
         if (state.isDirty) confirmDiscard = true else onBack()
     }
+    val saveHost = {
+        val save: () -> Unit = { scope.launch { if (vm.save() != null) onBack() }; Unit }
+        if (state.rememberCredential && vaultState == VaultState.Locked) onUnlockVault(save) else save()
+    }
     BackHandler(onBack = requestBack)
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -96,23 +102,32 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (hostId == 0L) "添加主机" else "编辑主机") },
+            SshTopAppBar(
+                title = if (hostId == 0L) "添加主机" else "编辑主机",
+                subtitle = if (hostId == 0L) "创建安全连接配置" else state.name.ifBlank { "连接配置" },
                 navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
             )
+        },
+        bottomBar = {
+            Surface(shadowElevation = 8.dp, tonalElevation = 3.dp) {
+                Button(onClick = saveHost, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(if (hostId == 0L) "创建主机" else "保存修改")
+                }
+            }
         },
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SshSectionHeader("基本信息", summary = "名称与服务器地址")
             OutlinedTextField(state.name, { vm.update { s -> s.copy(name = it) } }, Modifier.fillMaxWidth(), label = { Text("连接名称") }, singleLine = true)
             OutlinedTextField(state.hostname, { vm.update { s -> s.copy(hostname = it) } }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("192.168.1.10 或 example.com") }, singleLine = true)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(state.port, { vm.update { s -> s.copy(port = it.filter(Char::isDigit)) } }, Modifier.weight(.35f), label = { Text("端口") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 OutlinedTextField(state.username, { vm.update { s -> s.copy(username = it) } }, Modifier.weight(.65f), label = { Text("用户名") }, singleLine = true)
             }
-            Text("认证方式", style = MaterialTheme.typography.labelLarge)
+            SshSectionHeader("认证", summary = if (state.authType == AuthType.PASSWORD) "密码" else "私钥")
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FilterChip(selected = state.authType == AuthType.PASSWORD, onClick = { vm.update { it.copy(authType = AuthType.PASSWORD) } }, label = { Text("密码") })
                 FilterChip(selected = state.authType == AuthType.PRIVATE_KEY, onClick = { vm.update { it.copy(authType = AuthType.PRIVATE_KEY) } }, label = { Text("私钥") }, leadingIcon = { Icon(Icons.Default.Key, null) })
@@ -128,12 +143,29 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                     Text("最多尝试 3 次；认证失败不会自动重试", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            if (state.rememberCredential && state.authType == AuthType.PASSWORD) {
+                OutlinedTextField(state.password, { vm.update { s -> s.copy(password = it) } }, Modifier.fillMaxWidth(), label = { Text(if (hostId == 0L) "密码" else "新密码（留空则不修改）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            }
+            if (state.authType == AuthType.PRIVATE_KEY) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { keyPicker.launch(arrayOf("application/*", "text/*")) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Key, null)
+                        Text(if (state.privateKeyName == null) " 选择私钥文件" else " ${state.privateKeyName}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(onClick = { showGenerateKeyDialog = true }, modifier = Modifier.weight(1f)) { Text("生成密钥对") }
+                }
+                if (state.rememberCredential) {
+                    OutlinedTextField(state.passphrase, { vm.update { s -> s.copy(passphrase = it) } }, Modifier.fillMaxWidth(), label = { Text("私钥口令（可选）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                }
+            }
             val allHosts = vm.hosts.collectAsStateWithLifecycle().value
+            SshSectionHeader("路由", summary = if (state.jumpHostId == null) "直连" else "经跳板机")
             RouteSection(
                 state = state,
                 hosts = allHosts,
                 onJumpChange = { id -> vm.update { it.copy(jumpHostId = id) } },
             )
+            SshSectionHeader("代理", summary = state.proxyType?.name ?: "未使用")
             ProxySection(
                 proxyType = state.proxyType,
                 proxyHost = state.proxyHost,
@@ -142,26 +174,7 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                 proxyPassword = state.proxyPassword,
                 onChange = { update -> vm.update(update) },
             )
-            if (state.rememberCredential && state.authType == AuthType.PASSWORD) {
-                OutlinedTextField(state.password, { vm.update { s -> s.copy(password = it) } }, Modifier.fillMaxWidth(), label = { Text(if (hostId == 0L) "密码" else "新密码（留空则不修改）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            }
-            if (state.authType == AuthType.PRIVATE_KEY) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = { keyPicker.launch(arrayOf("application/*", "text/*")) },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.Key, null)
-                        Text(if (state.privateKeyName == null) " 选择私钥文件" else " ${state.privateKeyName}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    OutlinedButton(onClick = { showGenerateKeyDialog = true }, modifier = Modifier.weight(1f)) {
-                        Text("生成密钥对")
-                    }
-                }
-                if (state.rememberCredential) {
-                    OutlinedTextField(state.passphrase, { vm.update { s -> s.copy(passphrase = it) } }, Modifier.fillMaxWidth(), label = { Text("私钥口令（可选）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                }
-            }
+            SshSectionHeader("系统集成", summary = if (documentAccessEnabled) "系统文件访问已授权" else "应用内使用")
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
@@ -200,13 +213,6 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                 }
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(
-                onClick = {
-                    val save: () -> Unit = { scope.launch { if (vm.save() != null) onBack() }; Unit }
-                    if (state.rememberCredential && vaultState == VaultState.Locked) onUnlockVault(save) else save()
-                },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) { Text("保存") }
         }
     }
 
