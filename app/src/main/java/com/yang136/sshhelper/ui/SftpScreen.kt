@@ -53,6 +53,8 @@ import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +69,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -105,6 +110,9 @@ import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.CredentialRole
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
+import com.yang136.sshhelper.ui.design.SshStatusBadge
+import com.yang136.sshhelper.ui.design.SshStatusTone
+import com.yang136.sshhelper.ui.design.SshTopAppBar
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 
@@ -113,23 +121,15 @@ private enum class PaneMode { BROWSE, SEARCH, SELECTION }
 
 @Composable
 private fun CompactPaneSwitcher(pane: MobilePane, enabled: Boolean, onPane: (MobilePane) -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Row(Modifier.height(40.dp).padding(3.dp)) {
-            listOf(MobilePane.REMOTE to "远程", MobilePane.LOCAL to "本地").forEach { (item, label) ->
-                Surface(
-                    modifier = Modifier.weight(1f).fillMaxHeight().clickable(enabled = enabled) { onPane(item) },
-                    color = if (pane == item) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(label, style = MaterialTheme.typography.labelLarge, color = if (pane == item) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        listOf(MobilePane.REMOTE to "远程", MobilePane.LOCAL to "本地").forEachIndexed { index, (item, label) ->
+            SegmentedButton(
+                selected = pane == item,
+                onClick = { onPane(item) },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index, 2),
+                label = { Text(label) },
+            )
         }
     }
 }
@@ -202,17 +202,15 @@ fun SftpScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(session?.displayName ?: "SFTP 文件", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(session?.connection.sftpLabel(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                    }
-                },
+            SshTopAppBar(
+                title = session?.displayName ?: "SFTP 文件",
+                subtitle = session?.connection.sftpLabel(),
                 navigationIcon = { IconButton(onClick = handleBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
                     IconButton(onClick = { showTransfers = true }) {
-                        Box { Icon(Icons.Default.Download, "传输任务"); if (transfers.any { it.status.isActive() }) Text(transfers.count { it.status.isActive() }.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                        BadgedBox(badge = { val count = transfers.count { it.status.isActive() }; if (count > 0) Badge { Text(count.toString()) } }) {
+                            Icon(Icons.Default.Download, "传输任务")
+                        }
                     }
                 },
             )
@@ -221,12 +219,14 @@ fun SftpScreen(
         bottomBar = {
             val active = transfers.filter { it.status.isActive() }
             if (active.isNotEmpty()) {
-                Column(Modifier.fillMaxWidth().clickable { showTransfers = true }.padding(10.dp)) {
-                    Text("${active.size} 个传输任务", style = MaterialTheme.typography.labelMedium)
-                    LinearProgressIndicator(
-                        progress = { active.map(TransferJob::progress).average().toFloat() },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                Surface(tonalElevation = 3.dp, shadowElevation = 5.dp) {
+                    Column(Modifier.fillMaxWidth().clickable { showTransfers = true }.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("传输状态", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                            SshStatusBadge("${active.size} 个进行中", SshStatusTone.CONNECTING)
+                        }
+                        LinearProgressIndicator(progress = { active.map(TransferJob::progress).average().toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    }
                 }
             }
         },
