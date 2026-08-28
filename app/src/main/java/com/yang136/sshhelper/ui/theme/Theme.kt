@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -18,6 +19,9 @@ import androidx.compose.ui.unit.sp
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
+import com.yang136.sshhelper.settings.ThemeSource
+import com.yang136.sshhelper.theme.ImageThemePalette
+import com.yang136.sshhelper.theme.imageThemeTokens
 import com.yang136.sshhelper.ui.design.LocalSshMotion
 import com.yang136.sshhelper.ui.design.LocalSshSpacing
 import com.yang136.sshhelper.ui.design.LocalSshStatusColors
@@ -182,17 +186,25 @@ private val SshShapes = Shapes(
 )
 
 @Composable
-fun SshHelperTheme(settings: AppSettings = AppSettings(), content: @Composable () -> Unit) {
-    val dark = resolveDarkMode(settings.themeMode, isSystemInDarkTheme())
-    val colors = colorScheme(settings.themePreset, dark)
-    val terminal = terminalPalette(settings.themePreset, dark)
+fun SshHelperTheme(
+    settings: AppSettings = AppSettings(),
+    imageThemePalette: ImageThemePalette? = null,
+    content: @Composable () -> Unit,
+) {
+    val systemDark = isSystemInDarkTheme()
+    val imageActive = settings.themeSource == ThemeSource.IMAGE && imageThemePalette != null
+    val imageTokens = if (imageActive) imageThemeTokens(imageThemePalette, settings.imageThemeVariant) else null
+    val dark = imageTokens?.dark ?: resolveDarkMode(settings.themeMode, systemDark)
+    val colors = imageTokens?.let(::imageColorScheme) ?: colorScheme(settings.themePreset, dark)
+    // 图片只接管 Compose 界面；终端继续使用用户保存的预设和主题模式。
+    val terminal = terminalPaletteForSettings(settings, systemDark)
     val status = SshStatusColors(
         connected = if (dark) Color(0xFF62D69A) else Color(0xFF16734B),
-        connecting = colors.primary,
+        connecting = if (dark) Color(0xFF70C7FF) else Color(0xFF00658A),
         waiting = if (dark) Color(0xFFE8C96B) else Color(0xFF756000),
         warning = if (dark) Color(0xFFFFB86A) else Color(0xFF9B5200),
-        error = colors.error,
-        offline = colors.onSurfaceVariant,
+        error = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
+        offline = if (dark) Color(0xFFAAB3BC) else Color(0xFF5F6871),
     )
     androidx.compose.runtime.CompositionLocalProvider(
         LocalTerminalPalette provides terminal,
@@ -204,11 +216,48 @@ fun SshHelperTheme(settings: AppSettings = AppSettings(), content: @Composable (
     }
 }
 
+internal fun imageColorScheme(tokens: com.yang136.sshhelper.theme.ImageThemeTokens): ColorScheme {
+    val primary = Color(tokens.primary)
+    val secondary = Color(tokens.secondary)
+    val background = Color(tokens.background)
+    val surface = Color(tokens.surface)
+    val surfaceVariant = Color(tokens.surfaceVariant)
+    val onBackground = Color(tokens.onBackground)
+    val containerAmount = if (tokens.dark) .28f else .14f
+    return (if (tokens.dark) darkColorScheme() else lightColorScheme()).copy(
+        primary = primary,
+        onPrimary = Color(tokens.onPrimary),
+        primaryContainer = lerp(surface, primary, containerAmount),
+        onPrimaryContainer = onBackground,
+        secondary = secondary,
+        onSecondary = Color(tokens.onSecondary),
+        secondaryContainer = lerp(surface, secondary, containerAmount),
+        onSecondaryContainer = onBackground,
+        tertiary = lerp(primary, secondary, .5f),
+        background = background,
+        onBackground = onBackground,
+        surface = surface,
+        onSurface = onBackground,
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = Color(tokens.onSurfaceVariant),
+        outline = Color(tokens.outline),
+        outlineVariant = lerp(surfaceVariant, Color(tokens.outline), .52f),
+        surfaceContainerLowest = if (tokens.dark) lerp(background, Color.Black, .16f) else Color.White,
+        surfaceContainerLow = lerp(background, surface, .55f),
+        surfaceContainer = surface,
+        surfaceContainerHigh = lerp(surface, surfaceVariant, .55f),
+        surfaceContainerHighest = surfaceVariant,
+    )
+}
+
 internal fun resolveDarkMode(mode: ThemeMode, systemDark: Boolean): Boolean = when (mode) {
     ThemeMode.SYSTEM -> systemDark
     ThemeMode.LIGHT -> false
     ThemeMode.DARK -> true
 }
+
+internal fun terminalPaletteForSettings(settings: AppSettings, systemDark: Boolean): TerminalPalette =
+    terminalPalette(settings.themePreset, resolveDarkMode(settings.themeMode, systemDark))
 
 internal fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when (preset) {
     ThemePreset.OCEAN -> if (dark) OceanDark else OceanLight

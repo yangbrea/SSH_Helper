@@ -274,6 +274,7 @@ fun TerminalScreen(
                         DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { showMoreMenu = false; current?.let { sessionsViewModel.disconnect(it.id) } })
                     }
                 },
+                allowImageBackground = false,
             )
             if (hostSessions.isNotEmpty()) {
                 PrimaryScrollableTabRow(selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0), edgePadding = 4.dp) {

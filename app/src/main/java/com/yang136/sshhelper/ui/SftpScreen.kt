@@ -201,6 +201,7 @@ fun SftpScreen(
     }
 
     Scaffold(
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = session?.displayName ?: "SFTP 文件",

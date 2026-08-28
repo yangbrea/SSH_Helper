@@ -101,6 +101,7 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
     }
 
     Scaffold(
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = if (hostId == 0L) "添加主机" else "编辑主机",

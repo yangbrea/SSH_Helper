@@ -1,8 +1,15 @@
 package com.yang136.sshhelper.ui
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +38,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
@@ -39,6 +49,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -65,9 +76,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -85,6 +103,12 @@ import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
+import com.yang136.sshhelper.settings.ThemeSource
+import com.yang136.sshhelper.settings.ImageThemeVariant
+import com.yang136.sshhelper.settings.MIN_IMAGE_OVERLAY_STRENGTH
+import com.yang136.sshhelper.settings.MAX_IMAGE_OVERLAY_STRENGTH
+import com.yang136.sshhelper.theme.ImageThemeState
+import com.yang136.sshhelper.theme.imageThemeTokens
 import com.yang136.sshhelper.ui.design.PreferenceAction
 import com.yang136.sshhelper.ui.design.PreferenceGroup
 import com.yang136.sshhelper.ui.design.PreferenceSwitch
@@ -117,7 +141,11 @@ internal fun settingsSummary(
     documentRoots: Int,
     writebacks: Int,
 ): String = when (destination) {
-    SettingsDestination.APPEARANCE -> "${settings.themeMode.displayName()} · ${settings.themePreset.displayName()}"
+    SettingsDestination.APPEARANCE -> if (settings.themeSource == ThemeSource.IMAGE) {
+        "图片主题 · ${settings.imageThemeVariant.label}"
+    } else {
+        "${settings.themeMode.displayName()} · ${settings.themePreset.displayName()}"
+    }
     SettingsDestination.TERMINAL -> "${settings.terminalFontSize} px · ${settings.extraKeys.size} 个控制键"
     SettingsDestination.AI -> if (settings.aiApiKey.isBlank()) "未配置 API Key" else "${settings.aiModel} · 已配置"
     SettingsDestination.CONNECTIONS -> if (settings.forwardReconnectAfterLock) "允许活动隧道锁屏后重连" else "锁屏后等待解锁"
@@ -162,8 +190,16 @@ private val themePreviews = listOf(
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    imageThemeState: ImageThemeState,
     onThemeModeChange: (ThemeMode) -> Unit,
     onThemePresetChange: (ThemePreset) -> Unit,
+    onThemeSourceChange: (ThemeSource) -> Unit,
+    onImportImageTheme: (Uri, Float) -> Unit,
+    onImageVariantChange: (ImageThemeVariant) -> Unit,
+    onImageOverlayChange: (Float) -> Unit,
+    onSelectImageTheme: (String) -> Unit,
+    onDeleteImageTheme: (String) -> Unit,
+    onClearImageThemeError: () -> Unit,
     onFontSizeChange: (Int) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
     onAiBaseUrlChange: (String) -> Unit,
@@ -218,6 +254,7 @@ fun SettingsScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = selected?.title ?: "设置",
@@ -244,7 +281,20 @@ fun SettingsScreen(
                 buildSettingsHomeUiState(settings, vaultState.displayName(), roots.size, writebacks.size),
                 Modifier.padding(padding),
             ) { selectedId = it.id }
-            SettingsDestination.APPEARANCE -> AppearanceSettings(settings, onThemeModeChange, onThemePresetChange, Modifier.padding(padding))
+            SettingsDestination.APPEARANCE -> AppearanceSettings(
+                settings = settings,
+                imageThemeState = imageThemeState,
+                onMode = onThemeModeChange,
+                onPreset = onThemePresetChange,
+                onSource = onThemeSourceChange,
+                onImport = onImportImageTheme,
+                onVariant = onImageVariantChange,
+                onOverlay = onImageOverlayChange,
+                onSelectImage = onSelectImageTheme,
+                onDeleteImage = onDeleteImageTheme,
+                onClearError = onClearImageThemeError,
+                modifier = Modifier.padding(padding),
+            )
             SettingsDestination.TERMINAL -> TerminalSettings(settings, onFontSizeChange, onExtraKeysChange, Modifier.padding(padding))
             SettingsDestination.AI -> AiSettings(settings, aiBaseUrl, { aiBaseUrl = it }, aiApiKey, { aiApiKey = it }, aiModel, { aiModel = it }, onAiSendContextChange, onAiShowBubbleChange, Modifier.padding(padding))
             SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, Modifier.padding(padding))
@@ -299,44 +349,232 @@ private fun SettingsHome(state: SettingsHomeUiState, modifier: Modifier, onDesti
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppearanceSettings(settings: AppSettings, onMode: (ThemeMode) -> Unit, onPreset: (ThemePreset) -> Unit, modifier: Modifier) {
+private fun AppearanceSettings(
+    settings: AppSettings,
+    imageThemeState: ImageThemeState,
+    onMode: (ThemeMode) -> Unit,
+    onPreset: (ThemePreset) -> Unit,
+    onSource: (ThemeSource) -> Unit,
+    onImport: (Uri, Float) -> Unit,
+    onVariant: (ImageThemeVariant) -> Unit,
+    onOverlay: (Float) -> Unit,
+    onSelectImage: (String) -> Unit,
+    onDeleteImage: (String) -> Unit,
+    onClearError: () -> Unit,
+    modifier: Modifier,
+) {
+    val configuration = LocalConfiguration.current
+    val targetAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1))
+        .coerceIn(0.3f, 3f)
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { onImport(it, targetAspectRatio) }
+    }
+    val openPicker = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+
     SettingsPage(modifier) {
-        item { SshSectionHeader("显示模式", summary = settings.themeMode.displayName()) }
+        item { SshSectionHeader("主题来源", summary = if (settings.themeSource == ThemeSource.IMAGE) "图片主题" else "预设主题") }
         item {
             PreferenceGroup {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    ThemeMode.entries.forEachIndexed { index, mode ->
+                    ThemeSource.entries.forEachIndexed { index, source ->
                         SegmentedButton(
-                            selected = settings.themeMode == mode,
-                            onClick = { onMode(mode) },
-                            shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
-                        ) { Text(mode.displayName()) }
+                            selected = settings.themeSource == source,
+                            onClick = {
+                                if (source == ThemeSource.IMAGE && !imageThemeState.hasImage) openPicker()
+                                else onSource(source)
+                            },
+                            shape = SegmentedButtonDefaults.itemShape(index, ThemeSource.entries.size),
+                        ) { Text(if (source == ThemeSource.PRESET) "预设主题" else "图片主题") }
+                    }
+                }
+                if (imageThemeState.isImporting) {
+                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("正在处理图片…", Modifier.padding(start = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
-        item { SshSectionHeader("品牌主题", summary = settings.themePreset.displayName()) }
-        themePreviews.forEach { preview ->
-            item(preview.preset.name) {
-                val selected = settings.themePreset == preview.preset
-                Card(
-                    onClick = { onPreset(preview.preset) },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(52.dp).background(preview.background, MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(22.dp).background(preview.accent, MaterialTheme.shapes.small))
+
+        if (settings.themeSource == ThemeSource.PRESET) {
+            item { SshSectionHeader("显示模式", summary = settings.themeMode.displayName()) }
+            item {
+                PreferenceGroup {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        ThemeMode.entries.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = settings.themeMode == mode,
+                                onClick = { onMode(mode) },
+                                shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                            ) { Text(mode.displayName()) }
                         }
-                        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                            Text(preview.preset.displayName(), fontWeight = FontWeight.SemiBold)
-                            Text("同时更新应用界面与终端配色", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item { SshSectionHeader("品牌主题", summary = settings.themePreset.displayName()) }
+            themePreviews.forEach { preview ->
+                item(preview.preset.name) {
+                    val selected = settings.themePreset == preview.preset
+                    Card(
+                        onClick = { onPreset(preview.preset) },
+                        colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer)),
+                        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(52.dp).background(preview.background, MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(22.dp).background(preview.accent, MaterialTheme.shapes.small))
+                            }
+                            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                                Text(preview.preset.displayName(), fontWeight = FontWeight.SemiBold)
+                                Text("同时更新应用界面与终端配色", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (selected) Icon(Icons.Default.Check, "已选择", tint = MaterialTheme.colorScheme.primary)
                         }
-                        if (selected) Icon(Icons.Default.Check, "已选择", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        } else {
+            item {
+                ImageThemeControls(
+                    settings = settings,
+                    state = imageThemeState,
+                    onImport = openPicker,
+                    onVariant = onVariant,
+                    onOverlay = onOverlay,
+                    onSelect = onSelectImage,
+                    onDelete = onDeleteImage,
+                    onClearError = onClearError,
+                )
+            }
+        }
+        if (settings.themeSource == ThemeSource.PRESET && imageThemeState.errorMessage != null) {
+            item {
+                SshInlineBanner("图片处理失败", imageThemeState.errorMessage, tone = SshStatusTone.ERROR)
+                TextButton(onClick = onClearError) { Text("知道了") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageThemeControls(
+    settings: AppSettings,
+    state: ImageThemeState,
+    onImport: () -> Unit,
+    onVariant: (ImageThemeVariant) -> Unit,
+    onOverlay: (Float) -> Unit,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onClearError: () -> Unit,
+) {
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
+    val light = settings.imageThemeVariant == ImageThemeVariant.BRIGHT
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Card(colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh))) {
+            Box(Modifier.fillMaxWidth().height(190.dp)) {
+                state.bitmap?.let { bitmap ->
+                    Image(bitmap.asImageBitmap(), "当前图片背景预览", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    Box(Modifier.fillMaxSize().background(if (light) Color.White.copy(alpha = settings.imageOverlayStrength) else Color.Black.copy(alpha = settings.imageOverlayStrength)))
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, if (light) Color.White.copy(.3f) else Color.Black.copy(.5f)))))
+                } ?: Icon(Icons.Default.PhotoLibrary, null, Modifier.size(42.dp).align(Alignment.Center), tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                    Text("图片主题 · ${settings.imageThemeVariant.label}", fontWeight = FontWeight.Bold)
+                    Text("仅保存在本机，不会上传或备份", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        if (state.recentEntries.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("最近使用", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("${state.recentEntries.size}/3", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(3) { index ->
+                    val entry = state.recentEntries.getOrNull(index)
+                    val selected = entry?.id == state.activeId
+                    Box(
+                        Modifier.weight(1f).aspectRatio(.78f).clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .then(if (entry != null) Modifier.clickable { onSelect(entry.id) } else Modifier)
+                            .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
+                    ) {
+                        entry?.thumbnail?.let { Image(it.asImageBitmap(), "最近背景 ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                        if (entry == null) Text("空", Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else IconButton(
+                            onClick = { pendingDelete = entry.id },
+                            modifier = Modifier.align(Alignment.TopEnd).size(40.dp).background(Color.Black.copy(.48f), CircleShape),
+                        ) { Icon(Icons.Default.Delete, "删除最近背景 ${index + 1}", tint = Color.White) }
+                        if (selected) Icon(Icons.Default.Check, "当前背景", Modifier.align(Alignment.BottomStart).padding(8.dp), tint = Color.White)
                     }
                 }
             }
         }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = onImport, enabled = !state.isImporting, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.PhotoLibrary, null)
+                Spacer(Modifier.width(8.dp))
+                Text("导入新图片")
+            }
+            OutlinedButton(
+                onClick = { state.activeId?.let { pendingDelete = it } },
+                enabled = state.activeId != null && !state.isImporting,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.Delete, null)
+                Spacer(Modifier.width(8.dp))
+                Text("删除当前")
+            }
+        }
+
+        state.palette?.let { palette ->
+            Text("派生配色", fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ImageThemeVariant.entries.forEach { variant ->
+                    val tokens = imageThemeTokens(palette, variant)
+                    Card(
+                        onClick = { onVariant(variant) },
+                        modifier = Modifier.weight(1f),
+                        border = if (settings.imageThemeVariant == variant) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf(tokens.background, tokens.surface, tokens.primary).forEach { Box(Modifier.size(15.dp).background(Color(it), CircleShape)) }
+                            }
+                            Text(variant.label, fontWeight = FontWeight.SemiBold)
+                            Text(if (palette.recommendedVariant == variant) "算法推荐" else " ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
+        PreferenceGroup {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("背景遮罩", fontWeight = FontWeight.SemiBold)
+                    Text("提高后可增强文字可读性", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("${(settings.imageOverlayStrength * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary)
+            }
+            Slider(settings.imageOverlayStrength, onOverlay, valueRange = MIN_IMAGE_OVERLAY_STRENGTH..MAX_IMAGE_OVERLAY_STRENGTH)
+        }
+
+        state.errorMessage?.let {
+            SshInlineBanner("图片处理失败", it, tone = SshStatusTone.ERROR)
+            TextButton(onClick = onClearError) { Text("知道了") }
+        }
+    }
+    pendingDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除这张背景？") },
+            text = { Text(if (id == state.activeId && state.recentEntries.size == 1) "删除后将恢复到预设主题。" else "图片与独立配色将从本机永久删除。") },
+            confirmButton = { TextButton(onClick = { pendingDelete = null; onDelete(id) }) { Text("删除") } },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+        )
     }
 }
 

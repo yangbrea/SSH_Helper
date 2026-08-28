@@ -64,6 +64,7 @@ fun HostsScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = "主机",

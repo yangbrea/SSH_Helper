@@ -58,6 +58,7 @@ fun SnippetsScreen(
     var deleting by remember { mutableStateOf<CommandSnippet?>(null) }
     BackHandler(onBack = onBack)
     Scaffold(
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             TopAppBar(
                 title = { Text("快捷命令") },

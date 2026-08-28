@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.IOException
@@ -19,9 +20,36 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 enum class ThemePreset { OCEAN, EMERALD, AMBER, VIOLET }
 
+enum class ThemeSource { PRESET, IMAGE }
+
+fun parseThemeSource(storedValue: String?): ThemeSource =
+    enumValueOrDefault(storedValue, ThemeSource.PRESET)
+
+enum class ImageThemeVariant(val label: String) {
+    IMMERSIVE("沉浸"),
+    SOFT("柔和"),
+    BRIGHT("明亮"),
+}
+
+const val DEFAULT_IMAGE_OVERLAY_STRENGTH = 0.55f
+const val MIN_IMAGE_OVERLAY_STRENGTH = 0.35f
+const val MAX_IMAGE_OVERLAY_STRENGTH = 0.80f
+
+internal fun coerceImageOverlayStrength(value: Float): Float =
+    value.coerceIn(MIN_IMAGE_OVERLAY_STRENGTH, MAX_IMAGE_OVERLAY_STRENGTH)
+
+fun defaultImageOverlayStrength(variant: ImageThemeVariant): Float = when (variant) {
+    ImageThemeVariant.IMMERSIVE -> 0.55f
+    ImageThemeVariant.SOFT -> 0.65f
+    ImageThemeVariant.BRIGHT -> 0.60f
+}
+
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val themePreset: ThemePreset = ThemePreset.OCEAN,
+    val themeSource: ThemeSource = ThemeSource.PRESET,
+    val imageThemeVariant: ImageThemeVariant = ImageThemeVariant.IMMERSIVE,
+    val imageOverlayStrength: Float = DEFAULT_IMAGE_OVERLAY_STRENGTH,
     val terminalFontSize: Int = DEFAULT_TERMINAL_FONT_SIZE,
     val extraKeys: List<ExtraKeyId> = DEFAULT_EXTRA_KEYS,
     val aiBaseUrl: String = "https://api.deepseek.com/v1",
@@ -36,11 +64,21 @@ data class AppSettings(
     val forwardReconnectAfterLock: Boolean = true,
 )
 
+val AppSettings.effectiveThemeMode: ThemeMode
+    get() = if (themeSource == ThemeSource.IMAGE) {
+        if (imageThemeVariant == ImageThemeVariant.BRIGHT) ThemeMode.LIGHT else ThemeMode.DARK
+    } else {
+        themeMode
+    }
+
 interface SettingsRepository {
     val settings: Flow<AppSettings>
 
     suspend fun setThemeMode(mode: ThemeMode)
     suspend fun setThemePreset(preset: ThemePreset)
+    suspend fun setThemeSource(source: ThemeSource)
+    suspend fun setImageThemeVariant(variant: ImageThemeVariant)
+    suspend fun setImageOverlayStrength(strength: Float)
     suspend fun setTerminalFontSize(size: Int)
     suspend fun setExtraKeys(keys: List<ExtraKeyId>)
     suspend fun setAiBaseUrl(url: String)
@@ -64,6 +102,9 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
             AppSettings(
                 themeMode = enumValueOrDefault(preferences[THEME_MODE], ThemeMode.SYSTEM),
                 themePreset = enumValueOrDefault(preferences[THEME_PRESET], ThemePreset.OCEAN),
+                themeSource = enumValueOrDefault(preferences[THEME_SOURCE], ThemeSource.PRESET),
+                imageThemeVariant = enumValueOrDefault(preferences[IMAGE_THEME_VARIANT], ImageThemeVariant.IMMERSIVE),
+                imageOverlayStrength = coerceImageOverlayStrength(preferences[IMAGE_OVERLAY_STRENGTH] ?: DEFAULT_IMAGE_OVERLAY_STRENGTH),
                 terminalFontSize = sanitizeTerminalFontSize(
                     preferences[TERMINAL_FONT_SIZE] ?: DEFAULT_TERMINAL_FONT_SIZE,
                 ),
@@ -83,6 +124,18 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
 
     override suspend fun setThemePreset(preset: ThemePreset) {
         dataStore.edit { it[THEME_PRESET] = preset.name }
+    }
+
+    override suspend fun setThemeSource(source: ThemeSource) {
+        dataStore.edit { it[THEME_SOURCE] = source.name }
+    }
+
+    override suspend fun setImageThemeVariant(variant: ImageThemeVariant) {
+        dataStore.edit { it[IMAGE_THEME_VARIANT] = variant.name }
+    }
+
+    override suspend fun setImageOverlayStrength(strength: Float) {
+        dataStore.edit { it[IMAGE_OVERLAY_STRENGTH] = coerceImageOverlayStrength(strength) }
     }
 
     override suspend fun setTerminalFontSize(size: Int) {
@@ -120,6 +173,9 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
+        val THEME_SOURCE = stringPreferencesKey("theme_source")
+        val IMAGE_THEME_VARIANT = stringPreferencesKey("image_theme_variant")
+        val IMAGE_OVERLAY_STRENGTH = floatPreferencesKey("image_overlay_strength")
         val TERMINAL_FONT_SIZE = intPreferencesKey("terminal_font_size")
         val EXTRA_KEYS = stringPreferencesKey("extra_keys")
         val AI_BASE_URL = stringPreferencesKey("ai_base_url")

@@ -69,6 +69,7 @@ fun HostWorkspaceScreen(
     var sessionLimitReached by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = host.name,

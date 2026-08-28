@@ -1,5 +1,6 @@
 package com.yang136.sshhelper.ui
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -20,6 +21,11 @@ import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
 import com.yang136.sshhelper.settings.ExtraKeyId
+import com.yang136.sshhelper.settings.ThemeSource
+import com.yang136.sshhelper.settings.ImageThemeVariant
+import com.yang136.sshhelper.settings.defaultImageOverlayStrength
+import com.yang136.sshhelper.theme.ImageFocalTransform
+import com.yang136.sshhelper.theme.ImageThemeEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
@@ -163,6 +170,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         SharingStarted.Eagerly,
         AppSettings(),
     )
+    val imageThemeState = container.imageThemeRepository.state
+
+    init {
+        viewModelScope.launch {
+            val stored = container.settingsRepository.settings.first()
+            container.imageThemeRepository.initialize(stored.imageThemeVariant, stored.imageOverlayStrength)
+            if (stored.themeSource == ThemeSource.IMAGE && !imageThemeState.value.hasImage) {
+                container.settingsRepository.setThemeSource(ThemeSource.PRESET)
+            }
+        }
+    }
 
     fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
         container.settingsRepository.setThemeMode(mode)
@@ -170,6 +188,61 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setThemePreset(preset: ThemePreset) = viewModelScope.launch {
         container.settingsRepository.setThemePreset(preset)
+        container.settingsRepository.setThemeSource(ThemeSource.PRESET)
+    }
+
+    fun setThemeSource(source: ThemeSource) = viewModelScope.launch {
+        if (source != ThemeSource.IMAGE || imageThemeState.value.hasImage) {
+            container.settingsRepository.setThemeSource(source)
+        }
+    }
+
+    fun prepareImageTheme(uri: Uri, targetAspectRatio: Float) = viewModelScope.launch {
+        container.imageThemeRepository.prepareCrop(uri, targetAspectRatio)
+    }
+
+    fun confirmImageCrop(focal: ImageFocalTransform) = viewModelScope.launch {
+        container.imageThemeRepository.commitCrop(focal)?.let { entry ->
+            applyImageEntry(entry)
+            container.settingsRepository.setThemeSource(ThemeSource.IMAGE)
+        }
+    }
+
+    fun cancelImageCrop() = container.imageThemeRepository.cancelCrop()
+
+    fun selectImageTheme(entryId: String) = viewModelScope.launch {
+        container.imageThemeRepository.select(entryId)?.let { entry ->
+            applyImageEntry(entry)
+            container.settingsRepository.setThemeSource(ThemeSource.IMAGE)
+        }
+    }
+
+    fun deleteImageTheme(entryId: String) = viewModelScope.launch {
+        val next = container.imageThemeRepository.delete(entryId)
+        if (next == null) container.settingsRepository.setThemeSource(ThemeSource.PRESET)
+        else {
+            applyImageEntry(next)
+            container.settingsRepository.setThemeSource(ThemeSource.IMAGE)
+        }
+    }
+
+    fun setImageThemeVariant(variant: ImageThemeVariant) = viewModelScope.launch {
+        val strength = defaultImageOverlayStrength(variant)
+        container.settingsRepository.setImageThemeVariant(variant)
+        container.settingsRepository.setImageOverlayStrength(strength)
+        container.imageThemeRepository.updateActiveAppearance(variant, strength)
+    }
+
+    fun setImageOverlayStrength(strength: Float) = viewModelScope.launch {
+        container.settingsRepository.setImageOverlayStrength(strength)
+        container.imageThemeRepository.updateActiveAppearance(settings.value.imageThemeVariant, strength)
+    }
+
+    fun clearImageThemeError() = container.imageThemeRepository.clearError()
+
+    private suspend fun applyImageEntry(entry: ImageThemeEntry) {
+        container.settingsRepository.setImageThemeVariant(entry.variant)
+        container.settingsRepository.setImageOverlayStrength(entry.overlayStrength)
     }
 
     fun setTerminalFontSize(size: Int) = viewModelScope.launch {

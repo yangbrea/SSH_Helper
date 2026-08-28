@@ -23,6 +23,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -33,6 +34,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.yang136.sshhelper.ui.imageAwareContainerColor
+import com.yang136.sshhelper.ui.imageAwareScaffoldColor
 
 @Immutable
 data class SshSpacing(
@@ -95,6 +98,7 @@ fun SshTopAppBar(
     subtitle: String? = null,
     navigationIcon: @Composable (() -> Unit) = {},
     actions: @Composable RowScope.() -> Unit = {},
+    allowImageBackground: Boolean = true,
 ) {
     TopAppBar(
         modifier = modifier,
@@ -106,6 +110,9 @@ fun SshTopAppBar(
         },
         navigationIcon = navigationIcon,
         actions = actions,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = if (allowImageBackground) imageAwareScaffoldColor() else MaterialTheme.colorScheme.surface,
+        ),
     )
 }
 
@@ -206,7 +213,7 @@ fun PreferenceSwitch(
 
 @Composable
 fun PreferenceGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer))) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { content() }
     }
 }
@@ -216,7 +223,7 @@ fun SshHostCard(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Co
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer)),
     ) { Column(Modifier.fillMaxWidth().padding(16.dp)) { content() } }
 }
 
@@ -232,7 +239,7 @@ fun SshSessionRow(modifier: Modifier = Modifier, content: @Composable RowScope.(
 
 @Composable
 fun SshActionTile(icon: ImageVector, title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh))) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
             Text(title, style = MaterialTheme.typography.labelLarge)

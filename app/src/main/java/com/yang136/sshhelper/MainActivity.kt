@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -27,8 +28,10 @@ import com.yang136.sshhelper.ui.HostEditorScreen
 import com.yang136.sshhelper.ui.HostsScreen
 import com.yang136.sshhelper.ui.HostWorkspaceScreen
 import com.yang136.sshhelper.ui.ActivityScreen
+import com.yang136.sshhelper.ui.AppImageBackground
 import com.yang136.sshhelper.ui.AppDestination
 import com.yang136.sshhelper.ui.AppShellScreen
+import com.yang136.sshhelper.ui.ImageCropScreen
 import com.yang136.sshhelper.ui.SettingsScreen
 import com.yang136.sshhelper.ui.SettingsDestination
 import com.yang136.sshhelper.ui.SettingsViewModel
@@ -47,6 +50,8 @@ import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ui.theme.LocalTerminalPalette
 import com.yang136.sshhelper.ui.theme.SshHelperTheme
+import com.yang136.sshhelper.settings.ImageThemeVariant
+import com.yang136.sshhelper.settings.ThemeSource
 import kotlinx.coroutines.launch
 
 class MainActivity : FragmentActivity() {
@@ -98,8 +103,31 @@ class MainActivity : FragmentActivity() {
             val snippets = snippetsViewModel.snippets.collectAsStateWithLifecycle().value
             val hosts = hostsViewModel.hosts.collectAsStateWithLifecycle().value
             val vaultState = container.credentialVault.state.collectAsStateWithLifecycle().value
-            SshHelperTheme(settings) {
-                Surface(Modifier.fillMaxSize()) {
+            val imageTheme = settingsViewModel.imageThemeState.collectAsStateWithLifecycle().value
+            val imageActive = settings.themeSource == ThemeSource.IMAGE && imageTheme.hasImage
+            SshHelperTheme(settings, imageTheme.palette.takeIf { imageActive }) {
+                val cropDraft = imageTheme.cropDraft
+                if (cropDraft != null) {
+                    ImageCropScreen(
+                        draft = cropDraft,
+                        saving = imageTheme.isImporting,
+                        onCancel = settingsViewModel::cancelImageCrop,
+                        onConfirm = settingsViewModel::confirmImageCrop,
+                    )
+                } else {
+                    val activeEntry = imageTheme.activeEntry
+                    AppImageBackground(
+                        bitmap = imageTheme.bitmap.takeIf { imageActive },
+                        overlayStrength = settings.imageOverlayStrength,
+                        lightTheme = settings.imageThemeVariant == ImageThemeVariant.BRIGHT,
+                        focusX = activeEntry?.focusX ?: .5f,
+                        focusY = activeEntry?.focusY ?: .5f,
+                        zoom = activeEntry?.zoom ?: 1f,
+                    ) {
+                        Surface(
+                            Modifier.fillMaxSize(),
+                            color = if (imageActive) Color.Transparent else androidx.compose.material3.MaterialTheme.colorScheme.background,
+                        ) {
                     val navController = rememberNavController()
                     val initialDestination = if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) AppDestination.SETTINGS else AppDestination.HOSTS
                     val initialSettingsDestination = SettingsDestination.fromId(intent?.getStringExtra(EXTRA_SETTINGS_SECTION))
@@ -164,8 +192,16 @@ class MainActivity : FragmentActivity() {
                                 ) },
                                 settings = { modifier, onDetailChanged, navigate -> SettingsScreen(
                                     settings = settings,
+                                    imageThemeState = imageTheme,
                                     onThemeModeChange = settingsViewModel::setThemeMode,
                                     onThemePresetChange = settingsViewModel::setThemePreset,
+                                    onThemeSourceChange = settingsViewModel::setThemeSource,
+                                    onImportImageTheme = settingsViewModel::prepareImageTheme,
+                                    onImageVariantChange = settingsViewModel::setImageThemeVariant,
+                                    onImageOverlayChange = settingsViewModel::setImageOverlayStrength,
+                                    onSelectImageTheme = settingsViewModel::selectImageTheme,
+                                    onDeleteImageTheme = settingsViewModel::deleteImageTheme,
+                                    onClearImageThemeError = settingsViewModel::clearImageThemeError,
                                     onFontSizeChange = settingsViewModel::setTerminalFontSize,
                                     onExtraKeysChange = settingsViewModel::setExtraKeys,
                                     onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
@@ -192,8 +228,16 @@ class MainActivity : FragmentActivity() {
                         composable("settings") {
                             SettingsScreen(
                                 settings = settings,
+                                imageThemeState = imageTheme,
                                 onThemeModeChange = settingsViewModel::setThemeMode,
                                 onThemePresetChange = settingsViewModel::setThemePreset,
+                                onThemeSourceChange = settingsViewModel::setThemeSource,
+                                onImportImageTheme = settingsViewModel::prepareImageTheme,
+                                onImageVariantChange = settingsViewModel::setImageThemeVariant,
+                                onImageOverlayChange = settingsViewModel::setImageOverlayStrength,
+                                onSelectImageTheme = settingsViewModel::selectImageTheme,
+                                onDeleteImageTheme = settingsViewModel::deleteImageTheme,
+                                onClearImageThemeError = settingsViewModel::clearImageThemeError,
                                 onFontSizeChange = settingsViewModel::setTerminalFontSize,
                                 onExtraKeysChange = settingsViewModel::setExtraKeys,
                                 onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
@@ -319,6 +363,8 @@ class MainActivity : FragmentActivity() {
                             text = { Text(message) },
                             confirmButton = { TextButton(onClick = { vaultMessage = null }) { Text("知道了") } },
                         )
+                    }
+                        }
                     }
                 }
             }

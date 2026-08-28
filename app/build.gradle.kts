@@ -76,6 +76,8 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
+    implementation("androidx.palette:palette:1.0.0")
     implementation("androidx.work:work-runtime-ktx:2.11.2")
 
     implementation("com.github.mwiede:jsch:2.28.0")

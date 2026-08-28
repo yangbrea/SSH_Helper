@@ -120,6 +120,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
     val stopped = rules.filter { states[it.id]?.isActive() != true }
 
     Scaffold(
+        containerColor = imageAwareScaffoldColor(),
         topBar = {
             SshTopAppBar(
                 title = "端口转发",

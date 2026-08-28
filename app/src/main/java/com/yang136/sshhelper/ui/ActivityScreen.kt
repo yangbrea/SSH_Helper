@@ -68,6 +68,7 @@ fun ActivityScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = imageAwareScaffoldColor(),
         topBar = { SshTopAppBar("活动", subtitle = "会话、传输与隧道的实时状态") },
     ) { padding ->
         LazyColumn(
