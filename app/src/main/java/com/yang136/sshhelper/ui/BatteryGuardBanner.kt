@@ -22,6 +22,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +42,9 @@ import com.yang136.sshhelper.settings.batteryGuidanceText
 import com.yang136.sshhelper.settings.detectOemFamily
 import com.yang136.sshhelper.settings.isIgnoringBatteryOptimizations
 import com.yang136.sshhelper.settings.launchBatterySettings
+import com.yang136.sshhelper.ui.design.SshInlineBanner
+import com.yang136.sshhelper.ui.design.SshStatusBadge
+import com.yang136.sshhelper.ui.design.SshStatusTone
 
 @Composable
 private fun rememberBatteryOptimizationState(): Boolean {
@@ -65,40 +69,19 @@ fun BatteryGuardBanner(modifier: Modifier = Modifier) {
     var dismissed by remember { mutableStateOf(false) }
     if (ignoring || dismissed) return
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
-                Text(
-                    "保持后台连接",
-                    Modifier.weight(1f).padding(horizontal = 8.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-                IconButton(onClick = { dismissed = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Close, "关闭提示", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
-                }
-            }
-            Text(
-                "允许不受电池优化限制可降低 Doze/App Standby 对 SSH 的干扰，但不能保证厂商系统永不回收进程。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-            Text(
-                batteryGuidanceText(detectOemFamily()),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = .85f),
-            )
+    SshInlineBanner(
+        title = "保持后台连接",
+        description = "电池设置可降低 Doze/App Standby 干扰，但不能保证厂商系统永不回收进程。\n${batteryGuidanceText(detectOemFamily())}",
+        modifier = modifier,
+        tone = SshStatusTone.WARNING,
+        action = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { launchBatterySettings(context, preferOem = false) }) { Text("系统电池设置") }
                 OutlinedButton(onClick = { launchBatterySettings(context, preferOem = true) }) { Text("厂商设置") }
+                TextButton(onClick = { dismissed = true }) { Text("暂时关闭") }
             }
-        }
-    }
+        },
+    )
 }
 
 /** Full status card used by Settings > Security. */
@@ -122,9 +105,9 @@ fun BackgroundConnectionCard(modifier: Modifier = Modifier) {
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("后台连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("电池优化：${if (ignoring) "不受限制" else "受系统限制"}")
-            Text("通知权限：${if (notificationGranted) "已允许" else "未允许"}")
-            Text("ROM：${detectOemFamily().label}")
+            StatusLine("电池优化", if (ignoring) "不受限制" else "受系统限制", if (ignoring) SshStatusTone.CONNECTED else SshStatusTone.WARNING)
+            StatusLine("通知权限", if (notificationGranted) "已允许" else "未允许", if (notificationGranted) SshStatusTone.CONNECTED else SshStatusTone.WARNING)
+            StatusLine("ROM", detectOemFamily().label, SshStatusTone.OFFLINE)
             Text(
                 "前台服务仍会受系统策略约束；电池豁免只能降低干扰，不能保证厂商系统永不回收进程。",
                 style = MaterialTheme.typography.bodySmall,
@@ -145,5 +128,13 @@ fun BackgroundConnectionCard(modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun StatusLine(label: String, value: String, tone: SshStatusTone) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontWeight = FontWeight.Medium)
+        SshStatusBadge(value, tone)
     }
 }

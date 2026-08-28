@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -68,6 +69,11 @@ import com.yang136.sshhelper.ssh.ForwardState
 import com.yang136.sshhelper.ssh.PortForwardRule
 import com.yang136.sshhelper.ssh.displayName
 import com.yang136.sshhelper.ssh.isActive
+import com.yang136.sshhelper.ui.design.SshEmptyState
+import com.yang136.sshhelper.ui.design.SshSectionHeader
+import com.yang136.sshhelper.ui.design.SshStatusBadge
+import com.yang136.sshhelper.ui.design.SshStatusTone
+import com.yang136.sshhelper.ui.design.SshTopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,13 +121,9 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("端口转发", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(hostName, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                },
+            SshTopAppBar(
+                title = "端口转发",
+                subtitle = hostName,
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
                     if (running.isNotEmpty()) {
@@ -142,18 +144,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
             BatteryGuardBanner(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             if (rules.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Public, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(12.dp))
-                        Text("还没有转发规则", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "把远端内网服务映射到本机、反向打通，或把 SSH 变成 SOCKS5 代理",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 32.dp),
-                        )
-                        Text("点击右下角“添加规则”开始", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
-                    }
+                    SshEmptyState(Icons.Default.Public, "还没有转发规则", "添加本地、远程或 SOCKS5 转发规则后在这里统一控制")
                 }
             } else {
                 LazyColumn(
@@ -162,7 +153,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     if (running.isNotEmpty()) {
-                        item { SectionHeader("运行中", running.size) }
+                        item { SshSectionHeader("运行中", summary = "${running.size}") }
                         items(running, key = PortForwardRule::id) { rule ->
                             ForwardRuleCard(
                                 rule = rule,
@@ -174,7 +165,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                         }
                     }
                     if (stopped.isNotEmpty()) {
-                        item { SectionHeader("已停止", stopped.size, topPadding = if (running.isEmpty()) 0 else 10) }
+                        item { SshSectionHeader("已停止", Modifier.padding(top = if (running.isEmpty()) 0.dp else 10.dp), summary = "${stopped.size}") }
                         items(stopped, key = PortForwardRule::id) { rule ->
                             ForwardRuleCard(
                                 rule = rule,
@@ -218,17 +209,6 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SectionHeader(title: String, count: Int, topPadding: Int = 0) {
-    Row(
-        Modifier.fillMaxWidth().padding(top = topPadding.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Text("$count", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp))
-    }
-}
-
-@Composable
 private fun ForwardRuleCard(
     rule: PortForwardRule,
     state: ForwardState,
@@ -236,14 +216,8 @@ private fun ForwardRuleCard(
     onStop: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val stateColor = when (state) {
-        is ForwardState.Running -> MaterialTheme.colorScheme.primary
-        ForwardState.Starting, ForwardState.Reconnecting -> MaterialTheme.colorScheme.tertiary
-        is ForwardState.Failed -> MaterialTheme.colorScheme.error
-        ForwardState.WaitingForUnlock -> MaterialTheme.colorScheme.tertiary
-        ForwardState.Stopped -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Card(Modifier.fillMaxWidth()) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -257,9 +231,12 @@ private fun ForwardRuleCard(
                 )
                 Text(rule.name, Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(rule.type.displayName(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Box(Modifier.width(8.dp))
-                Surface(shape = MaterialTheme.shapes.small, color = stateColor.copy(alpha = .14f)) {
-                    Text(state.label(), Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = stateColor)
+                SshStatusBadge(state.label(), state.tone())
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "规则菜单") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("删除规则") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menuOpen = false; onDelete() })
+                    }
                 }
             }
             Text(rule.routeText(state), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -269,10 +246,17 @@ private fun ForwardRuleCard(
                 } else {
                     FilledTonalButton(onClick = onStart, enabled = state !is ForwardState.Reconnecting) { Icon(Icons.Default.PlayArrow, null, Modifier.size(16.dp)); Text("启动", Modifier.padding(start = 6.dp)) }
                 }
-                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "删除规则", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
     }
+}
+
+private fun ForwardState.tone() = when (this) {
+    is ForwardState.Running -> SshStatusTone.CONNECTED
+    ForwardState.Starting, ForwardState.Reconnecting -> SshStatusTone.CONNECTING
+    ForwardState.WaitingForUnlock -> SshStatusTone.WAITING
+    is ForwardState.Failed -> SshStatusTone.ERROR
+    ForwardState.Stopped -> SshStatusTone.OFFLINE
 }
 
 @Composable
