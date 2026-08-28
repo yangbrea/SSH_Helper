@@ -275,13 +275,13 @@ class MainActivity : FragmentActivity() {
                                     host = host,
                                     sessions = sessions,
                                     onTerminal = { profile ->
-                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
+                                        sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
                                             navController.navigate("terminal/${profile.id}/${id.value}")
                                             true
                                         } ?: false
                                     },
                                     onFiles = { profile ->
-                                        sessionsViewModel.create(profile, SessionFeature.SFTP)?.let { id ->
+                                        sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
                                             navController.navigate("files/${id.value}")
                                             true
                                         } ?: false

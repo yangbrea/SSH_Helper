@@ -103,7 +103,11 @@ fun HostsScreen(
                             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                    Text(session.displayName, fontWeight = FontWeight.SemiBold)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(session.displayName, fontWeight = FontWeight.SemiBold)
+                                        if (SessionFeature.SFTP in session.features) SshStatusBadge("文件", SshStatusTone.CONNECTED)
+                                        if (SessionFeature.PORT_FORWARD in session.features) SshStatusBadge("转发", SshStatusTone.CONNECTING)
+                                    }
                                     Text(session.profile.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 val presentation = session.connection.presentation()

@@ -72,6 +72,17 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun create(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId? =
         manager.create(profile, feature)
+
+    /**
+     * 打开主机功能（终端/文件）：优先复用该主机已有会话，让终端与文件系统共享同一条
+     * SSH 连接（多通道多路复用）；没有可复用会话时才新建。SHELL/SFTP 能力由对应
+     * 页面按需附加（TerminalScreen 的 enableFeature(SHELL)、SftpViewModel 的 sftp(id)）。
+     */
+    fun openFor(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId? {
+        val reusable = selectReusableSession(sessions.value, profile.id)
+        if (reusable != null) return reusable.id
+        return create(profile, feature)
+    }
     fun output(id: SessionId) = manager.output(id)
     fun recentOutput(id: SessionId, maxBytes: Int): ByteArray = manager.recentOutput(id, maxBytes)
     fun aiState(id: SessionId) = container.aiAgentManager.state(id)
@@ -144,6 +155,14 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
 internal const val PTY_RESIZE_DEBOUNCE_MS = 100L
 internal fun normalizePtySize(columns: Int, rows: Int): Pair<Int, Int> =
     columns.coerceIn(2, 500) to rows.coerceIn(2, 300)
+
+/**
+ * 主机级会话复用：返回该主机的"主会话"（会话列表按创建顺序排列，取最先创建者）。
+ * 排除纯转发专用会话（features == {PORT_FORWARD}）：后台隧道不承载终端/文件等
+ * UI 功能，避免把界面功能挂到转发生命周期上；带 SHELL/SFTP（或混合）的会话均可复用。
+ */
+internal fun selectReusableSession(sessions: List<ManagedSessionState>, hostId: Long): ManagedSessionState? =
+    sessions.firstOrNull { it.profile.id == hostId && it.features != setOf(SessionFeature.PORT_FORWARD) }
 
 class SnippetsViewModel(private val container: AppContainer) : ViewModel() {
     val snippets = container.snippetRepository.snippets.stateIn(
