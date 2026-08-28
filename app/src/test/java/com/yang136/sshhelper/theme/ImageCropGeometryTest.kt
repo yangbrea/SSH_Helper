@@ -90,4 +90,20 @@ class ImageCropGeometryTest {
         assertTrue(crop.left + crop.width <= 1.0001f)
         assertTrue(crop.top + crop.height <= 1.0001f)
     }
+
+    @Test
+    fun `corrupt non finite focal metadata falls back to centered crop`() {
+        val crop = focalCropSelection(
+            4000f,
+            3000f,
+            1080f,
+            1920f,
+            ImageFocalTransform(Float.NaN, Float.POSITIVE_INFINITY, Float.NaN),
+        )
+
+        assertEquals(0.2890625f, crop.left, 0.0001f)
+        assertEquals(0f, crop.top, 0.0001f)
+        assertEquals(0.421875f, crop.width, 0.0001f)
+        assertEquals(1f, crop.height, 0.0001f)
+    }
 }

@@ -53,8 +53,8 @@ fun AppImageBackground(
                         viewportHeight = size.height,
                         focal = ImageFocalTransform(focusX, focusY, zoom),
                     )
-                    val sourceWidth = (crop.width * image.width).roundToInt().coerceAtLeast(1)
-                    val sourceHeight = (crop.height * image.height).roundToInt().coerceAtLeast(1)
+                    val sourceWidth = (crop.width * image.width).roundToInt().coerceIn(1, image.width)
+                    val sourceHeight = (crop.height * image.height).roundToInt().coerceIn(1, image.height)
                     drawImage(
                         image = image,
                         srcOffset = IntOffset(

@@ -40,6 +40,8 @@ class ImageThemeSettingsTest {
         assertEquals(0.35f, coerceImageOverlayStrength(0.1f))
         assertEquals(0.8f, coerceImageOverlayStrength(0.95f))
         assertEquals(0.6f, coerceImageOverlayStrength(0.6f))
+        assertEquals(0.55f, coerceImageOverlayStrength(Float.NaN))
+        assertEquals(0.55f, coerceImageOverlayStrength(Float.POSITIVE_INFINITY))
     }
 
     @Test

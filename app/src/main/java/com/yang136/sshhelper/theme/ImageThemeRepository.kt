@@ -10,6 +10,7 @@ import com.yang136.sshhelper.settings.ImageThemeVariant
 import com.yang136.sshhelper.settings.coerceImageOverlayStrength
 import com.yang136.sshhelper.settings.defaultImageOverlayStrength
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,49 +36,58 @@ class ImageThemeRepository(context: Context) {
         legacyVariant: ImageThemeVariant,
         legacyOverlayStrength: Float,
     ) = withContext(Dispatchers.IO) {
-        directory.mkdirs()
-        recoverInterruptedReplace(legacyTarget, legacyTemporary, legacyBackup)
-        migrateLegacyBackground(legacyVariant, legacyOverlayStrength)
+        runCatching {
+            directory.mkdirs()
+            recoverInterruptedReplace(legacyTarget, legacyTemporary, legacyBackup)
+            migrateLegacyBackground(legacyVariant, legacyOverlayStrength)
 
-        val storedEntries = loadCatalog().sortedByDescending(ImageThemeEntry::importedAtEpochMs)
-        val requestedActiveId = prefs.getString(KEY_ACTIVE_ID, null)
-        val loadedEntries = mutableListOf<ImageThemeEntry>()
-        var requestedBitmap: Bitmap? = null
+            val storedEntries = loadCatalog().sortedByDescending(ImageThemeEntry::importedAtEpochMs)
+            val requestedActiveId = prefs.getString(KEY_ACTIVE_ID, null)
+            val loadedEntries = mutableListOf<ImageThemeEntry>()
+            var requestedBitmap: Bitmap? = null
 
-        storedEntries.take(MAX_RECENT_IMAGES).forEach { stored ->
-            val file = File(directory, stored.fileName)
-            val decoded = file.takeIf(File::isFile)?.let { BitmapFactory.decodeFile(it.absolutePath) }
-                ?: return@forEach
-            val palette = if (stored.palette.algorithmVersion == IMAGE_THEME_ALGORITHM_VERSION) {
-                stored.palette
-            } else {
-                ImagePaletteExtractor.extract(decoded)
+            storedEntries.take(MAX_RECENT_IMAGES).forEach { stored ->
+                val file = File(directory, stored.fileName)
+                val decoded = file.takeIf(File::isFile)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                    ?: return@forEach
+                val palette = if (stored.palette.algorithmVersion == IMAGE_THEME_ALGORITHM_VERSION) {
+                    stored.palette
+                } else {
+                    ImagePaletteExtractor.extract(decoded)
+                }
+                val thumbnail = createThumbnail(decoded)
+                loadedEntries += stored.copy(palette = palette, thumbnail = thumbnail)
+                if (stored.id == requestedActiveId) {
+                    requestedBitmap = decoded
+                } else if (thumbnail !== decoded) {
+                    decoded.recycle()
+                }
             }
-            val thumbnail = createThumbnail(decoded)
-            loadedEntries += stored.copy(palette = palette, thumbnail = thumbnail)
-            if (stored.id == requestedActiveId) {
-                requestedBitmap = decoded
-            } else if (thumbnail !== decoded) {
-                decoded.recycle()
+
+            val activeId = requestedActiveId?.takeIf { id -> loadedEntries.any { it.id == id } }
+                ?: loadedEntries.firstOrNull()?.id
+            val activeBitmap = requestedBitmap ?: activeId?.let { id ->
+                loadedEntries.firstOrNull { it.id == id }
+                    ?.let { BitmapFactory.decodeFile(File(directory, it.fileName).absolutePath) }
             }
-        }
+            val activeEntry = loadedEntries.firstOrNull { it.id == activeId }
 
-        val activeId = requestedActiveId?.takeIf { id -> loadedEntries.any { it.id == id } }
-            ?: loadedEntries.firstOrNull()?.id
-        val activeBitmap = requestedBitmap ?: activeId?.let { id ->
-            loadedEntries.firstOrNull { it.id == id }
-                ?.let { BitmapFactory.decodeFile(File(directory, it.fileName).absolutePath) }
+            saveCatalog(loadedEntries, activeId)
+            cleanupOrphanFiles(loadedEntries)
+            _state.value = ImageThemeState(
+                bitmap = activeBitmap,
+                palette = activeEntry?.palette,
+                activeId = activeId,
+                recentEntries = loadedEntries,
+            )
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            // Corrupt legacy metadata or an unreadable cached image must not crash app startup.
+            _state.value = ImageThemeState(
+                importPhase = ImageImportPhase.ERROR,
+                errorMessage = error.message ?: "图片主题数据无法恢复，已暂时停用",
+            )
         }
-        val activeEntry = loadedEntries.firstOrNull { it.id == activeId }
-
-        saveCatalog(loadedEntries, activeId)
-        cleanupOrphanFiles(loadedEntries)
-        _state.value = ImageThemeState(
-            bitmap = activeBitmap,
-            palette = activeEntry?.palette,
-            activeId = activeId,
-            recentEntries = loadedEntries,
-        )
     }
 
     suspend fun prepareCrop(uri: Uri, targetAspectRatio: Float): Boolean = withContext(Dispatchers.IO) {
@@ -354,9 +364,9 @@ class ImageThemeRepository(context: Context) {
                     ),
                 ),
                 importedAtEpochMs = prefs.getLong(entryKey(id, FIELD_IMPORTED_AT), 0L),
-                focusX = prefs.getFloat(entryKey(id, FIELD_FOCUS_X), 0.5f).coerceIn(0f, 1f),
-                focusY = prefs.getFloat(entryKey(id, FIELD_FOCUS_Y), 0.5f).coerceIn(0f, 1f),
-                zoom = prefs.getFloat(entryKey(id, FIELD_ZOOM), 1f).coerceIn(MIN_CROP_ZOOM, MAX_CROP_ZOOM),
+                focusX = prefs.getFloat(entryKey(id, FIELD_FOCUS_X), 0.5f).finiteOr(0.5f).coerceIn(0f, 1f),
+                focusY = prefs.getFloat(entryKey(id, FIELD_FOCUS_Y), 0.5f).finiteOr(0.5f).coerceIn(0f, 1f),
+                zoom = prefs.getFloat(entryKey(id, FIELD_ZOOM), 1f).finiteOr(1f).coerceIn(MIN_CROP_ZOOM, MAX_CROP_ZOOM),
             )
         }
     }
@@ -497,6 +507,8 @@ class ImageThemeRepository(context: Context) {
 }
 
 private fun entryKey(id: String, field: String): String = "entry.$id.$field"
+
+private fun Float.finiteOr(fallback: Float): Float = if (isFinite()) this else fallback
 
 internal fun calculateInSampleSize(width: Int, height: Int, maximumEdge: Int): Int =
     generateSequence(1) { it * 2 }

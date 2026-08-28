@@ -103,10 +103,13 @@ fun focalCropSelection(
     val viewportAspect = viewportWidth / viewportHeight
     val coverWidth = if (imageAspect > viewportAspect) viewportAspect / imageAspect else 1f
     val coverHeight = if (imageAspect > viewportAspect) 1f else imageAspect / viewportAspect
-    val zoom = focal.zoom.coerceIn(MIN_CROP_ZOOM, MAX_CROP_ZOOM)
+    val focusX = focal.focusX.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 0.5f
+    val focusY = focal.focusY.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 0.5f
+    val zoom = focal.zoom.takeIf(Float::isFinite)?.coerceIn(MIN_CROP_ZOOM, MAX_CROP_ZOOM)
+        ?: MIN_CROP_ZOOM
     val width = (coverWidth / zoom).coerceIn(0f, 1f)
     val height = (coverHeight / zoom).coerceIn(0f, 1f)
-    val left = (focal.focusX.coerceIn(0f, 1f) - width / 2f).coerceIn(0f, 1f - width)
-    val top = (focal.focusY.coerceIn(0f, 1f) - height / 2f).coerceIn(0f, 1f - height)
+    val left = (focusX - width / 2f).coerceIn(0f, 1f - width)
+    val top = (focusY - height / 2f).coerceIn(0f, 1f - height)
     return CropSelection(left, top, width, height)
 }

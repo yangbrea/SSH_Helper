@@ -36,7 +36,8 @@ const val MIN_IMAGE_OVERLAY_STRENGTH = 0.35f
 const val MAX_IMAGE_OVERLAY_STRENGTH = 0.80f
 
 internal fun coerceImageOverlayStrength(value: Float): Float =
-    value.coerceIn(MIN_IMAGE_OVERLAY_STRENGTH, MAX_IMAGE_OVERLAY_STRENGTH)
+    if (value.isFinite()) value.coerceIn(MIN_IMAGE_OVERLAY_STRENGTH, MAX_IMAGE_OVERLAY_STRENGTH)
+    else DEFAULT_IMAGE_OVERLAY_STRENGTH
 
 fun defaultImageOverlayStrength(variant: ImageThemeVariant): Float = when (variant) {
     ImageThemeVariant.IMMERSIVE -> 0.55f
