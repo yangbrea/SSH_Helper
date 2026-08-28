@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 
@@ -27,6 +28,7 @@ fun AppShellScreen(
 ) {
     var selectedId by rememberSaveable { mutableStateOf(initialDestination.id) }
     var detailVisible by rememberSaveable { mutableStateOf(false) }
+    val stateHolder = rememberSaveableStateHolder()
     val selected = AppDestination.fromId(selectedId)
     val navigate: (AppDestination) -> Unit = { destination ->
         selectedId = destination.id
@@ -48,10 +50,12 @@ fun AppShellScreen(
     ) { padding ->
         val modifier = Modifier.padding(padding)
         Box {
-            when (selected) {
-                AppDestination.HOSTS -> hosts(modifier, navigate)
-                AppDestination.ACTIVITY -> activity(modifier, navigate)
-                AppDestination.SETTINGS -> settings(modifier, { detailVisible = it }, navigate)
+            stateHolder.SaveableStateProvider(selected.id) {
+                when (selected) {
+                    AppDestination.HOSTS -> hosts(modifier, navigate)
+                    AppDestination.ACTIVITY -> activity(modifier, navigate)
+                    AppDestination.SETTINGS -> settings(modifier, { detailVisible = it }, navigate)
+                }
             }
         }
     }
