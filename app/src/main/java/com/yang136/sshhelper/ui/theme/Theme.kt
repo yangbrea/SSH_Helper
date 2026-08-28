@@ -5,13 +5,25 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
+import com.yang136.sshhelper.ui.design.LocalSshMotion
+import com.yang136.sshhelper.ui.design.LocalSshSpacing
+import com.yang136.sshhelper.ui.design.LocalSshStatusColors
+import com.yang136.sshhelper.ui.design.SshMotion
+import com.yang136.sshhelper.ui.design.SshSpacing
+import com.yang136.sshhelper.ui.design.SshStatusColors
 
 val Navy950 = Color(0xFF07131F)
 val Navy900 = Color(0xFF0B1D2B)
@@ -56,6 +68,9 @@ private val OceanDark = darkColorScheme(
     onBackground = Color(0xFFE6F7FA),
     onSurface = Color(0xFFE6F7FA),
     error = Color(0xFFFF7B7B),
+    surfaceContainer = Color(0xFF102533),
+    surfaceContainerHigh = Color(0xFF173241),
+    outline = Color(0xFF73909A),
 )
 
 private val OceanLight = lightColorScheme(
@@ -64,6 +79,9 @@ private val OceanLight = lightColorScheme(
     background = Color(0xFFF4FAFB),
     surface = Color.White,
     surfaceVariant = Color(0xFFDCEEF1),
+    surfaceContainer = Color(0xFFEAF3F5),
+    surfaceContainerHigh = Color(0xFFDDEBED),
+    outline = Color(0xFF657A80),
 )
 
 private val EmeraldDark = darkColorScheme(
@@ -123,18 +141,51 @@ private val VioletLight = lightColorScheme(
     surfaceVariant = Color(0xFFECE2FA),
 )
 
+private val SshTypography = Typography(
+    headlineSmall = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+)
+
+private val SshShapes = Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+)
+
 @Composable
 fun SshHelperTheme(settings: AppSettings = AppSettings(), content: @Composable () -> Unit) {
-    val dark = when (settings.themeMode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
+    val dark = resolveDarkMode(settings.themeMode, isSystemInDarkTheme())
     val colors = colorScheme(settings.themePreset, dark)
     val terminal = terminalPalette(settings.themePreset, dark)
-    androidx.compose.runtime.CompositionLocalProvider(LocalTerminalPalette provides terminal) {
-        MaterialTheme(colorScheme = colors, content = content)
+    val status = SshStatusColors(
+        connected = if (dark) Color(0xFF62D69A) else Color(0xFF16734B),
+        connecting = colors.primary,
+        waiting = if (dark) Color(0xFFE8C96B) else Color(0xFF756000),
+        warning = if (dark) Color(0xFFFFB86A) else Color(0xFF9B5200),
+        error = colors.error,
+        offline = colors.onSurfaceVariant,
+    )
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalTerminalPalette provides terminal,
+        LocalSshSpacing provides SshSpacing(),
+        LocalSshMotion provides SshMotion(),
+        LocalSshStatusColors provides status,
+    ) {
+        MaterialTheme(colorScheme = colors, typography = SshTypography, shapes = SshShapes, content = content)
     }
+}
+
+internal fun resolveDarkMode(mode: ThemeMode, systemDark: Boolean): Boolean = when (mode) {
+    ThemeMode.SYSTEM -> systemDark
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
 }
 
 private fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when (preset) {
