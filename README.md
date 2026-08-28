@@ -91,6 +91,10 @@ adb -s 192.168.2.35:43631 shell nc -z -w 3 192.168.2.47 22
 
 项目使用独立 git 仓库（`main` 分支）做版本管理，构建产物（`build/`、`app/build/`、`node_modules/` 等）不入库；`app/src/main/assets/terminal/terminal.js` 与 `app/schemas/`（Room schema 导出）随源码提交。
 
+## 运维手册
+
+家庭主机（NAT 后）经云服务器反向隧道做内网穿透、并从手机远程使用本机 DSH CLI / Web GUI 的完整配置流程，见 [docs/remote-access-playbook.md](docs/remote-access-playbook.md)。
+
 ## 终端资源
 
 xterm.js 资源离线打包在 APK 中。修改 `terminal-web/src/index.js` 后执行：
