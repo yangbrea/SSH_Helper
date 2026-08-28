@@ -63,7 +63,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -113,6 +113,7 @@ import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
+import com.yang136.sshhelper.ui.design.SshTopAppBar
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
@@ -254,33 +255,20 @@ fun TerminalScreen(
     Scaffold(
         topBar = {
             Column {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            current?.displayName ?: "SSH 终端",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            connectionLabel(current?.connection ?: ConnectionState.Idle),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = connectionColor(current?.connection ?: ConnectionState.Idle),
-                        )
-                    }
-                },
+            SshTopAppBar(
+                title = current?.displayName ?: "SSH 终端",
+                subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
                     IconButton(onClick = { showSearch = !showSearch; controller.clearSelection(); if (!showSearch) controller.clearSearch() }) { Icon(Icons.Default.Search, "搜索") }
                     IconButton(onClick = { controller.clearSelection(); controller.clearSearch(); showSearch = false; showSnippets = true }) { Icon(Icons.Default.Code, "快捷命令") }
-                    IconButton(onClick = { if (hasSelection) controller.copySelection() else controller.enterSelectionMode() }) {
-                        Icon(Icons.Default.ContentCopy, "复制")
+                    if (selectionMode && hasSelection) IconButton(onClick = controller::copySelection) {
+                        Icon(Icons.Default.ContentCopy, "复制所选内容")
                     }
                     IconButton(onClick = { showMoreMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
                     DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
                         DropdownMenuItem(text = { Text("粘贴") }, onClick = { showMoreMenu = false; controller.paste(context) }, enabled = !selectionMode)
+                        DropdownMenuItem(text = { Text("选择文本") }, onClick = { showMoreMenu = false; controller.enterSelectionMode() }, enabled = !selectionMode)
                         DropdownMenuItem(text = { Text("端口转发") }, onClick = { showMoreMenu = false; current?.let { onOpenForwards(it.profile.id) } })
                         DropdownMenuItem(text = { Text("字体大小") }, onClick = { showMoreMenu = false; showFontDialog = true })
                         DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { showMoreMenu = false; current?.let { sessionsViewModel.disconnect(it.id) } })
@@ -288,14 +276,14 @@ fun TerminalScreen(
                 },
             )
             if (hostSessions.isNotEmpty()) {
-                ScrollableTabRow(selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0), edgePadding = 4.dp) {
+                PrimaryScrollableTabRow(selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0), edgePadding = 4.dp) {
                     hostSessions.forEach { session ->
                         Tab(
                             selected = session.id == activeId,
                             onClick = { activeId = session.id; showSearch = false; controller.clearSearch() },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(session.displayName, maxLines = 1)
+                                    Text("${session.displayName} · ${session.connection.presentation().first}", maxLines = 1)
                                     IconButton(onClick = { closingSession = session.id }) { Icon(Icons.Default.Close, "关闭 ${session.displayName}") }
                                 }
                             },
