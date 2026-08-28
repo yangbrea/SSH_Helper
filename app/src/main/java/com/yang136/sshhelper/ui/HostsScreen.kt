@@ -47,6 +47,7 @@ fun HostsScreen(
     val deleteError by vm.deleteError.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var query by rememberSaveable { mutableStateOf("") }
+    var sessionsExpanded by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<HostProfile?>(null) }
     var hostMenu by remember { mutableStateOf<Long?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
@@ -88,18 +89,27 @@ fun HostsScreen(
                     leadingIcon = { Icon(Icons.Default.Search, null) }, label = { Text("搜索名称、地址或用户") })
             }
             if (sessions.isNotEmpty()) {
-                item { SshSectionHeader("活动会话", summary = "${sessions.size}/8") }
-                items(sessions.take(3), key = { "session-${it.id.value}" }) { session ->
-                    Card(onClick = { onOpenSession(session.id) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f))) {
-                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text(session.displayName, fontWeight = FontWeight.SemiBold)
-                                Text(session.profile.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                item {
+                    SshSectionHeader(
+                        title = "活动会话",
+                        summary = "${sessions.size}/8",
+                        onClick = { sessionsExpanded = !sessionsExpanded },
+                        expanded = sessionsExpanded,
+                    )
+                }
+                if (sessionsExpanded) {
+                    items(sessions.take(3), key = { "session-${it.id.value}" }) { session ->
+                        Card(onClick = { onOpenSession(session.id) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f))) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
+                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                    Text(session.displayName, fontWeight = FontWeight.SemiBold)
+                                    Text(session.profile.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                val presentation = session.connection.presentation()
+                                SshStatusBadge(presentation.first, presentation.second)
+                                IconButton(onClick = { closingSession = session }) { Icon(Icons.Default.Close, "关闭会话") }
                             }
-                            val presentation = session.connection.presentation()
-                            SshStatusBadge(presentation.first, presentation.second)
-                            IconButton(onClick = { closingSession = session }) { Icon(Icons.Default.Close, "关闭会话") }
                         }
                     }
                 }
