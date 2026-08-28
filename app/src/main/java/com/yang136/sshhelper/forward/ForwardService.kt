@@ -16,6 +16,8 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.yang136.sshhelper.MainActivity
 import com.yang136.sshhelper.R
 import com.yang136.sshhelper.SshHelperApplication
@@ -27,6 +29,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+
+internal enum class ForwardServiceStartMode { REGULAR, FOREGROUND }
+
+internal fun forwardServiceStartMode(appInForeground: Boolean): ForwardServiceStartMode =
+    if (appInForeground) ForwardServiceStartMode.REGULAR else ForwardServiceStartMode.FOREGROUND
 
 /**
  * Foreground service (specialUse) that keeps SSH port-forwarding tunnels alive while at least
@@ -40,20 +47,19 @@ class ForwardService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        // Some OEMs (observed on vivo Android 15) enforce a much shorter foreground-service
+        // promotion window than AOSP. Promote in onCreate rather than waiting for
+        // onStartCommand so a busy first Compose frame cannot trigger a process-killing timeout.
+        promoteToForeground()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 必须先于任何可能耗时的初始化调用 startForeground()：系统要求在
         // startForegroundService() 返回后 5 秒内完成，否则抛
         // ForegroundServiceDidNotStartInTimeException（进程崩溃）。
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            buildMinimalNotification(applicationContext),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            } else {
-                0
-            },
-        )
+        promoteToForeground()
         val container = (application as SshHelperApplication).container
         val manager = container.forwardManager
         // 用真实状态刷新通知内容。
@@ -79,6 +85,19 @@ class ForwardService : Service() {
         // 持有，进程死亡后全部内存状态丢失，恢复"转发意图"由 ForwardManager 读取
         // 持久化的 desired_running 完成（保险库锁定时只显示"等待解锁"）。
         return START_STICKY
+    }
+
+    private fun promoteToForeground() {
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            buildMinimalNotification(applicationContext),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                0
+            },
+        )
     }
 
     override fun onDestroy() {
@@ -108,7 +127,17 @@ class ForwardService : Service() {
         private const val CHANNEL_ID = "ssh_helper_forward"
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, ForwardService::class.java))
+            val intent = Intent(context, ForwardService::class.java)
+            val appInForeground = ProcessLifecycleOwner.get().lifecycle.currentState
+                .isAtLeast(Lifecycle.State.STARTED)
+            if (forwardServiceStartMode(appInForeground) == ForwardServiceStartMode.REGULAR) {
+                // While an Activity is visible, a normal service start is allowed. The service
+                // promotes itself in onCreate(), avoiding aggressive OEM interpretations of the
+                // startForegroundService promotion deadline (notably vivo Android 15).
+                context.startService(intent)
+            } else {
+                ContextCompat.startForegroundService(context, intent)
+            }
         }
 
         fun stop(context: Context) {

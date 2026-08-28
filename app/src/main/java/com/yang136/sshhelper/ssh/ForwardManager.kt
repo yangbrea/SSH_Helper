@@ -120,7 +120,13 @@ class DefaultForwardManager(
         scope.launch { sessions.sessions.collect { reconcile(it) } }
         // 进程被系统回收后重建：按持久化的规则 ID 集合恢复用户意图。
         // 凭据不足（保险库锁定）时规则进入"等待解锁"，不假装恢复。
-        scope.launch { restoreDesiredRules() }
+        scope.launch {
+            // Avoid issuing startForegroundService while the activity's first Compose frame is
+            // monopolising the main thread. vivo Android 15 applies an approximately one-second
+            // promotion deadline and otherwise kills the process before Service.onCreate runs.
+            delay(FORWARD_RESTORE_STARTUP_DELAY_MS)
+            restoreDesiredRules()
+        }
         // 保险库锁定期间 ensureSession 会直接返回；解锁后重试恢复。
         scope.launch {
             var previous: VaultState? = null
@@ -513,6 +519,7 @@ class DefaultForwardManager(
     }
 
     private companion object {
+        const val FORWARD_RESTORE_STARTUP_DELAY_MS = 1_500L
         val DESIRED_RULE_IDS = stringSetPreferencesKey("desired_rule_ids")
     }
 }
