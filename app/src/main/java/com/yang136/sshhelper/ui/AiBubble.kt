@@ -66,6 +66,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -97,6 +98,8 @@ import com.yang136.sshhelper.ai.MarkdownInline
 import com.yang136.sshhelper.ai.validateCommand
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ui.design.SshStatusBadge
+import com.yang136.sshhelper.ui.design.SshStatusTone
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
@@ -138,6 +141,7 @@ fun AiBubble(
             Modifier
                 .offset { IntOffset(bubbleOffsetX.roundToInt(), bubbleOffsetY.roundToInt()) }
                 .size(52.dp)
+                .shadow(6.dp, CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
@@ -163,6 +167,9 @@ fun AiBubble(
         ModalBottomSheet(
             onDismissRequest = { expanded = false },
             sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 4.dp,
             // 内容区滑动不触发关闭（material3 1.4.0）；关闭只由顶部横杠拖动触发。
             sheetGesturesEnabled = false,
             dragHandle = { SheetDragHandle(sheetState) { expanded = false } },
@@ -283,12 +290,13 @@ private fun AgentHeader(
     onCollapse: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-            Text("Terminal Agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(sessionName, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("终端助手", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(sessionName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        SshStatusBadge(if (generating) "生成中" else "就绪", if (generating) SshStatusTone.CONNECTING else SshStatusTone.CONNECTED)
         if (generating) IconButton(onClick = onCancelGeneration) { Icon(Icons.Default.Stop, "停止生成") }
         IconButton(onClick = onClear) { Icon(Icons.Default.ClearAll, "清空对话") }
         IconButton(onClick = onCollapse) { Icon(Icons.Default.KeyboardArrowDown, "收起") }
