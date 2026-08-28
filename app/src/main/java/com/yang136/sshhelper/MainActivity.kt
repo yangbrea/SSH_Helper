@@ -25,7 +25,12 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.yang136.sshhelper.ui.HostEditorScreen
 import com.yang136.sshhelper.ui.HostsScreen
+import com.yang136.sshhelper.ui.HostWorkspaceScreen
+import com.yang136.sshhelper.ui.ActivityScreen
+import com.yang136.sshhelper.ui.AppDestination
+import com.yang136.sshhelper.ui.AppShellScreen
 import com.yang136.sshhelper.ui.SettingsScreen
+import com.yang136.sshhelper.ui.SettingsDestination
 import com.yang136.sshhelper.ui.SettingsViewModel
 import com.yang136.sshhelper.ui.SessionsViewModel
 import com.yang136.sshhelper.ui.SnippetsViewModel
@@ -96,27 +101,24 @@ class MainActivity : FragmentActivity() {
             SshHelperTheme(settings) {
                 Surface(Modifier.fillMaxSize()) {
                     val navController = rememberNavController()
+                    val initialDestination = if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) AppDestination.SETTINGS else AppDestination.HOSTS
+                    val initialSettingsDestination = SettingsDestination.fromId(intent?.getStringExtra(EXTRA_SETTINGS_SECTION))
                     androidx.compose.runtime.LaunchedEffect(Unit) {
-                        if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) {
-                            navController.navigate("settings")
-                            intent?.removeExtra(EXTRA_OPEN_SETTINGS)
-                        }
+                        intent?.removeExtra(EXTRA_OPEN_SETTINGS)
+                        intent?.removeExtra(EXTRA_SETTINGS_SECTION)
                     }
                     val terminalPalette = LocalTerminalPalette.current
-                    NavHost(navController = navController, startDestination = "hosts") {
-                        composable("hosts") {
-                            HostsScreen(
+                    NavHost(navController = navController, startDestination = "home") {
+                        composable("home") {
+                            AppShellScreen(
+                                initialDestination = initialDestination,
+                                hosts = { modifier, _ -> HostsScreen(
                                 onAdd = { navController.navigate("edit/0") },
                                 onEdit = { navController.navigate("edit/${it.id}") },
+                                onOpenHost = { navController.navigate("host/${it.id}") },
                                 onConnect = { host ->
                                     sessionsViewModel.create(host, SessionFeature.SHELL)?.let { id ->
                                         navController.navigate("terminal/${host.id}/${id.value}")
-                                        true
-                                    } ?: false
-                                },
-                                onFiles = { host ->
-                                    sessionsViewModel.create(host, SessionFeature.SFTP)?.let { id ->
-                                        navController.navigate("files/${id.value}")
                                         true
                                     } ?: false
                                 },
@@ -133,7 +135,6 @@ class MainActivity : FragmentActivity() {
                                 },
                                 onCloseSession = sessionsViewModel::close,
                                 onCloseHostSessions = sessionsViewModel::closeForHost,
-                                onSettings = { navController.navigate("settings") },
                                 onSnippets = { navController.navigate("snippets") },
                                 vaultState = vaultState,
                                 onVaultClick = {
@@ -144,6 +145,48 @@ class MainActivity : FragmentActivity() {
                                     }
                                 },
                                 onExit = { sessionsViewModel.closeAll(::finish) },
+                                modifier = modifier,
+                            ) },
+                                activity = { modifier, navigate -> ActivityScreen(
+                                    hosts = hosts,
+                                    sessions = sessions,
+                                    onOpenSession = { id ->
+                                        sessions.firstOrNull { it.id == id }?.let { session ->
+                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
+                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        }
+                                    },
+                                    onOpenHost = { navController.navigate("host/$it") },
+                                    onOpenForwards = { navController.navigate("forwards/$it") },
+                                    onOpenDocuments = { navigate(AppDestination.SETTINGS) },
+                                    onBack = { navigate(AppDestination.HOSTS) },
+                                    modifier = modifier,
+                                ) },
+                                settings = { modifier, onDetailChanged, navigate -> SettingsScreen(
+                                    settings = settings,
+                                    onThemeModeChange = settingsViewModel::setThemeMode,
+                                    onThemePresetChange = settingsViewModel::setThemePreset,
+                                    onFontSizeChange = settingsViewModel::setTerminalFontSize,
+                                    onExtraKeysChange = settingsViewModel::setExtraKeys,
+                                    onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
+                                    onAiApiKeyChange = settingsViewModel::setAiApiKey,
+                                    onAiModelChange = settingsViewModel::setAiModel,
+                                    onAiSendContextChange = settingsViewModel::setAiSendContext,
+                                    onAiShowBubbleChange = settingsViewModel::setAiShowBubble,
+                                    onForwardReconnectAfterLockChange = settingsViewModel::setForwardReconnectAfterLock,
+                                    vaultState = vaultState,
+                                    canAuthenticate = container.credentialVault.canAuthenticate(),
+                                    onEnableVault = { requestVault(request = { container.credentialVault.enable() }) },
+                                    onUnlockVault = { requestVault(request = { container.credentialVault.unlock() }) },
+                                    onDisableVault = { requestVault(request = { container.credentialVault.disable() }) },
+                                    onLockVault = container.credentialVault::lock,
+                                    onClearUnavailableVault = { requestVault(request = { container.credentialVault.clearUnavailableCredentials() }) },
+                                    onBack = { navigate(AppDestination.HOSTS) },
+                                    initialDestination = initialSettingsDestination,
+                                    modifier = modifier,
+                                    showRootBack = false,
+                                    onDetailChanged = onDetailChanged,
+                                ) },
                             )
                         }
                         composable("settings") {
@@ -177,6 +220,40 @@ class MainActivity : FragmentActivity() {
                                 onDelete = snippetsViewModel::delete,
                                 onBack = navController::popBackStack,
                             )
+                        }
+                        composable(
+                            route = "host/{hostId}",
+                            arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
+                        ) { entry ->
+                            val hostId = entry.arguments?.getLong("hostId") ?: 0L
+                            hosts.firstOrNull { it.id == hostId }?.let { host ->
+                                HostWorkspaceScreen(
+                                    host = host,
+                                    sessions = sessions,
+                                    onTerminal = { profile ->
+                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
+                                            navController.navigate("terminal/${profile.id}/${id.value}")
+                                            true
+                                        } ?: false
+                                    },
+                                    onFiles = { profile ->
+                                        sessionsViewModel.create(profile, SessionFeature.SFTP)?.let { id ->
+                                            navController.navigate("files/${id.value}")
+                                            true
+                                        } ?: false
+                                    },
+                                    onForwards = { navController.navigate("forwards/$it") },
+                                    onEdit = { navController.navigate("edit/${it.id}") },
+                                    onOpenSession = { id ->
+                                        sessions.firstOrNull { it.id == id }?.let { session ->
+                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
+                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        }
+                                    },
+                                    onCloseSession = sessionsViewModel::close,
+                                    onBack = navController::popBackStack,
+                                )
+                            }
                         }
                         composable(
                             route = "edit/{hostId}",
@@ -285,5 +362,6 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.yang136.sshhelper.OPEN_SETTINGS"
+        const val EXTRA_SETTINGS_SECTION = "com.yang136.sshhelper.SETTINGS_SECTION"
     }
 }

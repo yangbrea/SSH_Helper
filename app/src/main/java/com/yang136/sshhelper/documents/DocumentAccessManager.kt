@@ -252,7 +252,9 @@ class DocumentAccessManager(
         val open = PendingIntent.getActivity(
             appContext,
             notificationId,
-            Intent(appContext, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true),
+            Intent(appContext, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
+                .putExtra(MainActivity.EXTRA_SETTINGS_SECTION, "documents"),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         manager.notify(
