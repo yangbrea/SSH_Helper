@@ -166,6 +166,9 @@ fun SettingsScreen(
     onClearUnavailableVault: () -> Unit,
     onBack: () -> Unit,
     initialDestination: SettingsDestination? = null,
+    modifier: Modifier = Modifier,
+    showRootBack: Boolean = true,
+    onDetailChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as SshHelperApplication
@@ -179,6 +182,8 @@ fun SettingsScreen(
     var aiApiKey by rememberSaveable { mutableStateOf(settings.aiApiKey) }
     var aiModel by rememberSaveable { mutableStateOf(settings.aiModel) }
     val aiDirty = aiBaseUrl != settings.aiBaseUrl || aiApiKey != settings.aiApiKey || aiModel != settings.aiModel
+
+    LaunchedEffect(selectedId) { onDetailChanged(selectedId != null) }
 
     LaunchedEffect(settings.aiBaseUrl, settings.aiApiKey, settings.aiModel) {
         if (!aiDirty) {
@@ -197,11 +202,16 @@ fun SettingsScreen(
     BackHandler(onBack = handleBack)
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             SshTopAppBar(
                 title = selected?.title ?: "设置",
                 subtitle = selected?.let { "SSH Helper 偏好设置" },
-                navigationIcon = { IconButton(onClick = handleBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                navigationIcon = {
+                    if (selected != null || showRootBack) IconButton(onClick = handleBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    }
+                },
                 actions = {
                     if (selected == SettingsDestination.AI && aiDirty) {
                         TextButton(onClick = {
