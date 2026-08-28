@@ -286,6 +286,12 @@ class MainActivity : FragmentActivity() {
                                             true
                                         } ?: false
                                     },
+                                    onNewSession = { profile ->
+                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
+                                            navController.navigate("terminal/${profile.id}/${id.value}")
+                                            true
+                                        } ?: false
+                                    },
                                     onForwards = { navController.navigate("forwards/$it") },
                                     onEdit = { navController.navigate("edit/${it.id}") },
                                     onOpenSession = { id ->

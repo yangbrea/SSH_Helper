@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.LinkOff
@@ -170,6 +171,7 @@ fun TerminalScreen(
     var forceCredentialDialog by remember { mutableStateOf(false) }
     var ctrlArmed by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var sessionLimitReached by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
     var aiHidden by remember { mutableStateOf(false) }
 
@@ -260,6 +262,14 @@ fun TerminalScreen(
                 subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            val profile = current?.profile ?: return@IconButton
+                            sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id -> activeId = id }
+                                ?: run { sessionLimitReached = true }
+                        },
+                        enabled = current != null,
+                    ) { Icon(Icons.Default.Add, "新建会话") }
                     IconButton(onClick = { showSearch = !showSearch; controller.clearSelection(); if (!showSearch) controller.clearSearch() }) { Icon(Icons.Default.Search, "搜索") }
                     IconButton(onClick = { controller.clearSelection(); controller.clearSearch(); showSearch = false; showSnippets = true }) { Icon(Icons.Default.Code, "快捷命令") }
                     if (selectionMode && hasSelection) IconButton(onClick = controller::copySelection) {
@@ -471,6 +481,12 @@ fun TerminalScreen(
             dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
         )
     }
+
+    if (sessionLimitReached) AlertDialog(
+        onDismissRequest = { sessionLimitReached = false }, title = { Text("已达到会话上限") },
+        text = { Text("最多可同时保留 8 个会话，请先关闭一个会话。") },
+        confirmButton = { TextButton(onClick = { sessionLimitReached = false }) { Text("知道了") } },
+    )
 
     if (showFontDialog) {
         FontSizeDialog(

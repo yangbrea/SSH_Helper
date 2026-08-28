@@ -157,12 +157,13 @@ internal fun normalizePtySize(columns: Int, rows: Int): Pair<Int, Int> =
     columns.coerceIn(2, 500) to rows.coerceIn(2, 300)
 
 /**
- * 主机级会话复用：返回该主机的"主会话"（会话列表按创建顺序排列，取最先创建者）。
+ * 主机级会话复用：返回该主机的"当前会话"（会话列表按创建顺序排列，取最近创建的）。
+ * 用户新建会话后通常在其上工作，终端/文件应复用最新连接而不是最旧的主会话。
  * 排除纯转发专用会话（features == {PORT_FORWARD}）：后台隧道不承载终端/文件等
  * UI 功能，避免把界面功能挂到转发生命周期上；带 SHELL/SFTP（或混合）的会话均可复用。
  */
 internal fun selectReusableSession(sessions: List<ManagedSessionState>, hostId: Long): ManagedSessionState? =
-    sessions.firstOrNull { it.profile.id == hostId && it.features != setOf(SessionFeature.PORT_FORWARD) }
+    sessions.lastOrNull { it.profile.id == hostId && it.features != setOf(SessionFeature.PORT_FORWARD) }
 
 class SnippetsViewModel(private val container: AppContainer) : ViewModel() {
     val snippets = container.snippetRepository.snippets.stateIn(

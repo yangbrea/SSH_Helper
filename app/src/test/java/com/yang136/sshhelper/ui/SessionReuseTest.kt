@@ -32,9 +32,9 @@ class SessionReuseTest {
     }
 
     @Test
-    fun returnsPrimarySessionOfTheHost() {
+    fun returnsMostRecentlyCreatedSessionOfTheHost() {
         val list = listOf(session("a", 1), session("b", 1), session("c", 2))
-        assertEquals("a", selectReusableSession(list, 1L)?.id?.value)
+        assertEquals("b", selectReusableSession(list, 1L)?.id?.value)
     }
 
     @Test

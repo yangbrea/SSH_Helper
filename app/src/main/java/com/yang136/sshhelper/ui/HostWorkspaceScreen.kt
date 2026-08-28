@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
@@ -54,6 +55,7 @@ fun HostWorkspaceScreen(
     sessions: List<ManagedSessionState>,
     onTerminal: (HostProfile) -> Boolean,
     onFiles: (HostProfile) -> Boolean,
+    onNewSession: (HostProfile) -> Boolean,
     onForwards: (Long) -> Unit,
     onEdit: (HostProfile) -> Unit,
     onOpenSession: (SessionId) -> Unit,
@@ -106,6 +108,7 @@ fun HostWorkspaceScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SshActionTile(Icons.Default.Folder, "文件", { if (!onFiles(host)) sessionLimitReached = true }, Modifier.weight(1f))
                     SshActionTile(Icons.Default.Public, "端口转发", { onForwards(host.id) }, Modifier.weight(1f))
+                    SshActionTile(Icons.Default.Add, "新建会话", { if (!onNewSession(host)) sessionLimitReached = true }, Modifier.weight(1f))
                 }
             }
             item { SshSectionHeader("系统集成") }
