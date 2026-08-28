@@ -72,6 +72,7 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
     val vm: HostEditorViewModel = viewModel(factory = HostEditorViewModel.factory(app.container, hostId))
     val state by vm.state.collectAsStateWithLifecycle()
     val generatedKey by vm.generatedKey.collectAsStateWithLifecycle()
+    val documentAccessEnabled by vm.documentAccessEnabled.collectAsStateWithLifecycle()
     val vaultState by app.container.credentialVault.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var confirmDiscard by remember { mutableStateOf(false) }
@@ -159,6 +160,43 @@ fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack
                 }
                 if (state.rememberCredential) {
                     OutlinedTextField(state.passphrase, { vm.update { s -> s.copy(passphrase = it) } }, Modifier.fillMaxWidth(), label = { Text("私钥口令（可选）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Storage, null, tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text("在系统文件管理器中显示", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                        Text(
+                            when {
+                                hostId == 0L -> "请先保存主机，再单独授权其 SFTP 用户主目录"
+                                state.isDirty -> "请先保存当前修改，再更改系统文件访问授权"
+                                !state.rememberCredential -> "需先启用并保存登录凭据"
+                                else -> "授权独立于应用保险库；设备锁定时不可访问，关闭后立即撤销"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = documentAccessEnabled,
+                        enabled = hostId != 0L && !state.isDirty && state.rememberCredential,
+                        onCheckedChange = { enabled ->
+                            if (!enabled) {
+                                vm.setDocumentAccess(false)
+                            } else {
+                                val grant: () -> Unit = { vm.setDocumentAccess(true); Unit }
+                                if (vaultState == VaultState.Locked) onUnlockVault(grant) else grant()
+                            }
+                        },
+                    )
                 }
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

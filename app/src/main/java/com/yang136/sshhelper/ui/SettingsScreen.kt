@@ -458,6 +458,8 @@ private fun SecurityTab(
     onRequestClear: () -> Unit,
 ) {
     SettingsScaffoldList {
+        item { BackgroundConnectionCard() }
+        item { DocumentWritebackCard() }
         item {
             SectionTitle("安全", "凭据保护")
             SectionCard {

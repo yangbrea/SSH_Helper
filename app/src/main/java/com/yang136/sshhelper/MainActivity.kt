@@ -96,6 +96,12 @@ class MainActivity : FragmentActivity() {
             SshHelperTheme(settings) {
                 Surface(Modifier.fillMaxSize()) {
                     val navController = rememberNavController()
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) {
+                            navController.navigate("settings")
+                            intent?.removeExtra(EXTRA_OPEN_SETTINGS)
+                        }
+                    }
                     val terminalPalette = LocalTerminalPalette.current
                     NavHost(navController = navController, startDestination = "hosts") {
                         composable("hosts") {
@@ -275,5 +281,9 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_SETTINGS = "com.yang136.sshhelper.OPEN_SETTINGS"
     }
 }

@@ -205,6 +205,56 @@ data class TransferJobEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+/**
+ * Explicit, per-host grant for Android's system DocumentsProvider.  The payload is a
+ * versioned RouteCredentials bundle encrypted with a provider-only Android Keystore key.
+ * It is deliberately separate from [SecretEntity]: locking the interactive vault must not
+ * make an already-authorized SAF root disappear while the device itself is unlocked.
+ */
+@Entity(
+    tableName = "document_roots",
+    foreignKeys = [ForeignKey(
+        entity = HostEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["hostId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("hostId", unique = true)],
+)
+data class DocumentRootEntity(
+    @PrimaryKey val hostId: Long,
+    val credentialIv: ByteArray,
+    val credentialCiphertext: ByteArray,
+    val credentialVersion: Int = 1,
+    val routeSignature: String,
+    val enabledAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+/** A local recovery copy retained after an online DocumentsProvider write-back fails. */
+@Entity(
+    tableName = "document_writebacks",
+    foreignKeys = [ForeignKey(
+        entity = HostEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["hostId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("hostId"), Index("status")],
+)
+data class DocumentWritebackEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val hostId: Long,
+    val remotePath: String,
+    val localPath: String,
+    val baselineSize: Long,
+    val baselineModifiedAt: Long,
+    val status: String = "FAILED",
+    val error: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
 data class CommandSnippet(
     val id: Long = 0,
     val title: String,

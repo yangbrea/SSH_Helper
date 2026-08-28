@@ -55,7 +55,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpCapableSession, PortForwardCapableSession {
+class JschSshSession(
+    private val knownHostDao: KnownHostDao,
+    private val allowHostKeyPrompt: Boolean = true,
+) : SshSession, SftpCapableSession, PortForwardCapableSession {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val mutableOutput = MutableSharedFlow<ByteArray>(extraBufferCapacity = 128)
@@ -540,6 +543,10 @@ class JschSshSession(private val knownHostDao: KnownHostDao) : SshSession, SftpC
                 issue = HostKeyIssue.UNKNOWN,
                 subject = subject,
             )
+            if (!allowHostKeyPrompt) {
+                mutableHostKeyRequest.value = request
+                return HostKeyRepository.NOT_INCLUDED
+            }
             val decision = CompletableDeferred<Boolean>()
             hostKeyDecision.set(decision)
             mutableHostKeyRequest.value = request
@@ -643,8 +650,13 @@ private inline fun <reified T : Throwable> Throwable?.hasCause(): Boolean {
 private fun Throwable.safeMessage(): String = message?.takeIf(String::isNotBlank)?.take(160) ?: this::class.java.simpleName
 
 internal const val SSH_CONNECT_TIMEOUT_MS = 15_000
-internal const val SSH_KEEPALIVE_INTERVAL_MS = 20_000
-internal const val SSH_KEEPALIVE_MAX_MISSES = 3
+/**
+ * 保活探针间隔 5s：比默认 20s 更激进，配合服务端/NAT 空闲清理（常见 30s~5min）
+ * 留足余量；即使个别探针被 Wi-Fi 省电延迟，也能赶在路径超时前刷新连接。
+ * 判定死亡 ≈ 间隔 × 容忍次数 = 5s × 6 = 30s。
+ */
+internal const val SSH_KEEPALIVE_INTERVAL_MS = 5_000
+internal const val SSH_KEEPALIVE_MAX_MISSES = 6
 /** 无 shell 转发会话的传输监视轮询间隔。 */
 internal const val TRANSPORT_WATCH_INTERVAL_MS = 5_000L
 /** 未知主机密钥确认超时；超时按拒绝处理。 */

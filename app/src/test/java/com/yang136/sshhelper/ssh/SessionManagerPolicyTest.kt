@@ -31,8 +31,9 @@ class SessionManagerPolicyTest {
     @Test
     fun reconnectOnlyHandlesUnexpectedTransportFailures() {
         assertEquals(15_000, SSH_CONNECT_TIMEOUT_MS)
-        assertEquals(20_000, SSH_KEEPALIVE_INTERVAL_MS)
-        assertEquals(3, SSH_KEEPALIVE_MAX_MISSES)
+        assertEquals(5_000, SSH_KEEPALIVE_INTERVAL_MS)
+        assertEquals(6, SSH_KEEPALIVE_MAX_MISSES)
+        assertEquals(30_000, SSH_KEEPALIVE_INTERVAL_MS * SSH_KEEPALIVE_MAX_MISSES)
         assertEquals(true, DisconnectCause.TRANSPORT_CLOSED.isAutoReconnectEligible())
         assertEquals(true, DisconnectCause.KEEPALIVE_TIMEOUT.isAutoReconnectEligible())
         assertEquals(false, DisconnectCause.REMOTE_SHELL_EXIT.isAutoReconnectEligible())

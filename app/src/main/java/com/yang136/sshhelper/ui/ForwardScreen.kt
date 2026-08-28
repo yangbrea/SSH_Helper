@@ -1,5 +1,10 @@
 package com.yang136.sshhelper.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yang136.sshhelper.SshHelperApplication
@@ -66,7 +72,9 @@ import com.yang136.sshhelper.ssh.isActive
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
-    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as SshHelperApplication
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as SshHelperApplication
+    val permissionPreferences = remember { context.getSharedPreferences("background_connection_guidance", 0) }
     val vm: ForwardViewModel = viewModel(
         key = "forward-$hostId",
         factory = ForwardViewModel.factory(app.container, hostId),
@@ -77,6 +85,30 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<PortForwardRule?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<PortForwardRule?>(null) }
+    var pendingStart by remember { mutableStateOf<Long?>(null) }
+    var showNotificationWarning by remember { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        pendingStart?.let(vm::start)
+        pendingStart = null
+        if (!granted) showNotificationWarning = true
+    }
+    val startForward: (Long) -> Unit = { ruleId ->
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            if (!permissionPreferences.getBoolean("notification_prompted", false)) {
+                permissionPreferences.edit().putBoolean("notification_prompted", true).apply()
+                pendingStart = ruleId
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                vm.start(ruleId)
+                showNotificationWarning = true
+            }
+        } else {
+            vm.start(ruleId)
+        }
+    }
 
     val running = rules.filter { states[it.id]?.isActive() == true }
     val stopped = rules.filter { states[it.id]?.isActive() != true }
@@ -106,49 +138,52 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
             )
         },
     ) { padding ->
-        if (rules.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Public, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(12.dp))
-                    Text("还没有转发规则", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "把远端内网服务映射到本机、反向打通，或把 SSH 变成 SOCKS5 代理",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 32.dp),
-                    )
-                    Text("点击右下角“添加规则”开始", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
-                }
-            }
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (running.isNotEmpty()) {
-                    item { SectionHeader("运行中", running.size) }
-                    items(running, key = PortForwardRule::id) { rule ->
-                        ForwardRuleCard(
-                            rule = rule,
-                            state = states[rule.id] ?: ForwardState.Stopped,
-                            onStart = { vm.start(rule.id) },
-                            onStop = { vm.stop(rule.id) },
-                            onDelete = { deleting = rule },
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            BatteryGuardBanner(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            if (rules.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Public, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(12.dp))
+                        Text("还没有转发规则", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "把远端内网服务映射到本机、反向打通，或把 SSH 变成 SOCKS5 代理",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 32.dp),
                         )
+                        Text("点击右下角“添加规则”开始", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
                     }
                 }
-                if (stopped.isNotEmpty()) {
-                    item { SectionHeader("已停止", stopped.size, topPadding = if (running.isEmpty()) 0 else 10) }
-                    items(stopped, key = PortForwardRule::id) { rule ->
-                        ForwardRuleCard(
-                            rule = rule,
-                            state = states[rule.id] ?: ForwardState.Stopped,
-                            onStart = { vm.start(rule.id) },
-                            onStop = { vm.stop(rule.id) },
-                            onDelete = { deleting = rule },
-                        )
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (running.isNotEmpty()) {
+                        item { SectionHeader("运行中", running.size) }
+                        items(running, key = PortForwardRule::id) { rule ->
+                            ForwardRuleCard(
+                                rule = rule,
+                                state = states[rule.id] ?: ForwardState.Stopped,
+                                onStart = { startForward(rule.id) },
+                                onStop = { vm.stop(rule.id) },
+                                onDelete = { deleting = rule },
+                            )
+                        }
+                    }
+                    if (stopped.isNotEmpty()) {
+                        item { SectionHeader("已停止", stopped.size, topPadding = if (running.isEmpty()) 0 else 10) }
+                        items(stopped, key = PortForwardRule::id) { rule ->
+                            ForwardRuleCard(
+                                rule = rule,
+                                state = states[rule.id] ?: ForwardState.Stopped,
+                                onStart = { startForward(rule.id) },
+                                onStop = { vm.stop(rule.id) },
+                                onDelete = { deleting = rule },
+                            )
+                        }
                     }
                 }
             }
@@ -170,6 +205,14 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
             text = { Text("将停止并删除“${rule.name}”。") },
             confirmButton = { TextButton(onClick = { vm.delete(rule.id); deleting = null }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
+        )
+    }
+    if (showNotificationWarning) {
+        AlertDialog(
+            onDismissRequest = { showNotificationWarning = false },
+            title = { Text("通知权限未开启") },
+            text = { Text("转发仍会启动，但前台服务会继续受系统限制，转发状态和通知中的停止、保活设置操作也可能不可见。") },
+            confirmButton = { TextButton(onClick = { showNotificationWarning = false }) { Text("知道了") } },
         )
     }
 }

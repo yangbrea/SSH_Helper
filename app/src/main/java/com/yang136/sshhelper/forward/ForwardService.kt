@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground service (specialUse) that keeps SSH port-forwarding tunnels alive while at least
- * one rule is running, starting, or reconnecting. START_NOT_STICKY: if the system kills the
+ * one rule is running, starting, or reconnecting. START_STICKY: if the system kills the
  * process, tunnels are not silently restored and no authentication is triggered.
  */
 class ForwardService : Service() {
@@ -134,6 +134,7 @@ class ForwardService : Service() {
                 .setContentText(text)
                 .setContentIntent(openIntent(context))
                 .setOngoing(true)
+                .addAction(0, "保活设置", batterySettingsPendingIntent(context))
                 .addAction(0, "全部停止", stopAllIntent(context))
                 .build()
         }
@@ -170,27 +171,42 @@ class ForwardService : Service() {
             Intent(context, ForwardActionReceiver::class.java).setAction(ForwardActionReceiver.ACTION_STOP_ALL),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+
+        private fun batterySettingsPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+            context, 2,
+            Intent(context, ForwardActionReceiver::class.java).setAction(ForwardActionReceiver.ACTION_OPEN_BATTERY_SETTINGS),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 }
 
 class ForwardActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_STOP_ALL) {
-            val pendingResult = goAsync()
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                try {
-                    (context.applicationContext as SshHelperApplication).container.forwardManager.stopAll()
-                } catch (error: Throwable) {
-                    // 停止失败也不能让异常进入默认未捕获处理器（协程未捕获会终止进程）。
-                } finally {
-                    // 无论成功与否都必须结束广播：否则系统超时后判定接收器无响应。
-                    pendingResult.finish()
+        when (intent.action) {
+            ACTION_STOP_ALL -> {
+                val pendingResult = goAsync()
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    try {
+                        (context.applicationContext as SshHelperApplication).container.forwardManager.stopAll()
+                    } catch (error: Throwable) {
+                        // 停止失败也不能让异常进入默认未捕获处理器（协程未捕获会终止进程）。
+                    } finally {
+                        // 无论成功与否都必须结束广播：否则系统超时后判定接收器无响应。
+                        pendingResult.finish()
+                    }
                 }
+            }
+
+            ACTION_OPEN_BATTERY_SETTINGS -> {
+                // 后台掉线多因系统暂停了无可见窗口应用的网络；引导用户豁免电池优化。
+                // 通知点击属于用户交互，后台启动 Activity 在此场景被系统允许。
+                com.yang136.sshhelper.settings.launchBatterySettings(context, preferOem = false)
             }
         }
     }
 
     companion object {
         const val ACTION_STOP_ALL = "com.yang136.sshhelper.STOP_FORWARDS"
+        const val ACTION_OPEN_BATTERY_SETTINGS = "com.yang136.sshhelper.OPEN_BATTERY_SETTINGS"
     }
 }

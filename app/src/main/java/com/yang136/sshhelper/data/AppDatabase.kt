@@ -175,6 +175,39 @@ interface CommandSnippetDao {
     @Delete suspend fun delete(snippet: CommandSnippetEntity)
 }
 
+@Dao
+interface DocumentAccessDao {
+    @Query("SELECT * FROM document_roots ORDER BY enabledAt")
+    fun observeRoots(): Flow<List<DocumentRootEntity>>
+
+    @Query("SELECT * FROM document_roots ORDER BY enabledAt")
+    suspend fun roots(): List<DocumentRootEntity>
+
+    @Query("SELECT * FROM document_roots WHERE hostId = :hostId LIMIT 1")
+    suspend fun root(hostId: Long): DocumentRootEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putRoot(root: DocumentRootEntity)
+
+    @Query("DELETE FROM document_roots WHERE hostId = :hostId")
+    suspend fun deleteRoot(hostId: Long)
+
+    @Query("SELECT * FROM document_writebacks ORDER BY updatedAt DESC")
+    fun observeWritebacks(): Flow<List<DocumentWritebackEntity>>
+
+    @Query("SELECT * FROM document_writebacks ORDER BY updatedAt DESC")
+    suspend fun writebacks(): List<DocumentWritebackEntity>
+
+    @Query("SELECT * FROM document_writebacks WHERE id = :id LIMIT 1")
+    suspend fun writeback(id: Long): DocumentWritebackEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putWriteback(writeback: DocumentWritebackEntity): Long
+
+    @Query("DELETE FROM document_writebacks WHERE id = :id")
+    suspend fun deleteWriteback(id: Long)
+}
+
 @Database(
     entities = [
         HostEntity::class,
@@ -187,8 +220,10 @@ interface CommandSnippetDao {
         TransferBatchEntity::class,
         TransferJobEntity::class,
         PortForwardRuleEntity::class,
+        DocumentRootEntity::class,
+        DocumentWritebackEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -202,13 +237,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sftpBookmarkDao(): SftpBookmarkDao
     abstract fun transferDao(): TransferDao
     abstract fun portForwardRuleDao(): PortForwardRuleDao
+    abstract fun documentAccessDao(): DocumentAccessDao
 
     companion object {
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "ssh_helper.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -301,6 +337,41 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE hosts ADD COLUMN proxyUsername TEXT")
                 db.execSQL("ALTER TABLE secrets ADD COLUMN proxyIv BLOB")
                 db.execSQL("ALTER TABLE secrets ADD COLUMN proxyCiphertext BLOB")
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS document_roots (
+                        hostId INTEGER NOT NULL PRIMARY KEY,
+                        credentialIv BLOB NOT NULL,
+                        credentialCiphertext BLOB NOT NULL,
+                        credentialVersion INTEGER NOT NULL,
+                        routeSignature TEXT NOT NULL,
+                        enabledAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(hostId) REFERENCES hosts(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_document_roots_hostId ON document_roots(hostId)")
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS document_writebacks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        hostId INTEGER NOT NULL,
+                        remotePath TEXT NOT NULL,
+                        localPath TEXT NOT NULL,
+                        baselineSize INTEGER NOT NULL,
+                        baselineModifiedAt INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        error TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(hostId) REFERENCES hosts(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_document_writebacks_hostId ON document_writebacks(hostId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_document_writebacks_status ON document_writebacks(status)")
             }
         }
     }

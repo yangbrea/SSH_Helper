@@ -144,4 +144,34 @@ class AppDatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate5To6_preservesConnectionAndTransferDataAndCreatesDocumentTables() {
+        val name = "$databaseName-5-6"
+        helper.createDatabase(name, 5).apply {
+            execSQL("INSERT INTO hosts (id,name,hostname,port,username,authType,rememberCredential,privateKeyName,autoReconnect,jumpHostId,proxyType,proxyHost,proxyPort,proxyUsername,createdAt,updatedAt,lastConnectedAt) VALUES (1,'旧主机','example.test',22,'root','PASSWORD',1,NULL,1,NULL,NULL,NULL,NULL,NULL,1,2,NULL)")
+            execSQL("INSERT INTO secrets (id,hostId,credentialIv,credentialCiphertext,passphraseIv,passphraseCiphertext,encryptionVersion,proxyIv,proxyCiphertext) VALUES (1,1,X'0102',X'0304',NULL,NULL,1,NULL,NULL)")
+            execSQL("INSERT INTO port_forward_rules (id,hostId,name,type,bindAddress,listenPort,targetHost,targetPort,autoStart) VALUES (1,1,'Web','LOCAL','127.0.0.1',8080,'127.0.0.1',80,1)")
+            execSQL("INSERT INTO transfer_batches (id,title,createdAt) VALUES (1,'批次',1)")
+            execSQL("INSERT INTO transfer_jobs (id,batchId,hostId,direction,source,destination,temporaryPath,totalBytes,transferredBytes,conflictPolicy,status,error,createdAt,updatedAt) VALUES (1,1,1,'DOWNLOAD','/remote','/local',NULL,10,4,'ASK','PAUSED',NULL,1,2)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate(name, 6, true, AppDatabase.MIGRATION_5_6).use { database ->
+            listOf(
+                "hosts" to "SELECT COUNT(*) FROM hosts WHERE id=1 AND name='旧主机'",
+                "secrets" to "SELECT COUNT(*) FROM secrets WHERE hostId=1 AND length(credentialCiphertext)=2",
+                "forwards" to "SELECT COUNT(*) FROM port_forward_rules WHERE hostId=1 AND listenPort=8080",
+                "transfers" to "SELECT COUNT(*) FROM transfer_jobs WHERE hostId=1 AND transferredBytes=4",
+                "document roots" to "SELECT COUNT(*) FROM document_roots",
+                "document writebacks" to "SELECT COUNT(*) FROM document_writebacks",
+            ).forEach { (label, query) ->
+                database.query(query).use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(label, if (label.startsWith("document")) 0 else 1, cursor.getInt(0))
+                }
+            }
+        }
+    }
 }

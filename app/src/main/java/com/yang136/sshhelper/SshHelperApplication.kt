@@ -17,6 +17,8 @@ import com.yang136.sshhelper.sftp.DefaultTransferManager
 import com.yang136.sshhelper.ssh.DefaultForwardManager
 import com.yang136.sshhelper.sftp.SftpRepository
 import androidx.work.Configuration
+import com.yang136.sshhelper.documents.DocumentAccessManager
+import com.yang136.sshhelper.documents.SshDocumentsBackend
 
 class SshHelperApplication : Application(), DefaultLifecycleObserver, Configuration.Provider {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -37,6 +39,8 @@ class AppContainer(application: Application) {
     val database = AppDatabase.create(application)
     val credentialVault = AndroidCredentialVault(application, database)
     val hostRepository = HostRepository(database, credentialVault)
+    val documentAccessManager = DocumentAccessManager(application, database, hostRepository)
+    val documentsBackend = SshDocumentsBackend(application, database, documentAccessManager)
     val snippetRepository = SnippetRepository(database)
     val settingsRepository = DataStoreSettingsRepository(application)
     val sessionManager = DefaultSessionManager(application, hostRepository, database.knownHostDao(), credentialVault = credentialVault, settings = settingsRepository)

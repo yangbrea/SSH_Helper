@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
@@ -44,6 +45,7 @@ class HostsViewModel(private val container: AppContainer) : ViewModel() {
     fun delete(profile: HostProfile) = viewModelScope.launch {
         runCatching {
             container.transferManager.cancelForHost(profile.id)
+            container.documentAccessManager.disable(profile.id)
             container.hostRepository.delete(profile)
         }.onFailure { mutableDeleteError.value = it.message ?: "删除失败" }
     }
@@ -251,6 +253,9 @@ class HostEditorViewModel(
     )
     private val mutableGeneratedKey = MutableStateFlow<GeneratedKeyState?>(null)
     val generatedKey: StateFlow<GeneratedKeyState?> = mutableGeneratedKey.asStateFlow()
+    val documentAccessEnabled: StateFlow<Boolean> = container.documentAccessManager.roots
+        .map { roots -> roots.any { it.hostId == hostId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private var privateKeyBytes: ByteArray? = null
 
     init {
@@ -308,6 +313,21 @@ class HostEditorViewModel(
         mutableGeneratedKey.value = null
     }
 
+    fun setDocumentAccess(enabled: Boolean) = viewModelScope.launch {
+        runCatching {
+            if (enabled) container.documentAccessManager.enable(hostId)
+            else container.documentAccessManager.disable(hostId)
+        }.onFailure { failure ->
+            mutableState.value = mutableState.value.copy(
+                error = if (enabled) {
+                    "无法开启系统文件访问：${failure.message ?: "未知错误"}"
+                } else {
+                    "无法关闭系统文件访问：${failure.message ?: "未知错误"}"
+                },
+            )
+        }
+    }
+
     suspend fun save(): Long? {
         val value = mutableState.value
         val profile = HostProfile(
@@ -351,6 +371,13 @@ class HostEditorViewModel(
         return runCatching {
             container.hostRepository.save(profile, credential, value.proxyPassword.takeIf(String::isNotEmpty))
         }
+            .mapCatching { savedId ->
+                val revoked = container.documentAccessManager.refreshAffected(savedId)
+                if (revoked.isNotEmpty()) {
+                    error("主机已保存，但连接参数或凭据无法刷新，系统文件访问已撤销；请确认指纹和已保存凭据后重新开启")
+                }
+                savedId
+            }
             .onFailure { mutableState.value = value.copy(error = "保存失败：${it.message ?: "未知错误"}") }
             .getOrNull()
     }

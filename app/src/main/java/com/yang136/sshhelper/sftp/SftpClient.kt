@@ -28,6 +28,7 @@ data class RemoteFileSystem(val size: Long, val used: Long, val available: Long,
 
 interface SftpClient : AutoCloseable {
     suspend fun home(): String
+    suspend fun realPath(path: String): String
     suspend fun list(path: String): List<RemoteFile>
     suspend fun stat(path: String, followLinks: Boolean = true): RemoteFile
     suspend fun fileSystem(path: String): RemoteFileSystem
@@ -47,6 +48,8 @@ class JschSftpClient(private val channel: ChannelSftp) : SftpClient {
     private val mutex = Mutex()
 
     override suspend fun home(): String = io { channel.home }
+
+    override suspend fun realPath(path: String): String = io { channel.realpath(normalizeRemotePath(path)) }
 
     override suspend fun list(path: String): List<RemoteFile> = io {
         @Suppress("UNCHECKED_CAST")
