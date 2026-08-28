@@ -23,6 +23,11 @@
 ./scripts/build-and-install.sh   # 测试、构建并安装到已连接的 Android 设备
 ```
 
+## 文档
+
+- [内网穿透完整教程](docs/tunnel-tutorial.md) —— 从零配置反向 SSH 隧道(NAT 后主机公网可达),含服务器端与目标机端全流程
+- [内网穿透运维速查](docs/remote-access-playbook.md) —— 已部署环境的恢复步骤与踩坑清单,含远程使用 DSH CLI
+
 Release 构建的签名凭据保存在本机 `~/.android`，不进入仓库。
 
 ## 安全说明
