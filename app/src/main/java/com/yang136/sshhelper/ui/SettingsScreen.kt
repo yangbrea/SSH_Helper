@@ -41,8 +41,11 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -71,6 +74,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -94,6 +98,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yang136.sshhelper.SshHelperApplication
+import com.yang136.sshhelper.data.ImportReport
 import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_EXTRA_KEYS
@@ -116,8 +121,13 @@ import com.yang136.sshhelper.ui.design.SshInlineBanner
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.design.SshTopAppBar
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class SettingsDestination(val id: String, val title: String, val icon: ImageVector) {
     APPEARANCE("appearance", "外观与主题", Icons.Default.Palette),
@@ -126,6 +136,7 @@ enum class SettingsDestination(val id: String, val title: String, val icon: Imag
     CONNECTIONS("connections", "连接与后台", Icons.Default.NotificationsActive),
     SECURITY("security", "安全与凭据", Icons.Default.Security),
     DOCUMENTS("documents", "系统文件访问", Icons.Default.Storage),
+    DATA("data", "数据备份", Icons.Default.SettingsBackupRestore),
     ABOUT("about", "关于", Icons.Default.Info),
     ;
 
@@ -151,6 +162,7 @@ internal fun settingsSummary(
     SettingsDestination.CONNECTIONS -> if (settings.forwardReconnectAfterLock) "允许活动隧道锁屏后重连" else "锁屏后等待解锁"
     SettingsDestination.SECURITY -> vault
     SettingsDestination.DOCUMENTS -> "$documentRoots 台主机已授权${if (writebacks > 0) " · $writebacks 个待恢复" else ""}"
+    SettingsDestination.DATA -> "导出或增量导入服务器配置与快捷指令"
     SettingsDestination.ABOUT -> "版本、功能与开源许可"
 }
 
@@ -300,6 +312,7 @@ fun SettingsScreen(
             SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, Modifier.padding(padding))
             SettingsDestination.SECURITY -> SecuritySettings(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, { confirmVaultReset = true }, Modifier.padding(padding))
             SettingsDestination.DOCUMENTS -> DocumentsSettings(roots.size, writebacks.size, Modifier.padding(padding))
+            SettingsDestination.DATA -> DataSettings(Modifier.padding(padding))
             SettingsDestination.ABOUT -> AboutSettings(Modifier.padding(padding))
         }
     }
@@ -700,6 +713,189 @@ private fun DocumentsSettings(roots: Int, writebacks: Int, modifier: Modifier) {
         item { SshInlineBanner("系统文件根目录", "$roots 台主机已授权；授权独立于应用保险库，设备锁定时停止访问。", tone = if (writebacks > 0) SshStatusTone.WARNING else SshStatusTone.CONNECTED) }
         item { DocumentWritebackCard() }
         if (writebacks == 0) item { PreferenceGroup { Text("没有待处理的写回文件", Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+    }
+}
+
+/**
+ * 数据备份：将服务器配置与快捷指令导出为 JSON，或对 JSON 做增量导入。
+ * 导出不包含密码/私钥等凭据，也不包含设置项；增量导入只新增或更新，不删除任何数据。
+ */
+@Composable
+private fun DataSettings(modifier: Modifier) {
+    val context = LocalContext.current
+    val app = context.applicationContext as SshHelperApplication
+    val manager = app.container.configTransferManager
+    val scope = rememberCoroutineScope()
+    var working by remember { mutableStateOf(false) }
+    var exportResult by remember { mutableStateOf<String?>(null) }
+    var exportError by remember { mutableStateOf<String?>(null) }
+    var importResult by remember { mutableStateOf<String?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var pendingImportText by remember { mutableStateOf<String?>(null) }
+    var pendingImportReport by remember { mutableStateOf<ImportReport?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        working = true
+        exportResult = null
+        exportError = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val payload = manager.export()
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(payload.json.encodeToByteArray())
+                    } ?: error("无法创建导出文件")
+                    payload
+                }
+            }.onSuccess { payload ->
+                working = false
+                exportResult = "已导出 ${payload.hostCount} 台主机 · ${payload.snippetCount} 条快捷指令（不含凭据）"
+            }.onFailure { failure ->
+                working = false
+                exportError = "导出失败：${failure.message ?: "未知错误"}"
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        working = true
+        importResult = null
+        importError = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("无法读取所选文件")
+                    text to manager.previewImport(text)
+                }
+            }.onSuccess { (text, report) ->
+                working = false
+                pendingImportText = text
+                pendingImportReport = report
+            }.onFailure { failure ->
+                working = false
+                importError = "导入失败：${failure.message ?: "未知错误"}"
+            }
+        }
+    }
+
+    fun performImport() {
+        val text = pendingImportText ?: return
+        pendingImportText = null
+        pendingImportReport = null
+        working = true
+        importResult = null
+        importError = null
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { manager.importIncremental(text) } }
+                .onSuccess { report ->
+                    working = false
+                    importResult = "导入完成：${report.summary()}"
+                }
+                .onFailure { failure ->
+                    working = false
+                    importError = "导入失败：${failure.message ?: "未知错误"}"
+                }
+        }
+    }
+
+    SettingsPage(modifier) {
+        item { SshSectionHeader("导出", summary = "服务器配置与快捷指令") }
+        item {
+            PreferenceGroup {
+                Text(
+                    "导出为 JSON 文件：包含主机连接参数与快捷指令，不含密码/私钥等凭据，也不含设置选项。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        exportResult = null
+                        exportError = null
+                        exportLauncher.launch("ssh-helper-config-${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.json")
+                    },
+                    enabled = !working,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.FileDownload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("导出 JSON")
+                }
+            }
+        }
+        item { SshSectionHeader("导入", summary = "增量合并") }
+        item {
+            PreferenceGroup {
+                Text(
+                    "选择 SSH Helper 导出的 JSON 做增量导入：相同服务器（地址+端口+用户名）与相同快捷指令会被更新，其余新增；不会删除现有数据，重复导入不会产生重复条目。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        importResult = null
+                        importError = null
+                        importLauncher.launch(arrayOf("application/json"))
+                    },
+                    enabled = !working,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.FileUpload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("选择 JSON 文件")
+                }
+            }
+        }
+        if (working) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("正在处理…", Modifier.padding(start = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        exportResult?.let { item { SshInlineBanner("导出完成", it, tone = SshStatusTone.CONNECTED) } }
+        importResult?.let { item { SshInlineBanner("导入完成", it, tone = SshStatusTone.CONNECTED) } }
+        exportError?.let { item { SshInlineBanner("导出失败", it, tone = SshStatusTone.ERROR) } }
+        importError?.let { item { SshInlineBanner("导入失败", it, tone = SshStatusTone.ERROR) } }
+    }
+
+    pendingImportReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!working) {
+                    pendingImportText = null
+                    pendingImportReport = null
+                }
+            },
+            title = { Text("确认增量导入？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(report.summary())
+                    if (report.skippedReasons.isNotEmpty()) {
+                        Text(
+                            "跳过 ${report.skippedHosts + report.skippedSnippets} 项：${report.skippedReasons.take(3).joinToString("；")}${if (report.skippedReasons.size > 3) "…" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "导入只新增或更新现有数据，不会删除任何条目；文件不含密码或私钥，导入后请为需要的主机重新输入凭据。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = ::performImport, enabled = !working) { Text("导入") } },
+            dismissButton = { TextButton(onClick = {
+                pendingImportText = null
+                pendingImportReport = null
+            }) { Text("取消") } },
+        )
     }
 }
 

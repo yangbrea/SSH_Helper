@@ -7,6 +7,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.yang136.sshhelper.data.AppDatabase
 import com.yang136.sshhelper.data.HostRepository
 import com.yang136.sshhelper.data.SnippetRepository
+import com.yang136.sshhelper.data.ConfigTransferManager
 import com.yang136.sshhelper.ai.AiAgentManager
 import com.yang136.sshhelper.ai.OkHttpAiClient
 import com.yang136.sshhelper.ai.TerminalCommandRunner
@@ -40,6 +41,7 @@ class AppContainer(application: Application) {
     val database = AppDatabase.create(application)
     val credentialVault = AndroidCredentialVault(application, database)
     val hostRepository = HostRepository(database, credentialVault)
+    val configTransferManager = ConfigTransferManager(database)
     val documentAccessManager = DocumentAccessManager(application, database, hostRepository)
     val documentsBackend = SshDocumentsBackend(application, database, documentAccessManager)
     val snippetRepository = SnippetRepository(database)

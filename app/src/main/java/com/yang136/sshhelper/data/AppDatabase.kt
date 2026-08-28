@@ -36,6 +36,9 @@ interface HostDao {
     @Query("SELECT * FROM hosts ORDER BY COALESCE(lastConnectedAt, 0) DESC, name COLLATE NOCASE")
     fun observeAll(): Flow<List<HostEntity>>
 
+    @Query("SELECT * FROM hosts")
+    suspend fun getAll(): List<HostEntity>
+
     @Query("SELECT * FROM hosts WHERE id = :id")
     suspend fun get(id: Long): HostEntity?
 
@@ -163,6 +166,9 @@ interface KnownHostDao {
 interface CommandSnippetDao {
     @Query("SELECT * FROM command_snippets ORDER BY groupName COLLATE NOCASE, sortOrder, title COLLATE NOCASE")
     fun observeAll(): Flow<List<CommandSnippetEntity>>
+
+    @Query("SELECT * FROM command_snippets")
+    suspend fun getAll(): List<CommandSnippetEntity>
 
     @Query("SELECT * FROM command_snippets WHERE hostId IS NULL OR hostId = :hostId ORDER BY groupName COLLATE NOCASE, sortOrder, title COLLATE NOCASE")
     fun observeForHost(hostId: Long): Flow<List<CommandSnippetEntity>>
