@@ -5,10 +5,21 @@ import com.jcraft.jsch.SftpATTRS
 import com.jcraft.jsch.SftpException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class RemoteFileType { FILE, DIRECTORY, SYMLINK, OTHER }
 
@@ -26,6 +37,13 @@ data class RemoteFile(
 
 data class RemoteFileSystem(val size: Long, val used: Long, val available: Long, val capacityPercent: Int)
 
+/**
+ * A cancellable remote byte stream opened at [SftpClient.openRead]. [size] is the full
+ * file size reported by the server up front, which lets callers implement seeking and
+ * progress without a separate stat round-trip. Closing [stream] aborts the transfer.
+ */
+data class RemoteRead(val size: Long, val stream: InputStream)
+
 interface SftpClient : AutoCloseable {
     suspend fun home(): String
     suspend fun realPath(path: String): String
@@ -42,10 +60,20 @@ interface SftpClient : AutoCloseable {
     suspend fun readlink(path: String): String
     suspend fun download(path: String, output: OutputStream, offset: Long = 0, progress: (Long) -> Boolean = { true })
     suspend fun upload(input: InputStream, path: String, offset: Long = 0, progress: (Long) -> Boolean = { true })
+
+    /**
+     * Opens a sequential, cancellable read of [path] starting at [offset] bytes. Intended
+     * for streaming previews: the returned stream must be closed by the caller (ideally in
+     * a `use` block) to abort the transfer and free the channel.
+     */
+    suspend fun openRead(path: String, offset: Long = 0): RemoteRead
 }
 
 class JschSftpClient(private val channel: ChannelSftp) : SftpClient {
     private val mutex = Mutex()
+    // Transfers launched by openRead run on their own scope so a long-lived stream never
+    // holds the channel mutex (the caller is expected to use a dedicated channel anyway).
+    private val streamScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun home(): String = io { channel.home }
 
@@ -98,7 +126,68 @@ class JschSftpClient(private val channel: ChannelSftp) : SftpClient {
         }
     }
 
-    override fun close() = channel.disconnect()
+    override suspend fun openRead(path: String, offset: Long): RemoteRead {
+        val normalized = normalizeRemotePath(path)
+        // Validates existence/readability synchronously (and reports a proper error), while
+        // the actual byte transfer runs in the background and streams through a pipe.
+        val size = stat(normalized).size
+        val stream = io {
+            val buffer = PipedInputStream(PIPE_BUFFER_SIZE)
+            val output = PipedOutputStream(buffer)
+            val failure = AtomicReference<Throwable?>()
+            val abortRequested = AtomicBoolean(false)
+            val monitor = object : com.jcraft.jsch.SftpProgressMonitor {
+                override fun init(op: Int, src: String?, dest: String?, max: Long) = Unit
+                // Returning false makes JSch stop between chunks cleanly, keeping the
+                // channel usable for follow-up requests (e.g. a seek on the same channel).
+                override fun count(count: Long) = !abortRequested.get()
+                override fun end() = Unit
+            }
+            val job = streamScope.launch {
+                try {
+                    channel.get(normalized, output, monitor, ChannelSftp.RESUME, offset.coerceAtLeast(0))
+                } catch (error: Throwable) {
+                    failure.compareAndSet(null, error)
+                } finally {
+                    // Signals EOF to the reader; on abort this unblocks a blocked read().
+                    runCatching { output.close() }
+                }
+            }
+            object : InputStream() {
+                @Volatile
+                private var closed = false
+
+                override fun read(): Int {
+                    check(!closed) { "流已关闭" }
+                    failure.get()?.let { throw it.asSftpFailure() }
+                    return buffer.read()
+                }
+
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    check(!closed) { "流已关闭" }
+                    failure.get()?.let { throw it.asSftpFailure() }
+                    return buffer.read(b, off, len)
+                }
+
+                override fun close() {
+                    closed = true
+                    abortRequested.set(true)
+                    runCatching { buffer.close() }
+                    runCatching { output.close() }
+                    // Wait for the transfer coroutine to settle so the channel is quiescent
+                    // before any follow-up request; the pipe close unblocks a stuck writer.
+                    runBlocking { withTimeoutOrNull(2_000) { job.join() } }
+                    job.cancel()
+                }
+            }
+        }
+        return RemoteRead(size, stream)
+    }
+
+    override fun close() {
+        streamScope.cancel()
+        channel.disconnect()
+    }
 
     private fun deleteInternal(path: String, recursive: Boolean) {
         val attrs = channel.lstat(path)
@@ -134,6 +223,8 @@ private class CountingMonitor(private val callback: (Long) -> Boolean) : com.jcr
     }
     override fun end() = Unit
 }
+
+private const val PIPE_BUFFER_SIZE = 256 * 1024
 
 private fun SftpATTRS.toRemote(path: String, name: String, target: String?): RemoteFile = RemoteFile(
     path = normalizeRemotePath(path),

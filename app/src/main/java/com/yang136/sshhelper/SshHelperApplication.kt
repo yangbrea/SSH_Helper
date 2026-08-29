@@ -20,6 +20,7 @@ import com.yang136.sshhelper.sftp.SftpRepository
 import androidx.work.Configuration
 import com.yang136.sshhelper.documents.DocumentAccessManager
 import com.yang136.sshhelper.documents.SshDocumentsBackend
+import com.yang136.sshhelper.preview.PreviewCache
 import com.yang136.sshhelper.theme.ImageThemeRepository
 
 class SshHelperApplication : Application(), DefaultLifecycleObserver, Configuration.Provider {
@@ -37,7 +38,7 @@ class SshHelperApplication : Application(), DefaultLifecycleObserver, Configurat
         get() = Configuration.Builder().setJobSchedulerJobIdRange(13_000, 14_000).build()
 }
 
-class AppContainer(application: Application) {
+class AppContainer(val application: Application) {
     val database = AppDatabase.create(application)
     val credentialVault = AndroidCredentialVault(application, database)
     val hostRepository = HostRepository(database, credentialVault)
@@ -58,6 +59,7 @@ class AppContainer(application: Application) {
     )
     val transferManager = DefaultTransferManager(application, database, hostRepository, sessionManager, credentialVault)
     val forwardManager = DefaultForwardManager(application, database, hostRepository, sessionManager, credentialVault)
+    val previewCache = PreviewCache(application)
 
     init {
         // 凭据租约按"活动转发"判定：会话管理器查询转发管理器当前活跃转发的会话。

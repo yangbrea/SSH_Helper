@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
@@ -72,6 +74,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -81,6 +84,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -96,6 +100,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ImageLoader
+import coil3.compose.SubcomposeAsyncImage
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.ConflictPolicy
 import com.yang136.sshhelper.data.Credential
@@ -110,9 +116,15 @@ import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.CredentialRole
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
+import com.yang136.sshhelper.preview.PreviewKind
+import com.yang136.sshhelper.preview.PreviewPlaybackManager
+import com.yang136.sshhelper.preview.SftpImage
+import com.yang136.sshhelper.preview.previewKind
 import com.yang136.sshhelper.ui.design.SshStatusBadge
 import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.design.SshTopAppBar
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 
@@ -157,6 +169,7 @@ fun SftpScreen(
     var deletingLocal by remember { mutableStateOf(false) }
     var properties by remember { mutableStateOf<RemoteFile?>(null) }
     var preview by remember { mutableStateOf<RemotePreview?>(null) }
+    var imagePreview by remember { mutableStateOf<RemoteFile?>(null) }
     var previewError by remember { mutableStateOf<String?>(null) }
     var editingText by remember { mutableStateOf<String?>(null) }
     var conflictPreview by remember { mutableStateOf<Pair<RemotePreview, String>?>(null) }
@@ -186,6 +199,19 @@ fun SftpScreen(
     }
     BackHandler(onBack = handleBack)
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it) } }
+
+    // Audio streams straight into ExoPlayer and images stream through Coil; everything
+    // else keeps the in-memory preview path (text editing), which also performs sniffing.
+    val openPreview: (RemoteFile) -> Unit = { file ->
+        when (previewKind(file.name)) {
+            PreviewKind.AUDIO -> viewModel.playback.start(file, session?.profile?.hostname ?: "")
+            PreviewKind.IMAGE -> imagePreview = file
+            else -> scope.launch {
+                viewModel.preview(file).onSuccess { preview = it; editingText = it.editableText }
+                    .onFailure { previewError = it.message }
+            }
+        }
+    }
 
     val rootPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -258,7 +284,7 @@ fun SftpScreen(
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 if (maxWidth >= 840.dp) {
                     Row(Modifier.fillMaxSize()) {
-                        RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxHeight(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = { file -> scope.launch { viewModel.preview(file).onSuccess { preview = it; editingText = it.editableText }.onFailure { previewError = it.message } } }, onDownload = viewModel::downloadSelected)
+                        RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxHeight(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
                         LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxHeight(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
                     }
                 } else {
@@ -269,7 +295,7 @@ fun SftpScreen(
                             onPane = { mobilePane = it },
                         )
                         if (mobilePane == MobilePane.REMOTE) {
-                            RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = { file -> scope.launch { viewModel.preview(file).onSuccess { preview = it; editingText = it.editableText }.onFailure { previewError = it.message } } }, onDownload = viewModel::downloadSelected)
+                            RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
                         } else {
                             LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
                         }
@@ -316,6 +342,18 @@ fun SftpScreen(
         confirmButton = { TextButton(onClick = { preview?.bytes?.fill(0); preview = null; editingText = null; confirmDiscardPreview = false }) { Text("放弃修改") } },
         dismissButton = { TextButton(onClick = { confirmDiscardPreview = false }) { Text("继续编辑") } },
     )
+    val playbackState by viewModel.playback.state.collectAsStateWithLifecycle()
+    if (playbackState.file != null) {
+        AudioPreviewDialog(manager = viewModel.playback, onDismiss = { viewModel.playback.stop() })
+    }
+    imagePreview?.let { file ->
+        ImagePreviewDialog(
+            file = file,
+            hostName = session?.profile?.hostname ?: "",
+            imageLoader = viewModel.imageLoader,
+            onDismiss = { imagePreview = null },
+        )
+    }
 }
 
 @Composable
@@ -723,6 +761,102 @@ private fun TransferSheet(jobs: List<TransferJob>, vm: SftpViewModel, onDismiss:
 }
 
 @Composable
+private fun AudioPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () -> Unit) {
+    val state by manager.state.collectAsStateWithLifecycle()
+    val player = manager.playerOrNull
+    val error = state.error
+    val file = state.file
+    var positionMs by remember(player) { mutableStateOf(0L) }
+    LaunchedEffect(player, state.isPrepared, state.isPlaying) {
+        while (isActive && player != null && state.isPrepared) {
+            positionMs = player.currentPosition.coerceAtLeast(0L)
+            delay(200)
+        }
+    }
+    val duration = state.durationMs.coerceAtLeast(0L)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(file?.name ?: "音频预览", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            when {
+                error != null -> Column {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                    Text("播放中断，请检查 SSH 连接。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                    if (file != null) TextButton(onClick = { manager.start(file, state.hostName) }) { Text("重试") }
+                }
+                !state.isPrepared -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Text("正在从服务器读取…", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 12.dp))
+                    }
+                }
+                else -> Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { manager.togglePlayPause() }, modifier = Modifier.size(56.dp)) {
+                            Icon(
+                                if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (state.isPlaying) "暂停" else "播放",
+                                Modifier.size(36.dp),
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Slider(
+                                value = positionMs.toFloat().coerceIn(0f, duration.toFloat().coerceAtLeast(1f)),
+                                onValueChange = { positionMs = it.toLong() },
+                                onValueChangeFinished = { manager.seekTo(positionMs) },
+                                valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
+                            )
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(formatPlaybackTime(positionMs), style = MaterialTheme.typography.labelSmall)
+                                Box(Modifier.weight(1f))
+                                Text(formatPlaybackTime(duration), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    if (state.isBuffering) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+@Composable
+private fun ImagePreviewDialog(file: RemoteFile, hostName: String, imageLoader: ImageLoader, onDismiss: () -> Unit) {
+    var attempt by remember(file.path) { mutableStateOf(0) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            key(attempt) {
+                SubcomposeAsyncImage(
+                    model = SftpImage(file.path, hostName, file.size),
+                    imageLoader = imageLoader,
+                    contentDescription = file.name,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                    loading = {
+                        Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator()
+                                Text("正在从服务器读取…", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 12.dp))
+                            }
+                        }
+                    },
+                    error = {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("图片加载失败", color = MaterialTheme.colorScheme.error)
+                            Text("请检查 SSH 连接后重试。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                            TextButton(onClick = { attempt++ }) { Text("重试") }
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+@Composable
 private fun PreviewDialog(preview: RemotePreview, text: String?, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -772,3 +906,10 @@ private fun TransferStatus.label() = when (this) { TransferStatus.QUEUED -> "排
 private fun TransferStatus.isActive() = this == TransferStatus.QUEUED || this == TransferStatus.RUNNING || this == TransferStatus.WAITING_NETWORK || this == TransferStatus.WAITING_UNLOCK
 private fun formatSize(bytes: Long): String { if (bytes < 0) return "未知"; val units = arrayOf("B", "KiB", "MiB", "GiB", "TiB"); var value = bytes.toDouble(); var unit = 0; while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }; return if (unit == 0) "$bytes B" else "%.1f %s".format(value, units[unit]) }
 private fun formatDuration(seconds: Long): String = if (seconds < 60) "${seconds}秒" else if (seconds < 3600) "${seconds / 60}分${seconds % 60}秒" else "${seconds / 3600}时${seconds % 3600 / 60}分"
+private fun formatPlaybackTime(millis: Long): String {
+    val totalSeconds = (millis / 1000).coerceAtLeast(0)
+    val hours = totalSeconds / 3600
+    val minutes = totalSeconds % 3600 / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
+}

@@ -14,9 +14,11 @@ import org.apache.sshd.sftp.server.SftpSubsystemFactory
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlin.system.measureTimeMillis
 
 class EmbeddedSftpIntegrationTest {
     private lateinit var server: SshServer
@@ -63,5 +65,54 @@ class EmbeddedSftpIntegrationTest {
 
         client.delete("目录", recursive = true)
         assertTrue(runCatching { client.stat("目录") }.isFailure)
+    }
+
+    @Test
+    fun openRead_readsWholeFileFromZeroOffset() = runBlocking {
+        val payload = "0123456789".repeat(2048).encodeToByteArray()
+        client.upload(ByteArrayInputStream(payload), "stream.bin")
+
+        val read = client.openRead("stream.bin", 0)
+        assertEquals(payload.size.toLong(), read.size)
+        read.stream.use { assertArrayEquals(payload, it.readBytes()) }
+    }
+
+    @Test
+    fun openRead_skipsToOffset() = runBlocking {
+        val payload = "0123456789".repeat(2048).encodeToByteArray()
+        client.upload(ByteArrayInputStream(payload), "stream.bin")
+
+        val offset = 5000L
+        client.openRead("stream.bin", offset).stream.use {
+            assertArrayEquals(payload.copyOfRange(offset.toInt(), payload.size), it.readBytes())
+        }
+    }
+
+    @Test
+    fun openRead_closeAbortsTransferAndChannelSurvives() = runBlocking {
+        val payload = ByteArray(2 * 1024 * 1024) { (it % 251).toByte() }
+        client.upload(ByteArrayInputStream(payload), "big.bin")
+
+        val read = client.openRead("big.bin", 0)
+        val first = ByteArray(4096)
+        assertEquals(4096, read.stream.read(first))
+        read.stream.close()
+
+        // Reading a closed stream must fail fast instead of blocking; the abort can surface
+        // as either the pipe IOException or the recorded SFTP failure depending on timing.
+        val elapsed = measureTimeMillis {
+            val error = runCatching { read.stream.read() }.exceptionOrNull()
+            assertTrue("关闭后读取应抛异常而非阻塞", error != null)
+        }
+        assertTrue("关闭后读取应在 1s 内返回，实际 ${elapsed}ms", elapsed < 1_000)
+        // The channel stays usable afterwards.
+        assertTrue(client.list(".").any { it.name == "big.bin" })
+    }
+
+    @Test
+    fun openRead_missingFileFailsEarly() {
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { client.openRead("nope.bin", 0) }
+        }
     }
 }
