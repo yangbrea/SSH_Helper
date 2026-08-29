@@ -53,8 +53,13 @@ class DefaultLanDiscoveryEngineTest {
     fun limitsConcurrentTcpProbes() = runTest {
         val active = AtomicInteger(0)
         val maximum = AtomicInteger(0)
-        val tcp = object : TcpSshProbe {
-            override suspend fun probe(networkId: String, address: String, port: Int): TcpProbeResult? {
+        val tcp = object : TcpServiceProbe {
+            override suspend fun probe(
+                networkId: String,
+                address: String,
+                port: Int,
+                readSshBanner: Boolean,
+            ): TcpProbeResult? {
                 val now = active.incrementAndGet()
                 maximum.updateAndGet { maxOf(it, now) }
                 delay(20)
@@ -84,7 +89,7 @@ class DefaultLanDiscoveryEngineTest {
     @Test
     fun mdnsFailureIsNonFatal() = runTest {
         val failingMdns = object : MdnsDiscovery {
-            override fun discover(networkId: String): Flow<MdnsService> = kotlinx.coroutines.flow.flow {
+            override fun discover(networkId: String, serviceTypes: Set<String>): Flow<MdnsService> = kotlinx.coroutines.flow.flow {
                 error("NSD unavailable")
             }
             override fun cancel() = Unit
@@ -109,10 +114,15 @@ class DefaultLanDiscoveryEngineTest {
         override suspend fun availableNetworks() = listOf(network)
     }
 
-    private class FakeTcpProbe(private val results: Map<String, TcpProbeResult>) : TcpSshProbe {
+    private class FakeTcpProbe(private val results: Map<String, TcpProbeResult>) : TcpServiceProbe {
         val probed = ConcurrentHashMap.newKeySet<String>()
         var cancelled = false
-        override suspend fun probe(networkId: String, address: String, port: Int): TcpProbeResult? {
+        override suspend fun probe(
+            networkId: String,
+            address: String,
+            port: Int,
+            readSshBanner: Boolean,
+        ): TcpProbeResult? {
             probed += "$address:$port"
             return results["$address:$port"]
         }
@@ -121,7 +131,7 @@ class DefaultLanDiscoveryEngineTest {
 
     private class FakeMdnsDiscovery(private val services: Flow<MdnsService>) : MdnsDiscovery {
         var cancelled = false
-        override fun discover(networkId: String) = services
+        override fun discover(networkId: String, serviceTypes: Set<String>) = services
         override fun cancel() { cancelled = true }
     }
 

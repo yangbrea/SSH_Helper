@@ -45,4 +45,46 @@ class DiscoveryReducerTest {
         assertTrue(devices.getValue("192.168.1.9").endpoints.isEmpty())
         assertNull(devices.getValue("192.168.1.9").displayName)
     }
+
+    @Test
+    fun classifiesConservativelyAndDescriptionNameWins() {
+        var devices = emptyMap<String, DiscoveredDevice>()
+        devices = DiscoveryReducer.apply(
+            devices,
+            "network-1",
+            DiscoveryEvidence.Tcp("192.168.1.30", 80, null, ServiceKind.HTTP),
+        )
+        assertEquals(DeviceKind.UNKNOWN, devices.getValue("192.168.1.30").classification.kind)
+
+        devices = DiscoveryReducer.apply(
+            devices,
+            "network-1",
+            DiscoveryEvidence.Mdns("192.168.1.30", 631, "Office printer", "_ipp._tcp."),
+        )
+        assertEquals(DeviceKind.PRINTER, devices.getValue("192.168.1.30").classification.kind)
+
+        devices = DiscoveryReducer.apply(
+            devices,
+            "network-1",
+            DiscoveryEvidence.Description(
+                "192.168.1.30",
+                DeviceDescription(friendlyName = "Front desk", manufacturer = "Example"),
+            ),
+        )
+        assertEquals("Front desk", devices.getValue("192.168.1.30").displayName)
+    }
+
+    @Test
+    fun ssdpGatewayEvidenceOverridesUnknownFallback() {
+        val devices = DiscoveryReducer.apply(
+            emptyMap(),
+            "network-1",
+            DiscoveryEvidence.Ssdp(
+                SsdpRecord("192.168.1.1", "urn:schemas-upnp-org:device:InternetGatewayDevice:2"),
+            ),
+        )
+
+        assertEquals(DeviceKind.ROUTER, devices.getValue("192.168.1.1").classification.kind)
+        assertEquals(ClassificationConfidence.HIGH, devices.getValue("192.168.1.1").classification.confidence)
+    }
 }

@@ -236,7 +236,9 @@ private fun DiscoveryDeviceCard(
                     when (it) {
                         DiscoverySource.TCP -> "TCP"
                         DiscoverySource.MDNS -> "mDNS"
+                        DiscoverySource.SSDP -> "SSDP"
                         DiscoverySource.ARP -> "ARP"
+                        DiscoverySource.DEVICE_DESCRIPTION -> "设备描述"
                     }
                 },
                 style = MaterialTheme.typography.labelSmall,

@@ -59,21 +59,26 @@ class AndroidNetworkEnvironment(context: Context) : NetworkEnvironment {
     }?.also { networks[id] = it }
 }
 
-class AndroidTcpSshProbe(
+class AndroidTcpServiceProbe(
     private val networks: AndroidNetworkEnvironment,
     private val connectTimeoutMillis: Int = 500,
     private val bannerTimeoutMillis: Int = 750,
-) : TcpSshProbe {
+) : TcpServiceProbe {
     private val sockets = Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
 
-    override suspend fun probe(networkId: String, address: String, port: Int): TcpProbeResult? =
+    override suspend fun probe(
+        networkId: String,
+        address: String,
+        port: Int,
+        readSshBanner: Boolean,
+    ): TcpProbeResult? =
         withContext(Dispatchers.IO) {
             val network = networks.networkFor(networkId) ?: return@withContext null
             val socket = runCatching { network.socketFactory.createSocket() }.getOrNull() ?: return@withContext null
             sockets += socket
             try {
                 socket.connect(InetSocketAddress(address, port), connectTimeoutMillis)
-                TcpProbeResult(SocketBannerReader.read(socket, bannerTimeoutMillis))
+                TcpProbeResult(if (readSshBanner) SocketBannerReader.read(socket, bannerTimeoutMillis) else null)
             } catch (security: SecurityException) {
                 throw security
             } catch (_: Exception) {
@@ -116,7 +121,7 @@ class AndroidMdnsDiscovery(
     private val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
     private val activeStops = CopyOnWriteArraySet<() -> Unit>()
 
-    override fun discover(networkId: String): Flow<MdnsService> = callbackFlow {
+    override fun discover(networkId: String, serviceTypes: Set<String>): Flow<MdnsService> = callbackFlow {
         val targetNetwork = networks.networkFor(networkId) ?: run {
             close(IllegalStateException("所选局域网已断开"))
             return@callbackFlow
@@ -155,7 +160,7 @@ class AndroidMdnsDiscovery(
 
         val localStops = mutableListOf<() -> Unit>()
         var started = 0
-        listOf("_ssh._tcp.", "_sftp-ssh._tcp.").forEach { type ->
+        serviceTypes.forEach { type ->
             lateinit var listener: NsdManager.DiscoveryListener
             val stopped = AtomicBoolean(false)
             listener = object : NsdManager.DiscoveryListener {

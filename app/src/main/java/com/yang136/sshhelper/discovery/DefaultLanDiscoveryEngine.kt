@@ -18,7 +18,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class DefaultLanDiscoveryEngine(
     private val networkEnvironment: NetworkEnvironment,
-    private val tcpProbe: TcpSshProbe,
+    private val tcpProbe: TcpServiceProbe,
     private val mdnsDiscovery: MdnsDiscovery,
     private val arpTableReader: ArpTableReader,
     private val macVendorResolver: MacVendorResolver,

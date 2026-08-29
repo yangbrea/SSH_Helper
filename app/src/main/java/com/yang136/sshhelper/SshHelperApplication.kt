@@ -25,7 +25,7 @@ import com.yang136.sshhelper.theme.ImageThemeRepository
 import com.yang136.sshhelper.discovery.AndroidArpTableReader
 import com.yang136.sshhelper.discovery.AndroidMdnsDiscovery
 import com.yang136.sshhelper.discovery.AndroidNetworkEnvironment
-import com.yang136.sshhelper.discovery.AndroidTcpSshProbe
+import com.yang136.sshhelper.discovery.AndroidTcpServiceProbe
 import com.yang136.sshhelper.discovery.AssetMacVendorResolver
 import com.yang136.sshhelper.discovery.DefaultLanDiscoveryEngine
 
@@ -69,7 +69,7 @@ class AppContainer(val application: Application) {
     val networkEnvironment = AndroidNetworkEnvironment(application)
     val lanDiscoveryEngine = DefaultLanDiscoveryEngine(
         networkEnvironment = networkEnvironment,
-        tcpProbe = AndroidTcpSshProbe(networkEnvironment),
+        tcpProbe = AndroidTcpServiceProbe(networkEnvironment),
         mdnsDiscovery = AndroidMdnsDiscovery(application, networkEnvironment),
         arpTableReader = AndroidArpTableReader(),
         macVendorResolver = AssetMacVendorResolver(application),
