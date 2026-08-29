@@ -19,6 +19,7 @@ import com.yang136.sshhelper.sftp.TransferJob
 import com.yang136.sshhelper.sftp.TransferRequest
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionId
+import com.yang136.sshhelper.preview.PreviewPlaybackManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,6 +81,18 @@ class SftpViewModel(
     val bookmarks = session.filterNotNull().flatMapLatest { container.sftpRepository.bookmarks(it.profile.id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private var client: SftpClient? = null
+
+    /** Streaming audio/video preview over the shared SSH session (dedicated SFTP channel). */
+    val playback = PreviewPlaybackManager(container.application, container.sessionManager, sessionId, container.previewCache.cache)
+
+    /** Coil loader whose fetcher streams remote images over the shared SSH session. */
+    val imageLoader: coil3.ImageLoader by lazy {
+        coil3.ImageLoader.Builder(container.application)
+            .components {
+                add(com.yang136.sshhelper.preview.SftpImageFetcher.Factory(container.sessionManager, sessionId))
+            }
+            .build()
+    }
 
     init {
         viewModelScope.launch {
@@ -392,6 +405,7 @@ class SftpViewModel(
     fun visibleLocalFiles(): List<LocalFile> = mutableState.value.localFiles.filteredLocal(mutableState.value)
 
     override fun onCleared() {
+        playback.stop()
         // The browser channel belongs to SessionManager and intentionally survives page changes.
     }
 
