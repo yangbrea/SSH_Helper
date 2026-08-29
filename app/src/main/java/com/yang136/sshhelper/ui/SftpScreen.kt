@@ -31,30 +31,37 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.DriveFileMove
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -94,6 +101,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -451,7 +459,15 @@ private fun RemotePane(
         else if (state.remoteFiles.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("远程目录为空") }
         else LazyColumn(Modifier.fillMaxSize(), state = listState) {
             items(vm.visibleRemoteFiles(), key = RemoteFile::path) { file ->
-                RemoteFileRow(file, file.path in state.selectedRemote, onSelect = { vm.toggleRemote(file.path) }, onOpen = { if (file.type == RemoteFileType.DIRECTORY) vm.setPath(file.path) else onPreview(file) })
+                RemoteFileRow(file, file.path in state.selectedRemote, onSelect = { vm.toggleRemote(file.path) }, onOpen = {
+                    if (file.type == RemoteFileType.DIRECTORY) {
+                        onSearchingChange(false)
+                        vm.setRemoteQuery("")
+                        vm.setPath(file.path)
+                    } else {
+                        onPreview(file)
+                    }
+                })
             }
         }
     }
@@ -544,7 +560,13 @@ private fun LocalPane(
         else if (state.localFiles.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("本地目录为空") }
         else LazyColumn(Modifier.fillMaxSize(), state = listState) {
             items(vm.visibleLocalFiles(), key = { it.uri.toString() }) { file ->
-                LocalFileRow(file, file.uri.toString() in state.selectedLocal, onSelect = { vm.toggleLocal(file.uri) }, onOpen = { vm.openLocal(file) })
+                LocalFileRow(file, file.uri.toString() in state.selectedLocal, onSelect = { vm.toggleLocal(file.uri) }, onOpen = {
+                    if (file.isDirectory) {
+                        onSearchingChange(false)
+                        vm.setLocalQuery("")
+                        vm.openLocal(file)
+                    }
+                })
             }
         }
     }
@@ -709,11 +731,59 @@ private fun PathDialog(title: String, initialValue: String, onDismiss: () -> Uni
     )
 }
 
+private val imageExtensions = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "heic", "heif", "avif", "tif", "tiff")
+private val audioExtensions = setOf("mp3", "wav", "flac", "aac", "ogg", "oga", "m4a", "opus", "wma", "mid", "midi")
+private val videoExtensions = setOf("mp4", "mkv", "avi", "mov", "wmv", "webm", "m4v", "3gp", "ts", "m2ts")
+private val archiveExtensions = setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz", "zst", "lz4", "iso", "jar", "apk", "ipa")
+private val spreadsheetExtensions = setOf("csv", "xls", "xlsx", "ods")
+private val presentationExtensions = setOf("ppt", "pptx", "odp", "key")
+private val codeExtensions = setOf(
+    "kt", "kts", "java", "gradle", "groovy", "c", "h", "cpp", "hpp", "cc", "cxx", "cs", "go", "rs",
+    "py", "rb", "php", "swift", "m", "mm", "js", "mjs", "cjs", "jsx", "ts", "tsx", "vue",
+    "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql", "html", "htm", "xml",
+    "yml", "yaml", "json", "toml", "ini", "cfg", "conf", "properties", "env",
+)
+
+private fun fileExtension(name: String): String = name.substringAfterLast('.', "").lowercase()
+
+private fun RemoteFile.typeIcon(): ImageVector = when (type) {
+    RemoteFileType.DIRECTORY -> Icons.Default.Folder
+    RemoteFileType.SYMLINK -> Icons.Default.Link
+    RemoteFileType.OTHER -> Icons.Default.InsertDriveFile
+    RemoteFileType.FILE -> {
+        val ext = fileExtension(name)
+        when {
+            ext in imageExtensions -> Icons.Default.Image
+            ext in audioExtensions -> Icons.Default.Audiotrack
+            ext in videoExtensions -> Icons.Default.Movie
+            ext in archiveExtensions -> Icons.Default.Archive
+            ext == "pdf" -> Icons.Default.PictureAsPdf
+            ext in spreadsheetExtensions -> Icons.Default.TableChart
+            ext in presentationExtensions -> Icons.Default.Slideshow
+            ext in codeExtensions -> Icons.Default.Code
+            else -> Icons.Default.Description
+        }
+    }
+}
+
+private fun LocalFile.typeIcon(): ImageVector = when {
+    isDirectory -> Icons.Default.Folder
+    mimeType?.startsWith("image/") == true || fileExtension(name) in imageExtensions -> Icons.Default.Image
+    mimeType?.startsWith("audio/") == true || fileExtension(name) in audioExtensions -> Icons.Default.Audiotrack
+    mimeType?.startsWith("video/") == true || fileExtension(name) in videoExtensions -> Icons.Default.Movie
+    fileExtension(name) in archiveExtensions -> Icons.Default.Archive
+    fileExtension(name) == "pdf" || mimeType == "application/pdf" -> Icons.Default.PictureAsPdf
+    fileExtension(name) in spreadsheetExtensions -> Icons.Default.TableChart
+    fileExtension(name) in presentationExtensions -> Icons.Default.Slideshow
+    fileExtension(name) in codeExtensions -> Icons.Default.Code
+    else -> Icons.Default.Description
+}
+
 @Composable
 private fun RemoteFileRow(file: RemoteFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(selected, { onSelect() })
-        Icon(if (file.type == RemoteFileType.DIRECTORY) Icons.Default.Folder else if (file.type == RemoteFileType.FILE) Icons.Default.Description else Icons.Default.UploadFile, null, tint = MaterialTheme.colorScheme.primary)
+        Icon(file.typeIcon(), null, tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${formatSize(file.size)} · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(file.modifiedAt)} · ${file.permissions.toString(8).padStart(4, '0')}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
@@ -722,7 +792,7 @@ private fun RemoteFileRow(file: RemoteFile, selected: Boolean, onSelect: () -> U
 private fun LocalFileRow(file: LocalFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(selected, { onSelect() })
-        Icon(if (file.isDirectory) Icons.Default.Folder else Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary)
+        Icon(file.typeIcon(), null, tint = MaterialTheme.colorScheme.primary)
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(if (file.isDirectory) "目录" else formatSize(file.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
