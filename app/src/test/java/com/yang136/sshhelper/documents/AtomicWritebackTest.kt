@@ -3,6 +3,7 @@ package com.yang136.sshhelper.documents
 import com.yang136.sshhelper.sftp.RemoteFile
 import com.yang136.sshhelper.sftp.RemoteFileSystem
 import com.yang136.sshhelper.sftp.RemoteFileType
+import com.yang136.sshhelper.sftp.RemoteRead
 import com.yang136.sshhelper.sftp.SftpClient
 import java.io.InputStream
 import java.io.OutputStream
@@ -94,6 +95,10 @@ private class FakeAtomicSftp : SftpClient {
     override suspend fun readlink(path: String) = error("not a link")
     override suspend fun download(path: String, output: OutputStream, offset: Long, progress: (Long) -> Boolean) {
         output.write(files.getValue(path).bytes)
+    }
+    override suspend fun openRead(path: String, offset: Long): RemoteRead {
+        val bytes = files.getValue(path).bytes
+        return RemoteRead(bytes.size.toLong(), bytes.inputStream().apply { skip(offset) })
     }
     override fun close() = Unit
 }
