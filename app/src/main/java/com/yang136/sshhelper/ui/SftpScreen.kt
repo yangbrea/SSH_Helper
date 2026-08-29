@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,6 +83,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -93,13 +95,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil3.ImageLoader
 import coil3.compose.SubcomposeAsyncImage
 import com.yang136.sshhelper.data.AuthType
@@ -200,11 +206,11 @@ fun SftpScreen(
     BackHandler(onBack = handleBack)
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it) } }
 
-    // Audio streams straight into ExoPlayer and images stream through Coil; everything
+    // Audio/video stream straight into ExoPlayer and images stream through Coil; everything
     // else keeps the in-memory preview path (text editing), which also performs sniffing.
     val openPreview: (RemoteFile) -> Unit = { file ->
         when (previewKind(file.name)) {
-            PreviewKind.AUDIO -> viewModel.playback.start(file, session?.profile?.hostname ?: "")
+            PreviewKind.AUDIO, PreviewKind.VIDEO -> viewModel.playback.start(file, session?.profile?.hostname ?: "")
             PreviewKind.IMAGE -> imagePreview = file
             else -> scope.launch {
                 viewModel.preview(file).onSuccess { preview = it; editingText = it.editableText }
@@ -344,7 +350,7 @@ fun SftpScreen(
     )
     val playbackState by viewModel.playback.state.collectAsStateWithLifecycle()
     if (playbackState.file != null) {
-        AudioPreviewDialog(manager = viewModel.playback, onDismiss = { viewModel.playback.stop() })
+        MediaPreviewDialog(manager = viewModel.playback, onDismiss = { viewModel.playback.stop() })
     }
     imagePreview?.let { file ->
         ImagePreviewDialog(
@@ -761,11 +767,19 @@ private fun TransferSheet(jobs: List<TransferJob>, vm: SftpViewModel, onDismiss:
 }
 
 @Composable
-private fun AudioPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () -> Unit) {
+private fun MediaPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () -> Unit) {
     val state by manager.state.collectAsStateWithLifecycle()
     val player = manager.playerOrNull
     val error = state.error
     val file = state.file
+    val isVideo = previewKind(file?.name ?: "") == PreviewKind.VIDEO
+    val view = LocalView.current
+    // Keep the screen awake while a video is on screen.
+    DisposableEffect(isVideo) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = isVideo
+        onDispose { view.keepScreenOn = previous }
+    }
     var positionMs by remember(player) { mutableStateOf(0L) }
     LaunchedEffect(player, state.isPrepared, state.isPlaying) {
         while (isActive && player != null && state.isPrepared) {
@@ -776,7 +790,7 @@ private fun AudioPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () ->
     val duration = state.durationMs.coerceAtLeast(0L)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(file?.name ?: "音频预览", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = { Text(file?.name ?: (if (isVideo) "视频预览" else "音频预览"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             when {
                 error != null -> Column {
@@ -784,13 +798,32 @@ private fun AudioPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () ->
                     Text("播放中断，请检查 SSH 连接。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                     if (file != null) TextButton(onClick = { manager.start(file, state.hostName) }) { Text("重试") }
                 }
-                !state.isPrepared -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                !state.isPrepared -> Box(Modifier.fillMaxWidth().height(if (isVideo) 200.dp else 120.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator()
                         Text("正在从服务器读取…", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 12.dp))
                     }
                 }
                 else -> Column {
+                    if (isVideo) {
+                        AndroidView(
+                            factory = { context ->
+                                PlayerView(context).apply {
+                                    setPlayer(manager.playerOrNull)
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    setBackgroundColor(android.graphics.Color.BLACK)
+                                }
+                            },
+                            update = { it.setPlayer(manager.playerOrNull) },
+                            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                        )
+                        if (state.isBuffering) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).padding(0.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { manager.togglePlayPause() }, modifier = Modifier.size(56.dp)) {
                             Icon(
@@ -813,7 +846,7 @@ private fun AudioPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () ->
                             }
                         }
                     }
-                    if (state.isBuffering) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (state.isBuffering && !isVideo) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
             }
         },
