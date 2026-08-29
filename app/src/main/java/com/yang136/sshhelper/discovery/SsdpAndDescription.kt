@@ -1,16 +1,15 @@
 package com.yang136.sshhelper.discovery
 
-import android.net.Network
 import java.io.ByteArrayOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URL
 import java.net.SocketTimeoutException
+import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.Locale
@@ -110,7 +109,8 @@ class AndroidSsdpDiscovery(
 
             val deadline = System.nanoTime() + responseWindowMillis * 1_000_000
             val accumulator = SsdpResponseAccumulator(cidr)
-            while (accumulator.snapshot().size < SSDP_MAX_RESPONSES) {
+            var receivedPackets = 0
+            while (receivedPackets < SSDP_MAX_RESPONSES) {
                 val remainingMillis = (deadline - System.nanoTime()) / 1_000_000
                 if (remainingMillis <= 0) break
                 socket.soTimeout = remainingMillis.coerceIn(1, 250).toInt()
@@ -121,6 +121,7 @@ class AndroidSsdpDiscovery(
                 } catch (_: SocketTimeoutException) {
                     continue
                 }
+                receivedPackets++
                 val source = (packet.address as? Inet4Address)?.hostAddress ?: continue
                 accumulator.add(source, packet.data, packet.length)
             }
@@ -193,6 +194,7 @@ class AndroidDeviceDescriptionRepository(
     private val networks: AndroidNetworkEnvironment,
 ) : DeviceDescriptionRepository {
     private val cache = ConcurrentHashMap<String, DeviceDescription>()
+    private val activeSockets = Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
 
     override suspend fun load(
         networkId: String,
@@ -205,35 +207,119 @@ class AndroidDeviceDescriptionRepository(
             val url = requireNotNull(DeviceDescriptionParser.validateLocation(address, location)) {
                 "SSDP LOCATION 必须是与响应来源一致的 HTTP IPv4 地址"
             }
-            val network: Network = requireNotNull(networks.networkFor(networkId)) { "所选局域网已断开" }
-            val connection = network.openConnection(url) as HttpURLConnection
+            val network = requireNotNull(networks.networkFor(networkId)) { "所选局域网已断开" }
+            val socket = network.socketFactory.createSocket()
+            activeSockets += socket
             try {
-                connection.instanceFollowRedirects = false
-                connection.connectTimeout = 1_500
-                connection.readTimeout = 1_500
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Accept", "application/xml, text/xml")
-                val code = connection.responseCode
-                require(code in 200..299) { "设备描述请求失败（HTTP $code）" }
-                val declaredLength = connection.contentLengthLong
-                require(declaredLength <= DESCRIPTION_MAX_BYTES) { "设备描述超过 64 KiB" }
-                val bytes = connection.inputStream.use { input ->
-                    val output = ByteArrayOutputStream()
-                    val buffer = ByteArray(4_096)
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        require(output.size() + read <= DESCRIPTION_MAX_BYTES) { "设备描述超过 64 KiB" }
-                        output.write(buffer, 0, read)
-                    }
-                    output.toByteArray()
+                val port = if (url.port == -1) 80 else url.port
+                socket.connect(InetSocketAddress(address, port), 1_500)
+                socket.soTimeout = 1_500
+                socket.getOutputStream().apply {
+                    write(DeviceDescriptionHttp.request(url))
+                    flush()
                 }
+                val rawResponse = DeviceDescriptionHttp.readResponse(socket)
+                val bytes = DeviceDescriptionHttp.parseResponse(rawResponse)
                 DeviceDescriptionParser.parse(bytes).also { cache[key] = it }
             } finally {
-                connection.disconnect()
+                activeSockets -= socket
+                runCatching { socket.close() }
             }
         }
     }
 
-    override fun clear() = cache.clear()
+    override fun clear() {
+        activeSockets.toList().forEach { runCatching { it.close() } }
+        activeSockets.clear()
+        cache.clear()
+    }
+}
+
+object DeviceDescriptionHttp {
+    private const val MAX_HEADER_BYTES = 16 * 1_024
+
+    fun request(url: URL): ByteArray {
+        val path = url.file.takeIf(String::isNotEmpty) ?: "/"
+        val host = if (url.port == -1 || url.port == 80) url.host else "${url.host}:${url.port}"
+        return (
+            "GET $path HTTP/1.1\r\n" +
+                "Host: $host\r\n" +
+                "Accept: application/xml, text/xml\r\n" +
+                "Connection: close\r\n\r\n"
+            ).toByteArray(StandardCharsets.US_ASCII)
+    }
+
+    fun readResponse(socket: Socket): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(4_096)
+        while (true) {
+            val read = try {
+                socket.getInputStream().read(buffer)
+            } catch (_: SocketTimeoutException) {
+                if (output.size() == 0) throw SocketTimeoutException("设备描述读取超时") else break
+            }
+            if (read < 0) break
+            require(output.size() + read <= DESCRIPTION_MAX_BYTES + MAX_HEADER_BYTES) {
+                "设备描述响应超过限制"
+            }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    fun parseResponse(raw: ByteArray): ByteArray {
+        val text = raw.toString(StandardCharsets.ISO_8859_1)
+        val headerEnd = text.indexOf("\r\n\r\n")
+        require(headerEnd in 1..MAX_HEADER_BYTES) { "设备描述 HTTP 响应头无效" }
+        val headerLines = text.substring(0, headerEnd).split("\r\n")
+        val status = headerLines.firstOrNull()?.split(' ')?.getOrNull(1)?.toIntOrNull()
+            ?: error("设备描述 HTTP 状态无效")
+        require(status in 200..299) { "设备描述请求失败（HTTP $status）" }
+        val headers = headerLines.drop(1).mapNotNull { line ->
+            val separator = line.indexOf(':')
+            if (separator <= 0) null else line.substring(0, separator).trim().lowercase(Locale.US) to
+                line.substring(separator + 1).trim()
+        }.toMap()
+        val body = raw.copyOfRange(headerEnd + 4, raw.size)
+        if (headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true) {
+            return decodeChunked(body)
+        }
+        val length = headers["content-length"]?.toLongOrNull()
+        if (length != null) {
+            require(length in 0..DESCRIPTION_MAX_BYTES.toLong()) { "设备描述超过 64 KiB" }
+            require(body.size >= length) { "设备描述响应不完整" }
+            return body.copyOf(length.toInt())
+        }
+        require(body.size <= DESCRIPTION_MAX_BYTES) { "设备描述超过 64 KiB" }
+        return body
+    }
+
+    private fun decodeChunked(body: ByteArray): ByteArray {
+        val output = ByteArrayOutputStream()
+        var offset = 0
+        while (true) {
+            val lineEnd = indexOfCrlf(body, offset)
+            require(lineEnd >= 0) { "设备描述分块响应无效" }
+            val size = body.copyOfRange(offset, lineEnd).toString(StandardCharsets.US_ASCII)
+                .substringBefore(';').trim().toIntOrNull(16)
+                ?: error("设备描述分块长度无效")
+            offset = lineEnd + 2
+            if (size == 0) return output.toByteArray()
+            require(size >= 0 && output.size() + size <= DESCRIPTION_MAX_BYTES) { "设备描述超过 64 KiB" }
+            require(offset + size + 2 <= body.size) { "设备描述分块响应不完整" }
+            output.write(body, offset, size)
+            offset += size
+            require(body[offset] == '\r'.code.toByte() && body[offset + 1] == '\n'.code.toByte()) {
+                "设备描述分块响应无效"
+            }
+            offset += 2
+        }
+    }
+
+    private fun indexOfCrlf(bytes: ByteArray, start: Int): Int {
+        for (index in start until bytes.size - 1) {
+            if (bytes[index] == '\r'.code.toByte() && bytes[index + 1] == '\n'.code.toByte()) return index
+        }
+        return -1
+    }
 }

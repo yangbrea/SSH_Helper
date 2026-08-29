@@ -5,28 +5,38 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yang136.sshhelper.AppContainer
 import com.yang136.sshhelper.discovery.DEFAULT_SSH_PORT
-import com.yang136.sshhelper.discovery.DiscoveredSshDevice
+import com.yang136.sshhelper.discovery.DeviceDescriptionRepository
+import com.yang136.sshhelper.discovery.DiscoveredDevice
+import com.yang136.sshhelper.discovery.DiscoveredService
 import com.yang136.sshhelper.discovery.DiscoveryEvent
+import com.yang136.sshhelper.discovery.DiscoveryEvidence
 import com.yang136.sshhelper.discovery.DiscoveryReducer
 import com.yang136.sshhelper.discovery.DiscoveryStatus
 import com.yang136.sshhelper.discovery.Ipv4Cidr
-import com.yang136.sshhelper.discovery.LanNetwork
 import com.yang136.sshhelper.discovery.LanDiscoveryEngine
+import com.yang136.sshhelper.discovery.LanNetwork
 import com.yang136.sshhelper.discovery.NetworkEnvironment
+import com.yang136.sshhelper.discovery.NoOpDeviceDescriptionRepository
+import com.yang136.sshhelper.discovery.ScanMode
 import com.yang136.sshhelper.discovery.ScanRequest
+import com.yang136.sshhelper.discovery.ServiceKind
+import com.yang136.sshhelper.discovery.TransportProtocol
+import com.yang136.sshhelper.discovery.parseGeneralPortList
 import com.yang136.sshhelper.discovery.parseIpv4
 import com.yang136.sshhelper.discovery.parsePortList
 import com.yang136.sshhelper.discovery.validateScanCidr
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class DiscoveryUiState(
+    val mode: ScanMode = ScanMode.SSH,
     val networks: List<LanNetwork> = emptyList(),
     val selectedNetworkId: String? = null,
     val cidrInput: String = "",
@@ -34,19 +44,28 @@ data class DiscoveryUiState(
     val status: DiscoveryStatus = DiscoveryStatus.IDLE,
     val completedProbes: Int = 0,
     val totalProbes: Int = 0,
-    val devices: List<DiscoveredSshDevice> = emptyList(),
+    val devices: List<DiscoveredDevice> = emptyList(),
+    val selectedDetailAddress: String? = null,
+    val detailLoading: Boolean = false,
+    val detailError: String? = null,
     val notice: String? = null,
     val error: String? = null,
-)
+) {
+    val selectedDevice: DiscoveredDevice?
+        get() = devices.firstOrNull { it.address == selectedDetailAddress }
+}
 
 class DiscoveryViewModel(
     private val networkEnvironment: NetworkEnvironment,
     private val discoveryEngine: LanDiscoveryEngine,
+    private val descriptionRepository: DeviceDescriptionRepository = NoOpDeviceDescriptionRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(DiscoveryUiState())
     val state: StateFlow<DiscoveryUiState> = mutableState.asStateFlow()
     private var scanJob: Job? = null
-    private var deviceMap = emptyMap<String, DiscoveredSshDevice>()
+    private var detailJob: Job? = null
+    private var deviceMap = emptyMap<String, DiscoveredDevice>()
+    private val generation = AtomicInteger(0)
 
     init {
         refreshNetworks()
@@ -66,6 +85,29 @@ class DiscoveryViewModel(
                     error = if (networks.isEmpty()) "未找到可用的 Wi-Fi 或以太网 IPv4 网络" else null,
                 )
             }
+        }
+    }
+
+    fun selectMode(mode: ScanMode) {
+        if (mutableState.value.status == DiscoveryStatus.SCANNING || mutableState.value.mode == mode) return
+        generation.incrementAndGet()
+        detailJob?.cancel()
+        descriptionRepository.clear()
+        deviceMap = emptyMap()
+        mutableState.update {
+            it.copy(
+                mode = mode,
+                portsInput = if (mode == ScanMode.SSH) DEFAULT_SSH_PORT.toString() else "",
+                status = if (it.networks.isEmpty()) DiscoveryStatus.NO_NETWORK else DiscoveryStatus.IDLE,
+                devices = emptyList(),
+                completedProbes = 0,
+                totalProbes = 0,
+                selectedDetailAddress = null,
+                detailLoading = false,
+                detailError = null,
+                notice = null,
+                error = null,
+            )
         }
     }
 
@@ -98,11 +140,17 @@ class DiscoveryViewModel(
             mutableState.update { it.copy(error = error) }
             return
         }
-        val ports = parsePortList(current.portsInput).getOrElse { failure ->
+        val ports = when (current.mode) {
+            ScanMode.SSH -> parsePortList(current.portsInput)
+            ScanMode.GENERAL -> parseGeneralPortList(current.portsInput)
+        }.getOrElse { failure ->
             mutableState.update { it.copy(error = failure.message ?: "端口列表格式不正确") }
             return
         }
         scanJob?.cancel()
+        detailJob?.cancel()
+        descriptionRepository.clear()
+        val scanGeneration = generation.incrementAndGet()
         deviceMap = emptyMap()
         mutableState.update {
             it.copy(
@@ -110,6 +158,9 @@ class DiscoveryViewModel(
                 completedProbes = 0,
                 totalProbes = 0,
                 devices = emptyList(),
+                selectedDetailAddress = null,
+                detailLoading = false,
+                detailError = null,
                 notice = null,
                 error = null,
             )
@@ -117,11 +168,14 @@ class DiscoveryViewModel(
         scanJob = viewModelScope.launch {
             try {
                 discoveryEngine.scan(
-                    ScanRequest(network.id, cidr, ports, network.ipv4Address),
-                ).collect { event -> handleEvent(network.id, event) }
+                    ScanRequest(network.id, cidr, ports, network.ipv4Address, current.mode),
+                ).collect { event ->
+                    if (generation.get() == scanGeneration) handleEvent(network.id, event)
+                }
             } catch (_: CancellationException) {
                 // cancelScan owns the visible cancelled state; lifecycle cancellation needs no UI update.
             } catch (failure: Throwable) {
+                if (generation.get() != scanGeneration) return@launch
                 mutableState.update {
                     it.copy(
                         status = DiscoveryStatus.ERROR,
@@ -135,10 +189,59 @@ class DiscoveryViewModel(
     }
 
     fun cancelScan() {
+        generation.incrementAndGet()
         discoveryEngine.cancel()
         scanJob?.cancel()
         scanJob = null
-        mutableState.update { it.copy(status = DiscoveryStatus.CANCELLED) }
+        detailJob?.cancel()
+        descriptionRepository.clear()
+        mutableState.update { it.copy(status = DiscoveryStatus.CANCELLED, detailLoading = false) }
+    }
+
+    fun openDetails(address: String) {
+        val current = deviceMap[address] ?: return
+        mutableState.update {
+            it.copy(selectedDetailAddress = address, detailError = null, detailLoading = false)
+        }
+        if (mutableState.value.mode != ScanMode.GENERAL || current.description != null) return
+        val locations = current.ssdpRecords.mapNotNull { it.location }.distinct()
+        if (locations.isEmpty()) return
+        val detailGeneration = generation.get()
+        detailJob?.cancel()
+        detailJob = viewModelScope.launch {
+            mutableState.update { it.copy(detailLoading = true, detailError = null) }
+            var lastFailure: Throwable? = null
+            var loaded = false
+            for (location in locations) {
+                val result = descriptionRepository.load(current.networkId, current.address, location)
+                result.onSuccess { description ->
+                    if (generation.get() != detailGeneration || mutableState.value.selectedDetailAddress != address) return@launch
+                    deviceMap = DiscoveryReducer.apply(
+                        deviceMap,
+                        current.networkId,
+                        DiscoveryEvidence.Description(address, description),
+                    )
+                    publishDevices()
+                    loaded = true
+                }.onFailure { lastFailure = it }
+                if (loaded) break
+            }
+            if (generation.get() == detailGeneration && mutableState.value.selectedDetailAddress == address) {
+                mutableState.update {
+                    it.copy(
+                        detailLoading = false,
+                        detailError = if (loaded) null else lastFailure?.message ?: "设备描述读取失败",
+                    )
+                }
+            }
+        }
+    }
+
+    fun closeDetails() {
+        detailJob?.cancel()
+        mutableState.update {
+            it.copy(selectedDetailAddress = null, detailLoading = false, detailError = null)
+        }
     }
 
     private fun handleEvent(networkId: String, event: DiscoveryEvent) {
@@ -149,20 +252,31 @@ class DiscoveryViewModel(
             }
             is DiscoveryEvent.Evidence -> {
                 deviceMap = DiscoveryReducer.apply(deviceMap, networkId, event.value)
-                val visible = deviceMap.values.filter { it.endpoints.isNotEmpty() }.sortedWith(
-                    compareByDescending<DiscoveredSshDevice> { it.bestConfidence }
-                        .thenBy { it.displayName.orEmpty().lowercase() }
-                        .thenBy { parseIpv4(it.address) },
-                )
-                mutableState.update { it.copy(devices = visible) }
+                publishDevices()
             }
             is DiscoveryEvent.Notice -> mutableState.update { it.copy(notice = event.message) }
             DiscoveryEvent.Completed -> mutableState.update { it.copy(status = DiscoveryStatus.COMPLETED) }
         }
     }
 
+    private fun publishDevices() {
+        val mode = mutableState.value.mode
+        val visible = deviceMap.values
+            .filter { mode == ScanMode.GENERAL || it.hasSsh }
+            .sortedWith(
+                compareByDescending<DiscoveredDevice> { it.classification.confidence }
+                    .thenByDescending { it.bestConfidence }
+                    .thenBy { it.displayName.orEmpty().lowercase() }
+                    .thenBy { parseIpv4(it.address) },
+            )
+        mutableState.update { it.copy(devices = visible) }
+    }
+
     override fun onCleared() {
+        generation.incrementAndGet()
         discoveryEngine.cancel()
+        detailJob?.cancel()
+        descriptionRepository.clear()
     }
 
     companion object {
@@ -171,7 +285,18 @@ class DiscoveryViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = DiscoveryViewModel(
                 container.networkEnvironment,
                 container.lanDiscoveryEngine,
+                container.deviceDescriptionRepository,
             ) as T
         }
     }
+}
+
+fun webUrlFor(address: String, service: DiscoveredService): String? {
+    if (parseIpv4(address) == null || service.transport != TransportProtocol.TCP) return null
+    val scheme = when {
+        service.kind == ServiceKind.HTTPS || service.port in setOf(443, 8443) -> "https"
+        service.kind == ServiceKind.HTTP || service.port in setOf(80, 8000, 8080) -> "http"
+        else -> return null
+    }
+    return "$scheme://$address:${service.port}/"
 }

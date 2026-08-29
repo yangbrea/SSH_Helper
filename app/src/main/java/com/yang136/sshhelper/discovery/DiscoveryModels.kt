@@ -200,6 +200,15 @@ object NoOpSsdpDiscovery : SsdpDiscovery {
     override fun cancel() = Unit
 }
 
+object NoOpDeviceDescriptionRepository : DeviceDescriptionRepository {
+    override suspend fun load(
+        networkId: String,
+        address: String,
+        location: String,
+    ): Result<DeviceDescription> = Result.failure(UnsupportedOperationException("设备描述不可用"))
+    override fun clear() = Unit
+}
+
 interface DeviceDescriptionRepository {
     suspend fun load(networkId: String, address: String, location: String): Result<DeviceDescription>
     fun clear()

@@ -68,6 +68,24 @@ class SsdpAndDescriptionTest {
         DeviceDescriptionParser.parse("<!DOCTYPE root [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><root/>".toByteArray())
     }
 
+    @Test
+    fun strictHttpParserRejectsRedirectAndDecodesBoundedChunkedBody() {
+        val redirect = "HTTP/1.1 302 Found\r\nLocation: http://192.168.1.2/other\r\nContent-Length: 0\r\n\r\n"
+            .toByteArray(StandardCharsets.ISO_8859_1)
+        assertTrue(runCatching { DeviceDescriptionHttp.parseResponse(redirect) }.isFailure)
+
+        val response = (
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
+                "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+            ).toByteArray(StandardCharsets.ISO_8859_1)
+        assertEquals("hello world", DeviceDescriptionHttp.parseResponse(response).toString(StandardCharsets.UTF_8))
+
+        val oversized = (
+            "HTTP/1.1 200 OK\r\nContent-Length: ${DESCRIPTION_MAX_BYTES + 1}\r\n\r\n"
+            ).toByteArray(StandardCharsets.ISO_8859_1)
+        assertTrue(runCatching { DeviceDescriptionHttp.parseResponse(oversized) }.isFailure)
+    }
+
     private fun response(usn: String, st: String): ByteArray = (
         "HTTP/1.1 200 OK\r\n" +
             "ST: $st\r\n" +

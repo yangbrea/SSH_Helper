@@ -45,5 +45,8 @@ class Ipv4CidrTest {
         assertEquals(linkedSetOf(22, 2222), parsePortList("22, 2222，22").getOrThrow())
         assertFalse(parsePortList("0").isSuccess)
         assertFalse(parsePortList((1..17).joinToString(",")).isSuccess)
+        assertEquals(emptySet<Int>(), parseGeneralPortList("").getOrThrow())
+        assertEquals(setOf(80, 8080), parseGeneralPortList("80,8080").getOrThrow())
+        assertFalse(parseGeneralPortList("1,2,3,4,5").isSuccess)
     }
 }

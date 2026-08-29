@@ -65,6 +65,15 @@ fun parsePortList(value: String): Result<Set<Int>> = runCatching {
     ports
 }
 
+fun parseGeneralPortList(value: String): Result<Set<Int>> = runCatching {
+    if (value.isBlank()) return@runCatching emptySet()
+    val ports = parsePortList(value).getOrThrow()
+    require(ports.size <= MAX_GENERAL_CUSTOM_PORTS) {
+        "通用模式最多添加 $MAX_GENERAL_CUSTOM_PORTS 个第一阶段端口"
+    }
+    ports
+}
+
 fun parseIpv4(value: String): Long? {
     val parts = value.trim().split('.')
     if (parts.size != 4) return null

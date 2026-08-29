@@ -42,7 +42,13 @@ object DiscoveryReducer {
             is DiscoveryEvidence.Ssdp -> current.copy(
                 ssdpRecords = (current.ssdpRecords + evidence.record)
                     .distinctBy { Triple(it.address, it.usn, it.st) },
-                sources = current.sources + DiscoverySource.SSDP,
+            ).withService(
+                DiscoveredService(
+                    port = 1900,
+                    kind = ServiceKind.UPNP,
+                    transport = TransportProtocol.UDP,
+                ),
+                DiscoverySource.SSDP,
             )
 
             is DiscoveryEvidence.Description -> current.copy(
