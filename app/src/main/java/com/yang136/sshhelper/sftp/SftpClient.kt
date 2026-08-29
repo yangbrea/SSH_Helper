@@ -15,11 +15,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 enum class RemoteFileType { FILE, DIRECTORY, SYMLINK, OTHER }
 
@@ -174,9 +172,10 @@ class JschSftpClient(private val channel: ChannelSftp) : SftpClient {
                     abortRequested.set(true)
                     runCatching { buffer.close() }
                     runCatching { output.close() }
-                    // Wait for the transfer coroutine to settle so the channel is quiescent
-                    // before any follow-up request; the pipe close unblocks a stuck writer.
-                    runBlocking { withTimeoutOrNull(2_000) { job.join() } }
+                    // Non-blocking: the transfer coroutine aborts on the next chunk (monitor)
+                    // or on pipe write (IOException). The owning client disconnects the
+                    // channel right after, which also kills a lingering get. Never block the
+                    // caller (Media3's loader thread) waiting for JSch to converge.
                     job.cancel()
                 }
             }

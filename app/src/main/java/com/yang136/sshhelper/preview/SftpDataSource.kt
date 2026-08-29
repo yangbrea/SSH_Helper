@@ -12,17 +12,21 @@ import java.util.concurrent.CopyOnWriteArraySet
 import kotlinx.coroutines.runBlocking
 
 /**
- * A Media3 [DataSource] that streams a remote file over SFTP. Each [open] starts a fresh
- * offset read on the caller-provided preview channel, which makes seeking cheap and keeps
- * the whole file out of memory. The [SftpClient] is owned by [SftpDataSourceFactory] and
- * must outlive this source: [close] only aborts the active byte stream.
+ * A Media3 [DataSource] that streams a remote file over SFTP.
+ *
+ * Every [open] (including every seek) obtains a **fresh dedicated SFTP channel** via
+ * [clientFactory] and closes it in [close]. Channels are never shared or reused: JSch's
+ * ChannelSftp deadlocks when two reads overlap on the same channel (aborting one read and
+ * immediately reopening at a new offset on the same channel can overlap), which froze the
+ * SSH session on seek. Owning one channel per read session makes seeks and aborts safe.
  */
 class SftpDataSource(
-    private val client: SftpClient,
+    private val clientFactory: () -> SftpClient,
     private val path: String,
     private val displayHost: String,
 ) : DataSource {
 
+    private var client: SftpClient? = null
     private var stream: InputStream? = null
     private var bytesRemaining = -1L
     private val transferListeners = CopyOnWriteArraySet<TransferListener>()
@@ -39,11 +43,18 @@ class SftpDataSource(
      */
     internal fun open(position: Long, length: Long): Long {
         close()
-        val remote = try {
-            runBlocking { client.openRead(path, position) }
+        val newClient = try {
+            clientFactory()
         } catch (error: Throwable) {
+            throw IOException("无法打开 SFTP 通道：${error.message}", error)
+        }
+        val remote = try {
+            runBlocking { newClient.openRead(path, position) }
+        } catch (error: Throwable) {
+            runCatching { newClient.close() }
             throw IOException("无法从 SFTP 读取远程文件：${error.message}", error)
         }
+        client = newClient
         stream = remote.stream
         bytesRemaining = (remote.size - position).coerceAtLeast(0L)
         if (length != C.LENGTH_UNSET.toLong()) {
@@ -73,5 +84,8 @@ class SftpDataSource(
     override fun close() {
         runCatching { stream?.close() }
         stream = null
+        // The channel dies with its stream; a lingering transfer is aborted by disconnect.
+        runCatching { client?.close() }
+        client = null
     }
 }

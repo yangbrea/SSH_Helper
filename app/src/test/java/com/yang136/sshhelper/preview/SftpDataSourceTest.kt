@@ -75,7 +75,7 @@ class SftpDataSourceTest {
         val payload = "0123456789".repeat(2048).encodeToByteArray()
         newClient().use { client ->
             runBlocking { client.upload(ByteArrayInputStream(payload), "/stream.bin") }
-            val source = SftpDataSource(client, "/stream.bin", "testhost")
+            val source = SftpDataSource(clientFactory = { newClient() }, path = "/stream.bin", displayHost = "testhost")
             try {
                 val length = source.open(0L, C.LENGTH_UNSET.toLong())
                 assertEquals(payload.size.toLong(), length)
@@ -91,7 +91,7 @@ class SftpDataSourceTest {
         val payload = "0123456789".repeat(2048).encodeToByteArray()
         newClient().use { client ->
             runBlocking { client.upload(ByteArrayInputStream(payload), "/stream.bin") }
-            val source = SftpDataSource(client, "/stream.bin", "testhost")
+            val source = SftpDataSource(clientFactory = { newClient() }, path = "/stream.bin", displayHost = "testhost")
             try {
                 val offset = 5000L
                 val length = source.open(offset, C.LENGTH_UNSET.toLong())
@@ -108,7 +108,7 @@ class SftpDataSourceTest {
         val payload = ByteArray(2 * 1024 * 1024) { (it % 251).toByte() }
         newClient().use { client ->
             runBlocking { client.upload(ByteArrayInputStream(payload), "/big.bin") }
-            val source = SftpDataSource(client, "/big.bin", "testhost")
+            val source = SftpDataSource(clientFactory = { newClient() }, path = "/big.bin", displayHost = "testhost")
             try {
                 source.open(0L, C.LENGTH_UNSET.toLong())
                 val buffer = ByteArray(8192)
@@ -120,6 +120,36 @@ class SftpDataSourceTest {
                     assertTrue("关闭后读取应快速失败而非阻塞", error is java.io.IOException)
                 }
                 assertTrue("关闭后读取应在 1s 内返回，实际 ${elapsed}ms", elapsed < 1_000)
+            } finally {
+                source.close()
+            }
+        }
+    }
+
+    /**
+     * Regression: Media3 seeks by closing the source and reopening at a new offset. The
+     * data source must open a FRESH channel per open (never reuse a channel with a
+     * concurrent/aborted read), otherwise JSch's ChannelSftp deadlocks and the SSH session
+     * freezes. This test replays the exact open -> read -> close -> open(offset) sequence.
+     */
+    @Test
+    fun seekReopensOnFreshChannel() {
+        val payload = ByteArray(3 * 1024 * 1024) { (it % 251).toByte() }
+        newClient().use { client ->
+            runBlocking { client.upload(ByteArrayInputStream(payload), "/media.bin") }
+            val source = SftpDataSource(clientFactory = { newClient() }, path = "/media.bin", displayHost = "testhost")
+            try {
+                // First play: open at 0, read a little, then "drag the seek bar".
+                assertEquals(payload.size.toLong(), source.open(0L, C.LENGTH_UNSET.toLong()))
+                val buffer = ByteArray(8192)
+                assertEquals(8192, source.read(buffer, 0, buffer.size))
+                source.close()
+
+                // Seek: reopen at 1 MiB. Must succeed on a fresh channel with correct bytes.
+                val offset = 1L * 1024 * 1024
+                val length = source.open(offset, C.LENGTH_UNSET.toLong())
+                assertEquals(payload.size.toLong() - offset, length)
+                assertArrayEquals(payload.copyOfRange(offset.toInt(), payload.size), drain(source))
             } finally {
                 source.close()
             }

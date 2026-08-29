@@ -1,16 +1,15 @@
 package com.yang136.sshhelper.preview
 
 import androidx.media3.datasource.DataSource
-import com.yang136.sshhelper.sftp.SftpClient
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionManager
 import kotlinx.coroutines.runBlocking
 
 /**
- * Creates Media3 data sources that stream [path] over one dedicated SFTP channel per
- * playback session. [release] must be called when playback ends so the channel is closed
- * and the session slot is freed; without it the channel would leak until the SSH session
- * itself is torn down.
+ * Creates [SftpDataSource]s that stream [path] over the session's SSH connection.
+ * Stateless on purpose: each data source opens and closes its own dedicated SFTP channel
+ * per read session, so seeks and cache-driven reopens never share a channel with a
+ * concurrent read (which would deadlock JSch's ChannelSftp).
  */
 class SftpDataSourceFactory(
     private val sessionManager: SessionManager,
@@ -19,17 +18,12 @@ class SftpDataSourceFactory(
     private val displayHost: String,
 ) : DataSource.Factory {
 
-    private var client: SftpClient? = null
+    override fun createDataSource(): DataSource = SftpDataSource(
+        clientFactory = { runBlocking { sessionManager.newSftpClient(sessionId) } },
+        path = path,
+        displayHost = displayHost,
+    )
 
-    override fun createDataSource(): DataSource {
-        client?.close()
-        val created = runBlocking { sessionManager.newSftpClient(sessionId) }
-        client = created
-        return SftpDataSource(created, path, displayHost)
-    }
-
-    fun release() {
-        client?.close()
-        client = null
-    }
+    /** Kept for API compatibility; channels are owned by the data sources themselves. */
+    fun release() = Unit
 }

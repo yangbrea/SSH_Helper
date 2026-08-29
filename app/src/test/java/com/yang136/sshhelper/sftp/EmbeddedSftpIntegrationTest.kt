@@ -24,6 +24,7 @@ class EmbeddedSftpIntegrationTest {
     private lateinit var server: SshServer
     private lateinit var root: java.nio.file.Path
     private lateinit var client: JschSftpClient
+    private lateinit var jschSession: com.jcraft.jsch.Session
 
     @Before fun startServer() {
         root = Files.createTempDirectory("ssh-helper-sftp-test")
@@ -36,16 +37,17 @@ class EmbeddedSftpIntegrationTest {
             fileSystemFactory = VirtualFileSystemFactory(root)
             start()
         }
-        val session = JSch().getSession("test", "127.0.0.1", server.port).apply {
+        jschSession = JSch().getSession("test", "127.0.0.1", server.port).apply {
             setPassword("secret")
             setConfig("StrictHostKeyChecking", "no")
             connect(5_000)
         }
-        client = JschSftpClient((session.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
+        client = JschSftpClient((jschSession.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
     }
 
     @After fun stopServer() {
         runCatching { client.close() }
+        runCatching { jschSession.disconnect() }
         runCatching { server.stop(true) }
         root.toFile().deleteRecursively()
     }
@@ -105,8 +107,14 @@ class EmbeddedSftpIntegrationTest {
             assertTrue("关闭后读取应抛异常而非阻塞", error != null)
         }
         assertTrue("关闭后读取应在 1s 内返回，实际 ${elapsed}ms", elapsed < 1_000)
-        // The channel stays usable afterwards.
-        assertTrue(client.list(".").any { it.name == "big.bin" })
+        // The aborted channel is deliberately discarded (never reused). The SSH session must
+        // survive: opening a fresh channel proves the seek/abort did not kill the connection.
+        val fresh = JschSftpClient((jschSession.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
+        try {
+            assertTrue(fresh.list(".").any { it.name == "big.bin" })
+        } finally {
+            fresh.close()
+        }
     }
 
     @Test
