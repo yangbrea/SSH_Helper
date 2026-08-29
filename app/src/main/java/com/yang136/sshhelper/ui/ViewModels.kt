@@ -325,6 +325,20 @@ data class EditorState(
     val isDirty: Boolean = false,
 )
 
+data class HostEditorSeed(
+    val name: String,
+    val hostname: String,
+    val port: Int,
+)
+
+internal fun HostEditorSeed.toEditorState() = EditorState(
+    name = name,
+    hostname = hostname,
+    port = port.toString(),
+    loaded = true,
+    isDirty = true,
+)
+
 data class GeneratedKeyState(
     val publicKey: String,
     val fingerprint: String,
@@ -336,6 +350,7 @@ internal fun EditorState.applyUserEdit(transform: (EditorState) -> EditorState):
 class HostEditorViewModel(
     private val container: AppContainer,
     private val hostId: Long,
+    private val seed: HostEditorSeed? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(EditorState())
     val state: StateFlow<EditorState> = mutableState.asStateFlow()
@@ -372,7 +387,7 @@ class HostEditorViewModel(
                     proxyUsername = it.proxyUsername.orEmpty(),
                     loaded = true,
                 )
-            } ?: EditorState(loaded = true)
+            } ?: seed?.toEditorState() ?: EditorState(loaded = true)
         }
     }
 
@@ -480,7 +495,8 @@ class HostEditorViewModel(
     }
 
     companion object {
-        fun factory(container: AppContainer, hostId: Long) = simpleFactory { HostEditorViewModel(container, hostId) }
+        fun factory(container: AppContainer, hostId: Long, seed: HostEditorSeed? = null) =
+            simpleFactory { HostEditorViewModel(container, hostId, seed) }
     }
 }
 

@@ -10,6 +10,8 @@ data class Ipv4Cidr private constructor(
 
     override fun toString(): String = "${formatIpv4(network)}/$prefixLength"
 
+    fun contains(address: String): Boolean = parseIpv4(address)?.let { it in network..broadcast } == true
+
     fun usableAddresses(ownAddress: String? = null): List<String> {
         val own = ownAddress?.let(::parseIpv4)
         val first = if (prefixLength <= 30) network + 1 else network
@@ -63,7 +65,7 @@ fun parsePortList(value: String): Result<Set<Int>> = runCatching {
     ports
 }
 
-internal fun parseIpv4(value: String): Long? {
+fun parseIpv4(value: String): Long? {
     val parts = value.trim().split('.')
     if (parts.size != 4) return null
     var result = 0L

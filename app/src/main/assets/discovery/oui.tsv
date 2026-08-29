@@ -1,0 +1,504 @@
+# Compact offline IEEE Registration Authority public-listing snapshot.
+# Generated 2026-08-30 from MA-L, MA-M and MA-S CSV listings.
+# Format: hexadecimal prefix/prefix length<TAB>organization.
+286FB9/24	Nokia Shanghai Bell Co.
+E80AB9/24	Cisco Systems
+78465F/24	Fiberhome Telecommunication Technologies Co.
+F01B24/24	zte corporation
+E00630/24	HUAWEI TECHNOLOGIES CO.
+644ED7/24	HP Inc.
+9CE330/24	Cisco Meraki
+04A959/24	New H3C Technologies Co.
+0CB983/24	Honor Device Co.
+2CB301/24	Honor Device Co.
+E4C767/24	Intel Corporate
+D48AFC/24	Espressif Inc.
+E465B8/24	Espressif Inc.
+B4DF91/24	Cisco Meraki
+98EE8C/24	zte corporation
+90C710/24	zte corporation
+CCEB5E/24	Xiaomi Communications Co Ltd
+DC5193/24	zte corporation
+F42E48/24	zte corporation
+481BA4/24	Cisco Systems
+F0EE7A/24	Apple
+203AEB/24	zte corporation
+D8DAF1/24	HUAWEI TECHNOLOGIES CO.
+54443B/24	HUAWEI TECHNOLOGIES CO.
+5C7075/24	HUAWEI TECHNOLOGIES CO.
+58AD12/24	Apple
+60FDA6/24	Apple
+80A997/24	Apple
+348C5E/24	Apple
+708185/24	New H3C Technologies Co.
+08F01E/24	eero inc.
+6C03B5/24	Cisco Systems
+F43A7B/24	zte corporation
+689E29/24	zte corporation
+E44097/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+DCB4CA/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+A002A5/24	Intel Corporate
+ACC048/24	OnePlus Technology (Shenzhen) Co.
+842859/24	Amazon Technologies Inc.
+5016F4/24	Motorola Mobility LLC
+90ECE3/24	Nokia
+887B2C/24	zte corporation
+B851A9/24	Nokia
+641B2F/24	Samsung Electronics Co.
+9C73B1/24	Samsung Electronics Co.
+388A06/24	Samsung Electronics Co.
+40D4F6/24	Honor Device Co.
+B8AB61/24	Cisco Meraki
+782DAD/24	HUAWEI TECHNOLOGIES CO.
+D06158/24	HUAWEI TECHNOLOGIES CO.
+244BF1/24	HUAWEI TECHNOLOGIES CO.
+908855/24	Cisco Systems
+687161/24	Cisco Systems
+0080B8/24	DMG MORI Digital Co.
+2873F6/24	Amazon Technologies Inc.
+C4EBFF/24	zte corporation
+D4BAFA/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+4CEC0F/24	Cisco Systems
+E0CB1D/24	Amazon Technologies Inc.
+201582/24	Apple
+40921A/24	Apple
+10E2C9/24	Apple
+D0431E/24	Dell Inc.
+F0A0B1/24	HUAWEI TECHNOLOGIES CO.
+404F42/24	HUAWEI TECHNOLOGIES CO.
+3086F1/24	Fiberhome Telecommunication Technologies Co.
+00C04F/24	Dell Inc.
+00B0D0/24	Dell Inc.
+0019B9/24	Dell Inc.
+001AA0/24	Dell Inc.
+002564/24	Dell Inc.
+A4BADB/24	Dell Inc.
+782BCB/24	Dell Inc.
+14FEB5/24	Dell Inc.
+180373/24	Dell Inc.
+74867A/24	Dell Inc.
+204747/24	Dell Inc.
+000BDB/24	Dell Inc.
+00123F/24	Dell Inc.
+A41F72/24	Dell Inc.
+001C23/24	Dell Inc.
+847BEB/24	Dell Inc.
+989096/24	Dell Inc.
+801844/24	Dell Inc.
+9840BB/24	Dell Inc.
+D481D7/24	Dell Inc.
+54BF64/24	Dell Inc.
+CCC5E5/24	Dell Inc.
+4CD98F/24	Dell Inc.
+DCF401/24	Dell Inc.
+6C2B59/24	Dell Inc.
+C8F750/24	Dell Inc.
+98E743/24	Dell Inc.
+185A58/24	Dell Inc.
+D08E79/24	Dell Inc.
+B44506/24	Dell Inc.
+E0D848/24	Dell Inc.
+04BF1B/24	Dell Inc.
+148477/24	New H3C Technologies Co.
+14962D/24	New H3C Technologies Co.
+7066B9/24	Huawei Device Co.
+C4A1AE/24	Huawei Device Co.
+FCD749/24	Amazon Technologies Inc.
+74EE8D/24	Apollo Intelligent Connectivity (Beijing) Technology Co.
+9497AE/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+0CBD75/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+AC9073/24	HUAWEI TECHNOLOGIES CO.
+F09FC2/24	Ubiquiti Inc
+802AA8/24	Ubiquiti Inc
+FC1D3A/24	HUAWEI TECHNOLOGIES CO.
+E4BEFB/24	HUAWEI TECHNOLOGIES CO.
+58F8D7/24	HUAWEI TECHNOLOGIES CO.
+788A20/24	Ubiquiti Inc
+7483C2/24	Ubiquiti Inc
+E063DA/24	Ubiquiti Inc
+245A4C/24	Ubiquiti Inc
+602232/24	Ubiquiti Inc
+E43883/24	Ubiquiti Inc
+B8EA98/24	Xiaomi Communications Co Ltd
+AC800A/24	Sony Corporation
+E878EE/24	New H3C Technologies Co.
+7C4D8F/24	HP Inc.
+74D558/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+F46412/24	Sony Interactive Entertainment Inc.
+3CF9F0/24	zte corporation
+6877DA/24	zte corporation
+5C64F1/24	Cisco Systems
+9CDBAF/24	HUAWEI TECHNOLOGIES CO.
+0C2E57/24	HUAWEI TECHNOLOGIES CO.
+E8D775/24	HUAWEI TECHNOLOGIES CO.
+64EC65/24	vivo Mobile Communication Co.
+48BCE1/24	Samsung Electronics Co.
+D0D003/24	Samsung Electronics Co.
+5C76D5/24	Nokia
+8C7A00/24	Nokia
+A4FC14/24	Apple
+A81AF1/24	Apple
+0891A3/24	Amazon Technologies Inc.
+CC08FA/24	Apple
+909B6F/24	Apple
+7473B4/24	Apple
+D83ADD/24	Raspberry Pi Trading Ltd
+70F8AE/24	Microsoft Corporation
+BC64D9/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+301F48/24	zte corporation
+7CC74A/24	Fiberhome Telecommunication Technologies Co.
+38FC34/24	Huawei Device Co.
+3CF692/24	Huawei Device Co.
+940EE7/24	HUAWEI TECHNOLOGIES CO.
+A8B271/24	HUAWEI TECHNOLOGIES CO.
+08F1B3/24	Cisco Meraki
+BCE8FA/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+6C0C9A/24	Amazon Technologies Inc.
+308216/24	Apple
+8CD0B2/24	Beijing Xiaomi Mobile Software Co.
+C4A052/24	Motorola Mobility LLC
+F41A9C/24	Xiaomi Communications Co Ltd
+5C3E06/24	Cisco Systems
+C828E5/24	Cisco Systems
+6CD199/24	vivo Mobile Communication Co.
+0CFC18/24	HUAWEI TECHNOLOGIES CO.
+80AB4D/24	Nokia Solutions and Networks GmbH & Co. KG
+500238/24	Nokia Shanghai Bell Co.
+ACAD4B/24	zte corporation
+444988/24	Intel Corporate
+7C296F/24	Apple
+40EDCF/24	Apple
+8C986B/24	Apple
+1C8682/24	Apple
+8054E3/24	Apple
+102E00/24	Intel Corporate
+203A43/24	Intel Corporate
+F8DE73/24	HUAWEI TECHNOLOGIES CO.
+EC1A02/24	HUAWEI TECHNOLOGIES CO.
+D009C8/24	Cisco Systems
+44643C/24	Cisco Systems
+24161B/24	Cisco Systems
+3CB07E/24	Arounds Intelligent Equipment Co.
+C04E8A/24	HUAWEI TECHNOLOGIES CO.
+081AFD/24	Huawei Device Co.
+C0BFAC/24	Huawei Device Co.
+44272E/24	Huawei Device Co.
+201642/24	Microsoft Corporation
+8C946A/24	New H3C Technologies Co.
+48C35A/24	LENOVO(BEIJING)CO.
+C461C7/24	Microsoft Corporation
+ACCB36/24	Fiberhome Telecommunication Technologies Co.
+60706C/24	Google
+C82ADD/24	Google
+240935/24	Samsung Electronics Co.
+C0A5E8/24	Intel Corporate
+906584/24	Intel Corporate
+28C5D2/24	Intel Corporate
+842289/24	Samsung Electronics Co.
+E8FF98/24	Huawei Device Co.
+241551/24	Huawei Device Co.
+58957E/24	Huawei Device Co.
+2C9452/24	HUAWEI TECHNOLOGIES CO.
+6001B1/24	HUAWEI TECHNOLOGIES CO.
+B8144D/24	Apple
+EC28D3/24	Apple
+5CBBEE/24	zte corporation
+086518/24	Apple
+2C57CE/24	Apple
+80398C/24	Samsung Electronics Co.
+980D6F/24	Samsung Electronics Co.
+982044/24	New H3C Technologies Co.
+D8A0E8/24	zte corporation
+2C9E00/24	Sony Interactive Entertainment Inc.
+DC6AE7/24	Xiaomi Communications Co Ltd
+7CA449/24	Xiaomi Communications Co Ltd
+089115/24	Amazon Technologies Inc.
+74D423/24	Amazon Technologies Inc.
+ECA138/24	Amazon Technologies Inc.
+E0EF02/24	Chengdu Quanjing Intelligent Technology Co.
+B067B5/24	Apple
+5C5284/24	Apple
+C0956D/24	Apple
+3C39C8/24	Apple
+A8ABB5/24	Apple
+5864C4/24	Apple
+40A53B/24	Nokia
+900A62/24	Inventus Power Eletronica do Brasil LTDA
+5C60BA/24	HP Inc.
+BCF88B/24	zte corporation
+3CA7AE/24	zte corporation
+AC3184/24	Huawei Device Co.
+503F50/24	Huawei Device Co.
+CC29BD/24	zte corporation
+C43D1A/24	Intel Corporate
+04E8B9/24	Intel Corporate
+E02E0B/24	Intel Corporate
+581CF8/24	Intel Corporate
+AC198E/24	Intel Corporate
+C85EA9/24	Intel Corporate
+C8BF4C/24	Beijing Xiaomi Mobile Software Co.
+7CDE78/24	New H3C Technologies Co.
+ECE6A2/24	Fiberhome Telecommunication Technologies Co.
+AC5AF0/24	LG Electronics
+ECA62F/24	HUAWEI TECHNOLOGIES CO.
+0CBEF1/24	Huawei Device Co.
+AC936A/24	Huawei Device Co.
+38A44B/24	Huawei Device Co.
+801970/24	Samsung Electronics Co.
+B48A0A/24	Espressif Inc.
+E0F728/24	Amazon Technologies Inc.
+242934/24	Google
+3822F4/24	Huawei Device Co.
+149BF3/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+10071D/24	Fiberhome Telecommunication Technologies Co.
+B850D8/24	Beijing Xiaomi Mobile Software Co.
+10B232/24	Qingdao Intelligent&Precise Electronics Co.
+30D587/24	Samsung Electronics Co.
+A042D1/24	Huawei Device Co.
+58879F/24	Huawei Device Co.
+68A7B4/24	Honor Device Co.
+803C20/24	HUAWEI TECHNOLOGIES CO.
+A4DD58/24	HUAWEI TECHNOLOGIES CO.
+E8D87E/24	Amazon Technologies Inc.
+78034F/24	Nokia
+F8AB82/24	Xiaomi Communications Co Ltd
+EC30B3/24	Xiaomi Communications Co Ltd
+08E63B/24	zte corporation
+88C174/24	zte corporation
+1CAF4A/24	Samsung Electronics Co.
+C8120B/24	Samsung Electronics Co.
+C08D51/24	Amazon Technologies Inc.
+44B4B2/24	Amazon Technologies Inc.
+ACCCFC/24	Amazon Technologies Inc.
+E8DC6C/24	Cisco Systems
+B03F64/24	Apple
+2C8217/24	Apple
+142D4D/24	Apple
+EC42CC/24	Apple
+B8211C/24	Apple
+28BE43/24	vivo Mobile Communication Co.
+2CFC8B/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+A8C98A/24	New H3C Technologies Co.
+AC8FA9/24	Nokia Solutions and Networks GmbH & Co. KG
+AC51AB/24	HUAWEI TECHNOLOGIES CO.
+48CDD3/24	HUAWEI TECHNOLOGIES CO.
+24EBED/24	HUAWEI TECHNOLOGIES CO.
+2874F5/24	Nokia Solutions and Networks GmbH & Co. KG
+A04466/24	Intellics
+446D7F/24	Amazon Technologies Inc.
+D8E2DF/24	Microsoft Corporation
+388F30/24	Samsung Electronics Co.
+504289/24	zte corporation
+90F7B2/24	New H3C Technologies Co.
+B0A4F0/24	HUAWEI TECHNOLOGIES CO.
+24753A/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+C85895/24	Motorola Mobility LLC
+6C999D/24	Amazon Technologies Inc.
+C0060C/24	HUAWEI TECHNOLOGIES CO.
+B05C16/24	Fiberhome Telecommunication Technologies Co.
+08E021/24	Honor Device Co.
+7426FF/24	zte corporation
+C42728/24	zte corporation
+E8D322/24	Cisco Systems
+DC8084/24	Apple
+34B883/24	Cisco Systems
+80657C/24	Apple
+94E686/24	Espressif Inc.
+F828C9/24	HUAWEI TECHNOLOGIES CO.
+FC1193/24	HUAWEI TECHNOLOGIES CO.
+50874D/24	GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.
+40FE95/24	New H3C Technologies Co.
+DCCCE6/24	Samsung Electronics Co.
+F065AE/24	Samsung Electronics Co.
+5089D1/24	Huawei Device Co.
+BCD074/24	Apple
+E85177/24	Qingdao Intelligent&Precise Electronics Co.
+8CF8C5/24	Intel Corporate
+A05950/24	Intel Corporate
+40E99B/24	SAMSUNG ELECTRO-MECHANICS(THAILAND)
+90FFD6/24	Honor Device Co.
+C0280B/24	Honor Device Co.
+9CEA97/24	Honor Device Co.
+C89BAD/24	Honor Device Co.
+BC455B/24	Samsung Electronics Co.
+B03CDC/24	Intel Corporate
+8415D3/24	HUAWEI TECHNOLOGIES CO.
+D49400/24	HUAWEI TECHNOLOGIES CO.
+F0AE66/24	Cosonic Intelligent Technologies Co.
+3CA916/24	Huawei Device Co.
+806A00/24	Cisco Systems
+C41C07/24	Samsung Electronics Co.
+4011C3/24	Samsung Electronics Co.
+C47D9F/24	Samsung Electronics Co.
+185B00/24	Nokia
+604DE1/24	HUAWEI TECHNOLOGIES CO.
+704E6B/24	HUAWEI TECHNOLOGIES CO.
+603D29/24	HUAWEI TECHNOLOGIES CO.
+10A51D/24	Intel Corporate
+507C6F/24	Intel Corporate
+98DD60/24	Apple
+C04442/24	Apple
+D468AA/24	Apple
+F8C3CC/24	Apple
+54C480/24	HUAWEI TECHNOLOGIES CO.
+F4573E/24	Fiberhome Telecommunication Technologies Co.
+70C6DD/24	New H3C Technologies Co.
+088E90/24	Intel Corporate
+F06C73/24	Nokia
+E8F9D4/24	HUAWEI TECHNOLOGIES CO.
+B0C787/24	HUAWEI TECHNOLOGIES CO.
+0C4F9B/24	HUAWEI TECHNOLOGIES CO.
+482FD7/24	HUAWEI TECHNOLOGIES CO.
+7C214A/24	Intel Corporate
+508492/24	Intel Corporate
+curl: (23) Failure writing output to destination, passed 16384 returned 377
+BC31989/28	Baisstar (Shenzhen) Intelligence Co.
+E0382D5/28	Weishi Intelligent Information Technology (Guangzhou) Co.
+18A59CB/28	CAL-COMP INDUSTRIA E COMERCIO DE ELETRONICOS E INFORMATICA LTDA
+A85B363/28	Shenzhen Dandelion Intelligent Cloud Technology Development Co.
+5C857E4/28	Shenzhen IP3 Century Intelligent Technology CO.
+B0B353E/28	Nanjing Yining Intelligent Technology Co.
+3CFAD39/28	Shenzhen Vplus Communication Intelligent Co.
+200A0DB/28	Amazon Technologies Inc.
+4403774/28	Lenovo Image(Tianjin) Technology Ltd.
+54A4930/28	Intelligent Surveillance Corp
+C82C2B7/28	Merpa Bilgi Islem Ltd.Sti
+745BC5C/28	ComNot
+8489ECE/28	Shenzhen Intellifusion Technologies Co.
+9CF6DD1/28	Ithor IT Co.
+B44BD66/28	Perspicace Intellegince Technology
+DCE533B/28	Tintel Hongkong Co.Ltd
+3873EAC/28	LG Electronics
+741AE04/28	Revl Inc.
+60D7E3C/28	Zhejiang Send Intelligent Technology
+40F3853/28	IntelliDesign Pty Ltd
+8CC8F49/28	Swift Navigation Inc
+50A4D09/28	OEM PRODUCTION INC.
+50A4D05/28	TREXOM S.r.l.
+40ED985/28	Cape
+1C88792/28	Airsmart System Co.
+A44F29B/28	GUANGDONG REAL-DESIGN INTELLIGENT TECHNOLOGY CO.
+5CF8387/28	T-CHIP INTELLIGENT TECHNOLOGY CO.
+2CC44F8/28	Wuxi Yikesen Intelligent Technology Co.
+8CA6825/28	Qstar Technology Co
+34C8D6C/28	Huizhou KDT Intelligent Display Technology Co. Ltd
+C8FFBFE/28	HT ITALIA SRL
+C8FFBFC/28	Density.IO
+1063A3D/28	Triton Sensors
+5C87D83/28	Shenzhen Beiens Import and Export Co.
+ECA7B11/28	AKOM Technologies Private Limited
+2C7AF44/28	Kegao Intelligent Garden Technology(Guangdong) Co.
+7878354/28	Jiaxing Cyber Sensor Intelligent Technology Co.
+58AD08B/28	Triton Sensors
+B4ABF38/28	Stravik Technologies LLC
+083C03C/28	Dongguan Development Security Intelligent  Tech  Co.
+34D7F5A/28	Hefei Panyuan Intelligent Technology Co.
+CCE7DEE/28	Shenzhen Xingyi Intelligent Technology Co.
+F8C9D6B/28	VT100 SRL
+04ECA9A/28	Leegiot Intelligent Technology Co.
+30BB28E/28	StarTop Era (Shanghai ) Intelligent Technology Co.
+5491AF1/28	4MITech
+C86BBC0/28	SafelyYou
+C4A5591/28	Motive Technologies
+F0221D4/28	Synergies Intelligent Systems Inc.
+C498948/28	Pliem (Shanghai) Intelligent Technology Co.
+883CC58/28	Wuhan Guangying Intelligence Technology Co.
+18C3F42/28	Changsha Kiloview Electronics Co.
+381F265/28	Zhejiang Huazhou Intelligent Equipment Co
+50A0303/28	RealWear (Shanghai) Intelligent Technology Co. Ltd
+D09FD90/28	Lemei Intelligent IOT (Shenzhen) Co.
+2CD141D/28	Square Inc.
+20CE2A8/28	Intelligraphics
+8C476E8/28	IntelliVIX Co. Ltd.
+58208A6/28	Shangyin Intelligence Technology Shandong Co.
+4C93A60/28	Vestaboard
+14AE857/28	SHENZHEN HONOR ELECTRONIC CO.
+90E2FCB/28	Shenzhen Dingsheng Intelligent Technology Co.
+200A0D7/28	Tecnint HTE SRL
+200A0DA/28	IRSAP
+4011758/28	Beijing Gemotech Intelligent Technology Co.
+241510A/28	Unitronux(Shenzhen) Intelligence Technology Co.
+D0C857D/28	IFLYTEK CO.
+6C5C3DA/28	krtkl inc.
+A83FA14/28	Zhejiang Wellsun Intelligent Technology Co.
+A019B22/28	Beijing Deephi Intelligent Technology Co.
+0C73EBD/28	D-Link （Shanghai）Limited Corp.
+34D0B84/28	EQPlay Intelligent Technology(Kunshan) Co
+98AAFCC/28	dots Inc.
+4048FD7/28	Cloud4Wi
+84E0F46/28	Liaoning IK'SONYA Science and Technology Co.
+84E0F48/28	RAY Co.
+40A36BB/28	Amobile Intelligent Corp.
+1C8779A/28	Hangzhou Xiaowen Intelligent Technology Co.
+E4956EE/28	Tacom Projetos Bilhetagem Inteligente ltda
+4CEA41E/28	Aztech Group DOOEL
+C898DB4/28	Shenzhen IBD Intelligence Technology Co
+34C8D6B/28	Yuanzhou Intelligent (Shenzhen) Co.
+48E663A/28	Shenzhen Jointelli Technologies Co.
+2486250/28	Shanghai Xizhi Technology Co.
+6C27C81/28	Chongqing Seres Phoenix Intelligent Innovation Technology Co.
+B0CCCE4/28	Shenzhen Xtooltech Intelligent Co.
+787835A/28	Skylight
+4808EBC/28	ZHEJIANG AIKE INTELLIGENTTECHNOLOGY CO.LTD
+9CE4503/28	Marelli AL&S ALIT-TZ
+7433369/28	Lyno Dynamics LLC
+74A2351/28	Efference
+74A235E/28	Shenzhen Jointelli Technologies Co.
+0825328/28	Shanghai Xinyuzhou Intelligent Technology Co.
+B4DF43C/28	Raven Resonance Inc.
+58C41E8/28	Xiaomi EV Technology Co.
+5C6AECC/28	Suzhou Huaqi Intelligent Technology Co.
+84B386D/28	Dongguan Amsamotion Automation Technology Co.
+5847CAB/28	Suzhou Laisai Intelligence Technology Co.
+1845B3C/28	Bdf Digital
+781305A/28	Leonardo SpA - Montevarchi
+8C1F64055/36	Intercreate
+8C1F644E7/36	Circuit Solutions
+8C1F64397/36	Intel Corporate
+70B3D5EBF/36	AUTOMATICA Y REGULACION S.A.
+70B3D5E6F/36	Amazon Technologies Inc.
+70B3D5270/36	Amazon Technologies Inc.
+70B3D5574/36	Cloud Intelligence Pty Ltd
+70B3D5ED7/36	WAVE
+70B3D5B1F/36	TECNOWATT
+70B3D59E3/36	LG Electronics
+70B3D5BE4/36	Kunshan excellent Intelligent Technology Co.
+70B3D590A/36	Hangzhou SunTown Intelligent Science & Technology Co.
+70B3D535E/36	EIDOS s.p.a.
+70B3D5FC6/36	Tecnint HTE SRL
+70B3D5190/36	Fantom Wireless
+8C1F64B86/36	Elektronik & Modellprodukter Gävle AB
+8C1F64001/36	HYFIX Spatial Intelligence
+8C1F64A71/36	Martec S.p.A.
+8C1F64DC4/36	Amazon Robotics MTAC Matrix NPI
+8C1F6434A/36	Raspberry Pi (Trading) Ltd
+8C1F648C9/36	RoboCore Tecnologia
+8C1F6466D/36	VT100 SRL
+8C1F644A9/36	Martec Marine S.p.a.
+8C1F6406A/36	Intellisense Systems Inc.
+8C1F643D4/36	e.p.g. Elettronica s.r.l.
+8C1F64AAB/36	BlueSword Intelligent Technology Co.
+70B3D5CB0/36	Ossiaco
+70B3D5514/36	Intelligent Security Systems (ISS)
+70B3D54F1/36	LG Electronics
+70B3D5ACA/36	Tecnint HTE SRL
+70B3D5890/36	EIDOS s.r.l.
+70B3D50EA/36	AEV Broadcast Srl
+70B3D54A0/36	FLUDIA
+70B3D5809/36	Tecnint HTE SRL
+70B3D5785/36	Density Inc.
+70B3D5A5C/36	Molekule
+70B3D51F5/36	Martec S.p.A.
+001BC504A/36	Certis Technology International Pte Ltd
+001BC5023/36	MAGO di Della Mora Walter
+8C1F647B7/36	James G. Biddle dba Megger
+8C1F64D80/36	AZTEK SA
+8C1F64BB9/36	SmartD Technologies Inc
+8C1F644B4/36	Point One Navigation
+8C1F64B41/36	STATE GRID INTELLIGENCE TECHNOLOGY CO.
+8C1F64607/36	Nanjing Aotong Intelligent Technology Co.
+8C1F6499E/36	EIDOS s.r.l.
+8C1F644F7/36	SmartD Technologies Inc
+8C1F6438C/36	XIAMEN ZHIXIAOJIN INTELLIGENT TECHNOLOGY CO.
+8C1F64240/36	HuiTong intelligence Company
+8C1F64254/36	Zhuhai Yunzhou Intelligence Technology Ltd.

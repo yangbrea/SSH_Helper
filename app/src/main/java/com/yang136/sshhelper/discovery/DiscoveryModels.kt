@@ -23,6 +23,8 @@ data class ScanRequest(
 
 enum class DiscoverySource { TCP, MDNS, ARP }
 
+enum class DiscoveryStatus { IDLE, SCANNING, COMPLETED, CANCELLED, NO_NETWORK, ERROR }
+
 enum class SshConfidence { PORT_OPEN, MDNS_ADVERTISED, BANNER_CONFIRMED }
 
 data class SshBanner(
@@ -93,7 +95,29 @@ interface NetworkEnvironment {
     suspend fun availableNetworks(): List<LanNetwork>
 }
 
+data class TcpProbeResult(val banner: SshBanner?)
+
+interface TcpSshProbe {
+    suspend fun probe(networkId: String, address: String, port: Int): TcpProbeResult?
+    fun cancel()
+}
+
+data class MdnsService(
+    val address: String,
+    val port: Int,
+    val serviceName: String,
+    val serviceType: String,
+)
+
+interface MdnsDiscovery {
+    fun discover(networkId: String): Flow<MdnsService>
+    fun cancel()
+}
+
+interface ArpTableReader {
+    suspend fun read(interfaceName: String): Result<List<ArpEntry>>
+}
+
 interface MacVendorResolver {
     fun vendorFor(macAddress: String): String?
 }
-
