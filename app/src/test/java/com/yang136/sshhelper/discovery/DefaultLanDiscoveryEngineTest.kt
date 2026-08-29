@@ -110,6 +110,47 @@ class DefaultLanDiscoveryEngineTest {
         assertEquals(DiscoveryEvent.Completed, events.last())
     }
 
+    @Test
+    fun generalModeUsesTwoPhasesDynamicProgressAndAllDiscoveryProtocols() = runTest {
+        val tcp = FakeTcpProbe(mapOf("192.168.1.2:80" to TcpProbeResult(null)))
+        val mdns = FakeMdnsDiscovery(flowOf(MdnsService("192.168.1.2", 8765, "Device", "_http._tcp.")))
+        val ssdp = FakeSsdpDiscovery(
+            flowOf(SsdpRecord("192.168.1.2", "upnp:rootdevice", "uuid:one")),
+        )
+        val engine = DefaultLanDiscoveryEngine(
+            FakeNetworkEnvironment(network), tcp, mdns,
+            FakeArpReader(Result.success(listOf(ArpEntry("192.168.1.3", "00:11:22:33:44:55")))),
+            OuiIndex.Empty,
+            ssdpDiscovery = ssdp,
+            concurrency = 2,
+            mdnsWindowMillis = 100,
+        )
+
+        val events = engine.scan(
+            ScanRequest(
+                "n1",
+                Ipv4Cidr.parse("192.168.1.0/29").getOrThrow(),
+                setOf(1234),
+                "192.168.1.1",
+                ScanMode.GENERAL,
+            ),
+        ).toList()
+
+        assertTrue(GENERAL_PHASE_ONE_PORTS.all { "192.168.1.2:$it" in tcp.probed })
+        assertTrue("192.168.1.2:1234" in tcp.probed)
+        assertTrue(GENERAL_PHASE_TWO_PORTS.all { "192.168.1.2:$it" in tcp.probed })
+        assertTrue("192.168.1.2:8765" in tcp.probed)
+        assertEquals(GENERAL_MDNS_SERVICE_TYPES, mdns.requestedTypes)
+        assertTrue(events.any { (it as? DiscoveryEvent.Evidence)?.value is DiscoveryEvidence.Ssdp })
+        assertTrue(events.any {
+            ((it as? DiscoveryEvent.Evidence)?.value as? DiscoveryEvidence.Arp)?.address == "192.168.1.3"
+        })
+        val progress = events.filterIsInstance<DiscoveryEvent.Progress>().last()
+        assertEquals(progress.totalProbes, progress.completedProbes)
+        assertTrue(progress.totalProbes > (GENERAL_PHASE_ONE_PORTS.size + 1))
+        assertTrue(ssdp.cancelled)
+    }
+
     private class FakeNetworkEnvironment(private val network: LanNetwork) : NetworkEnvironment {
         override suspend fun availableNetworks() = listOf(network)
     }
@@ -131,7 +172,17 @@ class DefaultLanDiscoveryEngineTest {
 
     private class FakeMdnsDiscovery(private val services: Flow<MdnsService>) : MdnsDiscovery {
         var cancelled = false
-        override fun discover(networkId: String, serviceTypes: Set<String>) = services
+        var requestedTypes = emptySet<String>()
+        override fun discover(networkId: String, serviceTypes: Set<String>): Flow<MdnsService> {
+            requestedTypes = serviceTypes
+            return services
+        }
+        override fun cancel() { cancelled = true }
+    }
+
+    private class FakeSsdpDiscovery(private val records: Flow<SsdpRecord>) : SsdpDiscovery {
+        var cancelled = false
+        override fun discover(networkId: String, cidr: Ipv4Cidr) = records
         override fun cancel() { cancelled = true }
     }
 

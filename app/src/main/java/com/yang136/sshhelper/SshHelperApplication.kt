@@ -26,6 +26,8 @@ import com.yang136.sshhelper.discovery.AndroidArpTableReader
 import com.yang136.sshhelper.discovery.AndroidMdnsDiscovery
 import com.yang136.sshhelper.discovery.AndroidNetworkEnvironment
 import com.yang136.sshhelper.discovery.AndroidTcpServiceProbe
+import com.yang136.sshhelper.discovery.AndroidSsdpDiscovery
+import com.yang136.sshhelper.discovery.AndroidDeviceDescriptionRepository
 import com.yang136.sshhelper.discovery.AssetMacVendorResolver
 import com.yang136.sshhelper.discovery.DefaultLanDiscoveryEngine
 
@@ -67,10 +69,12 @@ class AppContainer(val application: Application) {
     val forwardManager = DefaultForwardManager(application, database, hostRepository, sessionManager, credentialVault)
     val previewCache = PreviewCache(application)
     val networkEnvironment = AndroidNetworkEnvironment(application)
+    val deviceDescriptionRepository = AndroidDeviceDescriptionRepository(networkEnvironment)
     val lanDiscoveryEngine = DefaultLanDiscoveryEngine(
         networkEnvironment = networkEnvironment,
         tcpProbe = AndroidTcpServiceProbe(networkEnvironment),
         mdnsDiscovery = AndroidMdnsDiscovery(application, networkEnvironment),
+        ssdpDiscovery = AndroidSsdpDiscovery(networkEnvironment),
         arpTableReader = AndroidArpTableReader(),
         macVendorResolver = AssetMacVendorResolver(application),
     )

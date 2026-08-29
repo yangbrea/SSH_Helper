@@ -194,6 +194,12 @@ interface SsdpDiscovery {
     fun cancel()
 }
 
+object NoOpSsdpDiscovery : SsdpDiscovery {
+    override fun discover(networkId: String, cidr: Ipv4Cidr): Flow<SsdpRecord> =
+        kotlinx.coroutines.flow.emptyFlow()
+    override fun cancel() = Unit
+}
+
 interface DeviceDescriptionRepository {
     suspend fun load(networkId: String, address: String, location: String): Result<DeviceDescription>
     fun clear()

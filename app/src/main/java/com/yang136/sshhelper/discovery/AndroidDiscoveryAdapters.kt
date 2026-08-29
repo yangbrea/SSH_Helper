@@ -119,6 +119,7 @@ class AndroidMdnsDiscovery(
 ) : MdnsDiscovery {
     private val nsdManager = context.getSystemService(NsdManager::class.java)
     private val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
+    private val callbackExecutor = context.mainExecutor
     private val activeStops = CopyOnWriteArraySet<() -> Unit>()
 
     override fun discover(networkId: String, serviceTypes: Set<String>): Flow<MdnsService> = callbackFlow {
@@ -191,7 +192,18 @@ class AndroidMdnsDiscovery(
             localStops += stop
             activeStops += stop
             runCatching {
-                nsdManager.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener)
+                if (Build.VERSION.SDK_INT >= 33) {
+                    nsdManager.discoverServices(
+                        type,
+                        NsdManager.PROTOCOL_DNS_SD,
+                        targetNetwork,
+                        callbackExecutor,
+                        listener,
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    nsdManager.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener)
+                }
             }.onSuccess { started++ }.onFailure { stop() }
         }
         if (started == 0) close(IllegalStateException("mDNS 服务发现启动失败"))
