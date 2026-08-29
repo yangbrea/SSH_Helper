@@ -22,6 +22,14 @@ import com.yang136.sshhelper.documents.DocumentAccessManager
 import com.yang136.sshhelper.documents.SshDocumentsBackend
 import com.yang136.sshhelper.preview.PreviewCache
 import com.yang136.sshhelper.theme.ImageThemeRepository
+import com.yang136.sshhelper.discovery.AndroidArpTableReader
+import com.yang136.sshhelper.discovery.AndroidMdnsDiscovery
+import com.yang136.sshhelper.discovery.AndroidNetworkEnvironment
+import com.yang136.sshhelper.discovery.AndroidTcpServiceProbe
+import com.yang136.sshhelper.discovery.AndroidSsdpDiscovery
+import com.yang136.sshhelper.discovery.AndroidDeviceDescriptionRepository
+import com.yang136.sshhelper.discovery.AssetMacVendorResolver
+import com.yang136.sshhelper.discovery.DefaultLanDiscoveryEngine
 
 class SshHelperApplication : Application(), DefaultLifecycleObserver, Configuration.Provider {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -60,6 +68,16 @@ class AppContainer(val application: Application) {
     val transferManager = DefaultTransferManager(application, database, hostRepository, sessionManager, credentialVault)
     val forwardManager = DefaultForwardManager(application, database, hostRepository, sessionManager, credentialVault)
     val previewCache = PreviewCache(application)
+    val networkEnvironment = AndroidNetworkEnvironment(application)
+    val deviceDescriptionRepository = AndroidDeviceDescriptionRepository(networkEnvironment)
+    val lanDiscoveryEngine = DefaultLanDiscoveryEngine(
+        networkEnvironment = networkEnvironment,
+        tcpProbe = AndroidTcpServiceProbe(networkEnvironment),
+        mdnsDiscovery = AndroidMdnsDiscovery(application, networkEnvironment),
+        ssdpDiscovery = AndroidSsdpDiscovery(networkEnvironment),
+        arpTableReader = AndroidArpTableReader(),
+        macVendorResolver = AssetMacVendorResolver(application),
+    )
 
     init {
         // 凭据租约按"活动转发"判定：会话管理器查询转发管理器当前活跃转发的会话。

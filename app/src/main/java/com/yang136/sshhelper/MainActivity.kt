@@ -1,5 +1,6 @@
 package com.yang136.sshhelper
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
@@ -25,7 +26,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.yang136.sshhelper.ui.HostEditorScreen
+import com.yang136.sshhelper.ui.HostEditorSeed
 import com.yang136.sshhelper.ui.HostsScreen
+import com.yang136.sshhelper.ui.LanDiscoveryScreen
 import com.yang136.sshhelper.ui.HostWorkspaceScreen
 import com.yang136.sshhelper.ui.ActivityScreen
 import com.yang136.sshhelper.ui.AppImageBackground
@@ -142,6 +145,7 @@ class MainActivity : FragmentActivity() {
                                 initialDestination = initialDestination,
                                 hosts = { modifier, _ -> HostsScreen(
                                 onAdd = { navController.navigate("edit/0") },
+                                onDiscover = { navController.navigate("discover") },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
                                 onConnect = { host ->
@@ -265,6 +269,21 @@ class MainActivity : FragmentActivity() {
                                 onBack = navController::popBackStack,
                             )
                         }
+                        composable("discover") {
+                            LanDiscoveryScreen(
+                                hosts = hosts,
+                                onSelect = { name, address, port, existingHostId ->
+                                    if (existingHostId != null) {
+                                        navController.navigate("edit/$existingHostId")
+                                    } else {
+                                        navController.navigate(
+                                            "edit/0?seedName=${Uri.encode(name)}&seedHost=${Uri.encode(address)}&seedPort=$port",
+                                        )
+                                    }
+                                },
+                                onBack = navController::popBackStack,
+                            )
+                        }
                         composable(
                             route = "host/{hostId}",
                             arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
@@ -306,11 +325,24 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                         composable(
-                            route = "edit/{hostId}",
-                            arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
-                        ) {
+                            route = "edit/{hostId}?seedName={seedName}&seedHost={seedHost}&seedPort={seedPort}",
+                            arguments = listOf(
+                                navArgument("hostId") { type = NavType.LongType },
+                                navArgument("seedName") { type = NavType.StringType; defaultValue = "" },
+                                navArgument("seedHost") { type = NavType.StringType; defaultValue = "" },
+                                navArgument("seedPort") { type = NavType.IntType; defaultValue = 22 },
+                            ),
+                        ) { entry ->
+                            val seedHost = entry.arguments?.getString("seedHost").orEmpty()
                             HostEditorScreen(
-                                hostId = it.arguments?.getLong("hostId") ?: 0,
+                                hostId = entry.arguments?.getLong("hostId") ?: 0,
+                                seed = seedHost.takeIf(String::isNotBlank)?.let {
+                                    HostEditorSeed(
+                                        name = entry.arguments?.getString("seedName").orEmpty(),
+                                        hostname = it,
+                                        port = entry.arguments?.getInt("seedPort") ?: 22,
+                                    )
+                                },
                                 onUnlockVault = { after -> requestVault({ container.credentialVault.unlock() }, after) },
                                 onBack = navController::popBackStack,
                             )

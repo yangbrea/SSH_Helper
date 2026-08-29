@@ -68,10 +68,15 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HostEditorScreen(hostId: Long, onUnlockVault: ((() -> Unit) -> Unit), onBack: () -> Unit) {
+fun HostEditorScreen(
+    hostId: Long,
+    seed: HostEditorSeed? = null,
+    onUnlockVault: ((() -> Unit) -> Unit),
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val app = context.applicationContext as SshHelperApplication
-    val vm: HostEditorViewModel = viewModel(factory = HostEditorViewModel.factory(app.container, hostId))
+    val vm: HostEditorViewModel = viewModel(factory = HostEditorViewModel.factory(app.container, hostId, seed))
     val state by vm.state.collectAsStateWithLifecycle()
     val generatedKey by vm.generatedKey.collectAsStateWithLifecycle()
     val documentAccessEnabled by vm.documentAccessEnabled.collectAsStateWithLifecycle()
