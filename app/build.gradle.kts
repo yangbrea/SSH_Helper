@@ -15,8 +15,8 @@ android {
         applicationId = "com.yang136.sshhelper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.6.1"
+        versionCode = 9
+        versionName = "1.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -108,6 +108,7 @@ dependencies {
     implementation("org.commonmark:commonmark:0.24.0")
     implementation("androidx.media3:media3-exoplayer:1.9.0")
     implementation("androidx.media3:media3-datasource:1.9.0")
+    implementation("androidx.media3:media3-ui:1.9.0")
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
 
     testImplementation("junit:junit:4.13.2")
