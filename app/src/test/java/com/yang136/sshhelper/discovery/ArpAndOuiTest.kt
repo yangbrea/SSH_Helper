@@ -30,4 +30,3 @@ class ArpAndOuiTest {
         assertNull(index.vendorFor("02:FF:EE:DD:CC:BB"))
     }
 }
-

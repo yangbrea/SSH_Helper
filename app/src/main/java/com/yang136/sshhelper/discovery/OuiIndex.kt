@@ -35,4 +35,3 @@ class OuiIndex private constructor(private val entries: List<Entry>) : MacVendor
         }
     }
 }
-

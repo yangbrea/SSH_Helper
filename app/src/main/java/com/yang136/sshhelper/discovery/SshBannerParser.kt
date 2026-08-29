@@ -20,4 +20,3 @@ object SshBannerParser {
         return null
     }
 }
-

@@ -25,4 +25,3 @@ object ArpTableParser {
         return octets.joinToString(":") { it.toString(16).padStart(2, '0').uppercase() }
     }
 }
-

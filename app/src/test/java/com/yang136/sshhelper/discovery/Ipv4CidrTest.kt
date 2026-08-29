@@ -47,4 +47,3 @@ class Ipv4CidrTest {
         assertFalse(parsePortList((1..17).joinToString(",")).isSuccess)
     }
 }
-

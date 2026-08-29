@@ -11,6 +11,8 @@ import com.yang136.sshhelper.discovery.DiscoveryReducer
 import com.yang136.sshhelper.discovery.DiscoveryStatus
 import com.yang136.sshhelper.discovery.Ipv4Cidr
 import com.yang136.sshhelper.discovery.LanNetwork
+import com.yang136.sshhelper.discovery.LanDiscoveryEngine
+import com.yang136.sshhelper.discovery.NetworkEnvironment
 import com.yang136.sshhelper.discovery.ScanRequest
 import com.yang136.sshhelper.discovery.parseIpv4
 import com.yang136.sshhelper.discovery.parsePortList
@@ -37,7 +39,10 @@ data class DiscoveryUiState(
     val error: String? = null,
 )
 
-class DiscoveryViewModel(private val container: AppContainer) : ViewModel() {
+class DiscoveryViewModel(
+    private val networkEnvironment: NetworkEnvironment,
+    private val discoveryEngine: LanDiscoveryEngine,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(DiscoveryUiState())
     val state: StateFlow<DiscoveryUiState> = mutableState.asStateFlow()
     private var scanJob: Job? = null
@@ -50,7 +55,7 @@ class DiscoveryViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshNetworks() {
         if (mutableState.value.status == DiscoveryStatus.SCANNING) return
         viewModelScope.launch {
-            val networks = runCatching { container.networkEnvironment.availableNetworks() }.getOrDefault(emptyList())
+            val networks = runCatching { networkEnvironment.availableNetworks() }.getOrDefault(emptyList())
             val selected = networks.firstOrNull { it.id == mutableState.value.selectedNetworkId } ?: networks.firstOrNull()
             mutableState.update { current ->
                 current.copy(
@@ -111,7 +116,7 @@ class DiscoveryViewModel(private val container: AppContainer) : ViewModel() {
         }
         scanJob = viewModelScope.launch {
             try {
-                container.lanDiscoveryEngine.scan(
+                discoveryEngine.scan(
                     ScanRequest(network.id, cidr, ports, network.ipv4Address),
                 ).collect { event -> handleEvent(network.id, event) }
             } catch (_: CancellationException) {
@@ -130,7 +135,7 @@ class DiscoveryViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun cancelScan() {
-        container.lanDiscoveryEngine.cancel()
+        discoveryEngine.cancel()
         scanJob?.cancel()
         scanJob = null
         mutableState.update { it.copy(status = DiscoveryStatus.CANCELLED) }
@@ -157,13 +162,16 @@ class DiscoveryViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     override fun onCleared() {
-        container.lanDiscoveryEngine.cancel()
+        discoveryEngine.cancel()
     }
 
     companion object {
         fun factory(container: AppContainer): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = DiscoveryViewModel(container) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = DiscoveryViewModel(
+                container.networkEnvironment,
+                container.lanDiscoveryEngine,
+            ) as T
         }
     }
 }

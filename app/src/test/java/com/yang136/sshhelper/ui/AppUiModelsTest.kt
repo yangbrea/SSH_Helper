@@ -17,6 +17,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppUiModelsTest {
+
+    @Test
+    fun discoveredHostSeedPrefillsNewEditorAndMarksItDirty() {
+        val state = HostEditorSeed("Office NAS", "192.168.1.20", 2222).toEditorState()
+
+        assertEquals("Office NAS", state.name)
+        assertEquals("192.168.1.20", state.hostname)
+        assertEquals("2222", state.port)
+        assertTrue(state.loaded)
+        assertTrue(state.isDirty)
+    }
     private val host = HostProfile(7, "生产机", "example.test", 22, "root", AuthType.PASSWORD, false)
 
     @Test
