@@ -269,11 +269,13 @@ fun TerminalScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val isLandscape = layoutMode() == SshLayoutMode.LANDSCAPE
         val hasHwKeyboard = hasHardwareKeyboard()
+        val terminalBackground = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))
         // 横屏默认收起 chrome;IME 可见时自动展开(保证搜索/扩展键可达),消失后恢复收起;竖屏恒展开。
         LaunchedEffect(isLandscape, imeVisible) {
             chromeCollapsed = isLandscape && !imeVisible
         }
         Scaffold(
+        containerColor = if (isLandscape) terminalBackground else MaterialTheme.colorScheme.background,
         topBar = {
             if (!(isLandscape && chromeCollapsed)) {
             Column {
@@ -341,7 +343,7 @@ fun TerminalScreen(
         ) {
         Column(
             Modifier.fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))),
+                .background(terminalBackground),
         ) {
             // WebView 常驻:首帧即创建,避免渲染循环等待就绪时丢失输出;空态只作为覆盖层。
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -356,7 +358,7 @@ fun TerminalScreen(
                 if (current == null) {
                     Box(
                         Modifier.fillMaxSize()
-                            .background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))),
+                            .background(terminalBackground),
                         contentAlignment = Alignment.Center,
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
