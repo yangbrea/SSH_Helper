@@ -1,6 +1,7 @@
 package com.yang136.sshhelper.ui
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -15,13 +16,19 @@ import com.yang136.sshhelper.sftp.RemoteFile
 import com.yang136.sshhelper.sftp.RemoteFileSystem
 import com.yang136.sshhelper.sftp.RemoteFileType
 import com.yang136.sshhelper.sftp.SftpClient
+import com.yang136.sshhelper.sftp.SftpSearchConfig
+import com.yang136.sshhelper.sftp.SftpSearchHit
 import com.yang136.sshhelper.sftp.TransferJob
 import com.yang136.sshhelper.sftp.TransferRequest
+import com.yang136.sshhelper.sftp.searchRemoteSftp
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.preview.PreviewPlaybackManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -66,6 +73,14 @@ data class RemotePreview(
     val editableText: String?,
 )
 
+/** 递归搜索结果状态(仅远程;本地搜索保持当前目录筛选)。 */
+data class SftpSearchUiState(
+    val query: String = "",
+    val loading: Boolean = false,
+    val results: List<SftpSearchHit> = emptyList(),
+    val error: String? = null,
+)
+
 class SftpViewModel(
     private val container: AppContainer,
     val sessionId: SessionId,
@@ -81,6 +96,9 @@ class SftpViewModel(
     val bookmarks = session.filterNotNull().flatMapLatest { container.sftpRepository.bookmarks(it.profile.id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private var client: SftpClient? = null
+    private val mutableSearch = MutableStateFlow(SftpSearchUiState())
+    val searchState: StateFlow<SftpSearchUiState> = mutableSearch.asStateFlow()
+    private var searchJob: Job? = null
 
     /** Streaming audio/video preview over the shared SSH session (dedicated SFTP channel). */
     val playback = PreviewPlaybackManager(container.application, container.sessionManager, sessionId, container.previewCache.cache)
@@ -200,6 +218,69 @@ class SftpViewModel(
     }
 
     fun clearSelection() { mutableState.value = mutableState.value.copy(selectedRemote = emptySet(), selectedLocal = emptySet()) }
+
+    /**
+     * 递归搜索当前远程目录。输入去抖 [SEARCH_DEBOUNCE_MILLIS],新输入取消上一次任务;
+     * 搜索范围受深度/结果上限约束,隐藏文件跟随「显示隐藏文件」选项。
+     */
+    fun setSearchQuery(query: String) {
+        searchJob?.cancel()
+        mutableSearch.value = mutableSearch.value.copy(query = query)
+        val needle = query.trim()
+        if (needle.isEmpty()) {
+            mutableSearch.value = mutableSearch.value.copy(loading = false, results = emptyList(), error = null)
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MILLIS)
+            mutableSearch.value = mutableSearch.value.copy(loading = true, error = null)
+            runCatching {
+                val sftp = ensureClient()
+                val root = if (mutableState.value.remotePath == ".") sftp.home() else mutableState.value.remotePath
+                searchRemoteSftp(
+                    client = sftp,
+                    root = root,
+                    query = needle,
+                    config = SftpSearchConfig(includeHidden = mutableState.value.remoteView.showHidden),
+                )
+            }.onSuccess { hits ->
+                mutableSearch.value = mutableSearch.value.copy(loading = false, results = sortSearchHits(hits))
+            }.onFailure { failure ->
+                if (failure is CancellationException) throw failure
+                mutableSearch.value = mutableSearch.value.copy(loading = false, error = failure.message ?: "搜索失败")
+            }
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        searchJob = null
+        mutableSearch.value = SftpSearchUiState()
+    }
+
+    /**
+     * 通过系统文件选择器选中的文件上传到当前远程目录(替代旧的「先选本地再上传」流程)。
+     * SAF 多选只会返回普通文件,不做目录递归。
+     */
+    fun uploadFiles(uris: List<Uri>, policy: ConflictPolicy = ConflictPolicy.ASK) = viewModelScope.launch {
+        if (uris.isEmpty()) return@launch
+        val session = session.value ?: return@launch
+        runCatching {
+            val resolver = container.application.contentResolver
+            val requests = uris.map { uri ->
+                val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: "file"
+                val size = resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else -1L
+                } ?: -1L
+                TransferRequest(session.profile.id, sessionId, TransferDirection.UPLOAD, uri.toString(), joinPath(mutableState.value.remotePath, name), size, policy)
+            }
+            container.transferManager.enqueue(requests)
+        }.onFailure {
+            mutableState.value = mutableState.value.copy(error = it.message ?: "无法创建上传任务")
+        }
+    }
 
     fun createRemoteDirectory(name: String) = remoteOperation { mkdir(joinPath(mutableState.value.remotePath, name)) }
     fun renameRemote(file: RemoteFile, name: String) = remoteOperation { rename(file.path, joinPath(file.path.substringBeforeLast('/', "/"), name)) }
@@ -410,6 +491,7 @@ class SftpViewModel(
     }
 
     companion object {
+        const val SEARCH_DEBOUNCE_MILLIS = 300L
         const val MAX_TEXT_BYTES = 2L * 1024 * 1024
         const val MAX_PREVIEW_BYTES = 25L * 1024 * 1024
         fun factory(container: AppContainer, sessionId: SessionId) = object : ViewModelProvider.Factory {
@@ -418,6 +500,13 @@ class SftpViewModel(
         }
     }
 }
+
+/** 递归搜索结果按「所在目录 + 名称」稳定排序,便于展示。 */
+internal fun sortSearchHits(hits: List<SftpSearchHit>): List<SftpSearchHit> =
+    hits.sortedWith(
+        compareBy(SftpSearchHit::parentDir)
+            .thenBy(String.CASE_INSENSITIVE_ORDER, SftpSearchHit::name),
+    )
 
 internal fun List<RemoteFile>.filteredRemote(state: SftpUiState): List<RemoteFile> {
     val options = state.remoteView

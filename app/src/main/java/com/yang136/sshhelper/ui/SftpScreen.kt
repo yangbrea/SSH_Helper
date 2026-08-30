@@ -130,6 +130,9 @@ import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.CredentialRole
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
+import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
+import com.yang136.sshhelper.ui.adaptive.currentLayoutMode
 import com.yang136.sshhelper.preview.PreviewKind
 import com.yang136.sshhelper.preview.PreviewPlaybackManager
 import com.yang136.sshhelper.preview.SftpImage
@@ -169,8 +172,10 @@ fun SftpScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
     val roots by viewModel.localRoots.collectAsStateWithLifecycle()
+    val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
     val transfers by viewModel.transfers.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -240,79 +245,90 @@ fun SftpScreen(
         ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    val landscape = currentLayoutMode() == SshLayoutMode.LANDSCAPE
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
         topBar = {
-            SshTopAppBar(
-                title = session?.displayName ?: "SFTP 文件",
-                subtitle = session?.connection.sftpLabel(),
-                navigationIcon = { IconButton(onClick = handleBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = {
-                    IconButton(onClick = { showTransfers = true }) {
-                        BadgedBox(badge = { val count = transfers.count { it.status.isActive() }; if (count > 0) Badge { Text(count.toString()) } }) {
-                            Icon(Icons.Default.Download, "传输任务")
+            if (!landscape) {
+                SshTopAppBar(
+                    title = session?.displayName ?: "SFTP 文件",
+                    subtitle = session?.connection.sftpLabel(),
+                    navigationIcon = { IconButton(onClick = handleBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                    actions = {
+                        IconButton(onClick = { showTransfers = true }) {
+                            BadgedBox(badge = { val count = transfers.count { it.status.isActive() }; if (count > 0) Badge { Text(count.toString()) } }) {
+                                Icon(Icons.Default.Download, "传输任务")
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            val active = transfers.filter { it.status.isActive() }
-            if (active.isNotEmpty()) {
-                Surface(tonalElevation = 3.dp, shadowElevation = 5.dp) {
-                    Column(Modifier.fillMaxWidth().clickable { showTransfers = true }.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("传输状态", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                            SshStatusBadge("${active.size} 个进行中", SshStatusTone.CONNECTING)
+            if (!landscape) {
+                val active = transfers.filter { it.status.isActive() }
+                if (active.isNotEmpty()) {
+                    Surface(tonalElevation = 3.dp, shadowElevation = 5.dp) {
+                        Column(Modifier.fillMaxWidth().clickable { showTransfers = true }.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("传输状态", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                                SshStatusBadge("${active.size} 个进行中", SshStatusTone.CONNECTING)
+                            }
+                            LinearProgressIndicator(progress = { active.map(TransferJob::progress).average().toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                         }
-                        LinearProgressIndicator(progress = { active.map(TransferJob::progress).average().toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                     }
                 }
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            if (session?.needsVaultUnlock == true) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("凭据保险库已锁定", Modifier.weight(1f).padding(horizontal = 10.dp))
-                    Button(onClick = onUnlockVault) { Text("解锁") }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            if (landscape) {
+                Column(Modifier.fillMaxSize()) {
+                    if (session?.needsVaultUnlock == true) SftpVaultUnlockBanner(onUnlockVault)
+                    SftpCredentialGate(session, onDismiss = onBack, onConnect = viewModel::connect)
+                    GnomeSftpLayout(
+                        vm = viewModel,
+                        state = state,
+                        search = searchState,
+                        bookmarks = bookmarks,
+                        roots = roots,
+                        transfers = transfers,
+                        onBack = onBack,
+                        onCreateRemoteDirectory = { showCreateDirectory = true },
+                        onDeleteRemote = { deletingRemote = true },
+                        onDeleteLocal = { deletingLocal = true },
+                        onPropertiesRemote = { properties = it },
+                        onPreview = openPreview,
+                        onShowTransfers = { showTransfers = true },
+                        onAddLocalRoot = { rootPicker.launch(null) },
+                        modifier = Modifier.weight(1f).fillMaxSize(),
+                    )
                 }
-            }
-            val s = session
-            if (s != null && s.needsCredential) {
-                val credentialProfile = if (s.credentialRole == CredentialRole.JUMP) s.jumpProfile ?: s.profile else s.profile
-                val subject = when {
-                    s.credentialRole == CredentialRole.JUMP -> "跳板机"
-                    s.jumpProfile != null -> "目标机"
-                    else -> "SSH 服务器"
-                }
-                CredentialDialog(
-                    authType = credentialProfile.authType,
-                    subject = subject,
-                    onDismiss = onBack,
-                    onConnect = viewModel::connect,
-                )
-            }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                if (maxWidth >= 840.dp) {
-                    Row(Modifier.fillMaxSize()) {
-                        RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxHeight(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
-                        LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxHeight(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
-                    }
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        CompactPaneSwitcher(
-                            pane = mobilePane,
-                            enabled = state.selectedRemote.isEmpty() && state.selectedLocal.isEmpty(),
-                            onPane = { mobilePane = it },
-                        )
-                        if (mobilePane == MobilePane.REMOTE) {
-                            RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    if (session?.needsVaultUnlock == true) SftpVaultUnlockBanner(onUnlockVault)
+                    SftpCredentialGate(session, onDismiss = onBack, onConnect = viewModel::connect)
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                        if (maxWidth >= 840.dp) {
+                            Row(Modifier.fillMaxSize()) {
+                                RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxHeight(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
+                                LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxHeight(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
+                            }
                         } else {
-                            LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
+                            Column(Modifier.fillMaxSize()) {
+                                CompactPaneSwitcher(
+                                    pane = mobilePane,
+                                    enabled = state.selectedRemote.isEmpty() && state.selectedLocal.isEmpty(),
+                                    onPane = { mobilePane = it },
+                                )
+                                if (mobilePane == MobilePane.REMOTE) {
+                                    RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
+                                } else {
+                                    LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
+                                }
+                            }
                         }
                     }
                 }
@@ -627,7 +643,7 @@ private fun CompactSearchBar(query: String, onQuery: (String) -> Unit, onClose: 
 }
 
 @Composable
-private fun CompactSelectionBar(
+internal fun CompactSelectionBar(
     count: Int,
     primaryLabel: String,
     primaryIcon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -699,7 +715,7 @@ private fun LocalBrowseMenu(
 }
 
 @Composable
-private fun ViewOptionItems(options: FileViewOptions, onHidden: (Boolean) -> Unit, onSort: (FileSort) -> Unit, onDirection: () -> Unit) {
+internal fun ViewOptionItems(options: FileViewOptions, onHidden: (Boolean) -> Unit, onSort: (FileSort) -> Unit, onDirection: () -> Unit) {
     DropdownMenuItem(
         text = { Text("显示隐藏文件") },
         trailingIcon = { if (options.showHidden) Icon(Icons.Default.Check, null) },
@@ -721,7 +737,7 @@ private fun ViewOptionItems(options: FileViewOptions, onHidden: (Boolean) -> Uni
 }
 
 @Composable
-private fun PathDialog(title: String, initialValue: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+internal fun PathDialog(title: String, initialValue: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var value by remember(initialValue) { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -781,7 +797,7 @@ private fun LocalFile.typeIcon(): ImageVector = when {
 }
 
 @Composable
-private fun RemoteFileRow(file: RemoteFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
+internal fun RemoteFileRow(file: RemoteFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(selected, { onSelect() })
         Icon(file.typeIcon(), null, tint = MaterialTheme.colorScheme.primary)
@@ -790,7 +806,7 @@ private fun RemoteFileRow(file: RemoteFile, selected: Boolean, onSelect: () -> U
 }
 
 @Composable
-private fun LocalFileRow(file: LocalFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
+internal fun LocalFileRow(file: LocalFile, selected: Boolean, onSelect: () -> Unit, onOpen: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(selected, { onSelect() })
         Icon(file.typeIcon(), null, tint = MaterialTheme.colorScheme.primary)
@@ -800,7 +816,7 @@ private fun LocalFileRow(file: LocalFile, selected: Boolean, onSelect: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TransferSheet(jobs: List<TransferJob>, vm: SftpViewModel, onDismiss: () -> Unit) {
+internal fun TransferSheet(jobs: List<TransferJob>, vm: SftpViewModel, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text("传输任务", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
@@ -838,7 +854,7 @@ private fun TransferSheet(jobs: List<TransferJob>, vm: SftpViewModel, onDismiss:
 }
 
 @Composable
-private fun MediaPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () -> Unit) {
+internal fun MediaPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () -> Unit) {
     val state by manager.state.collectAsStateWithLifecycle()
     val player = manager.playerOrNull
     val error = state.error
@@ -926,7 +942,7 @@ private fun MediaPreviewDialog(manager: PreviewPlaybackManager, onDismiss: () ->
 }
 
 @Composable
-private fun ImagePreviewDialog(file: RemoteFile, hostName: String, imageLoader: ImageLoader, onDismiss: () -> Unit) {
+internal fun ImagePreviewDialog(file: RemoteFile, hostName: String, imageLoader: ImageLoader, onDismiss: () -> Unit) {
     var attempt by remember(file.path) { mutableStateOf(0) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -961,7 +977,7 @@ private fun ImagePreviewDialog(file: RemoteFile, hostName: String, imageLoader: 
 }
 
 @Composable
-private fun PreviewDialog(preview: RemotePreview, text: String?, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+internal fun PreviewDialog(preview: RemotePreview, text: String?, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(preview.file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -978,7 +994,7 @@ private fun PreviewDialog(preview: RemotePreview, text: String?, onTextChange: (
 }
 
 @Composable
-private fun RemotePropertiesDialog(file: RemoteFile, onDismiss: () -> Unit, onApply: (Int, Int, Int) -> Unit) {
+internal fun RemotePropertiesDialog(file: RemoteFile, onDismiss: () -> Unit, onApply: (Int, Int, Int) -> Unit) {
     var mode by remember(file.path) { mutableStateOf(file.permissions.toString(8).padStart(4, '0')) }
     var uid by remember(file.path) { mutableStateOf(file.uid.toString()) }
     var gid by remember(file.path) { mutableStateOf(file.gid.toString()) }
@@ -986,13 +1002,13 @@ private fun RemotePropertiesDialog(file: RemoteFile, onDismiss: () -> Unit, onAp
 }
 
 @Composable
-private fun NameDialog(title: String, label: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) { var value by remember { mutableStateOf("") }; AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { OutlinedTextField(value, { value = it }, label = { Text(label) }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (value.isNotBlank()) onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text("确定") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }) }
+internal fun NameDialog(title: String, label: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) { var value by remember { mutableStateOf("") }; AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { OutlinedTextField(value, { value = it }, label = { Text(label) }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (value.isNotBlank()) onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text("确定") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }) }
 
 @Composable
-private fun ConfirmDeleteDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) = AlertDialog(onDismissRequest = onDismiss, title = { Text("永久删除？") }, text = { Text("将永久删除 $count 个项目，此操作无法撤销。") }, confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+internal fun ConfirmDeleteDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) = AlertDialog(onDismissRequest = onDismiss, title = { Text("永久删除？") }, text = { Text("将永久删除 $count 个项目，此操作无法撤销。") }, confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 
 @Composable
-private fun SymlinkDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+internal fun SymlinkDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
     var target by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     AlertDialog(
@@ -1004,12 +1020,38 @@ private fun SymlinkDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> 
     )
 }
 
+@Composable
+private fun SftpVaultUnlockBanner(onUnlockVault: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
+        Text("凭据保险库已锁定", Modifier.weight(1f).padding(horizontal = 10.dp))
+        Button(onClick = onUnlockVault) { Text("解锁") }
+    }
+}
+
+@Composable
+private fun SftpCredentialGate(session: ManagedSessionState?, onDismiss: () -> Unit, onConnect: (Credential, Boolean) -> Unit) {
+    if (session == null || !session.needsCredential) return
+    val credentialProfile = if (session.credentialRole == CredentialRole.JUMP) session.jumpProfile ?: session.profile else session.profile
+    val subject = when {
+        session.credentialRole == CredentialRole.JUMP -> "跳板机"
+        session.jumpProfile != null -> "目标机"
+        else -> "SSH 服务器"
+    }
+    CredentialDialog(
+        authType = credentialProfile.authType,
+        subject = subject,
+        onDismiss = onDismiss,
+        onConnect = onConnect,
+    )
+}
+
 private fun ConnectionState?.sftpLabel(): String = when (this) { is ConnectionState.Connected -> "已连接 · $label"; ConnectionState.Connecting -> "连接中"; is ConnectionState.Error -> "连接失败 · $message"; is ConnectionState.Disconnected -> "已断开 · $reason"; else -> "准备连接" }
-private fun FileSort.label() = when (this) { FileSort.NAME -> "名称"; FileSort.SIZE -> "大小"; FileSort.TIME -> "时间"; FileSort.TYPE -> "类型" }
-private fun TransferStatus.label() = when (this) { TransferStatus.QUEUED -> "排队"; TransferStatus.RUNNING -> "传输中"; TransferStatus.PAUSED -> "已暂停"; TransferStatus.WAITING_NETWORK -> "等待网络"; TransferStatus.WAITING_UNLOCK -> "等待解锁"; TransferStatus.COMPLETED -> "完成"; TransferStatus.FAILED -> "失败"; TransferStatus.CANCELLED -> "已取消" }
-private fun TransferStatus.isActive() = this == TransferStatus.QUEUED || this == TransferStatus.RUNNING || this == TransferStatus.WAITING_NETWORK || this == TransferStatus.WAITING_UNLOCK
-private fun formatSize(bytes: Long): String { if (bytes < 0) return "未知"; val units = arrayOf("B", "KiB", "MiB", "GiB", "TiB"); var value = bytes.toDouble(); var unit = 0; while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }; return if (unit == 0) "$bytes B" else "%.1f %s".format(value, units[unit]) }
-private fun formatDuration(seconds: Long): String = if (seconds < 60) "${seconds}秒" else if (seconds < 3600) "${seconds / 60}分${seconds % 60}秒" else "${seconds / 3600}时${seconds % 3600 / 60}分"
+internal fun FileSort.label() = when (this) { FileSort.NAME -> "名称"; FileSort.SIZE -> "大小"; FileSort.TIME -> "时间"; FileSort.TYPE -> "类型" }
+internal fun TransferStatus.label() = when (this) { TransferStatus.QUEUED -> "排队"; TransferStatus.RUNNING -> "传输中"; TransferStatus.PAUSED -> "已暂停"; TransferStatus.WAITING_NETWORK -> "等待网络"; TransferStatus.WAITING_UNLOCK -> "等待解锁"; TransferStatus.COMPLETED -> "完成"; TransferStatus.FAILED -> "失败"; TransferStatus.CANCELLED -> "已取消" }
+internal fun TransferStatus.isActive() = this == TransferStatus.QUEUED || this == TransferStatus.RUNNING || this == TransferStatus.WAITING_NETWORK || this == TransferStatus.WAITING_UNLOCK
+internal fun formatSize(bytes: Long): String { if (bytes < 0) return "未知"; val units = arrayOf("B", "KiB", "MiB", "GiB", "TiB"); var value = bytes.toDouble(); var unit = 0; while (value >= 1024 && unit < units.lastIndex) { value /= 1024; unit++ }; return if (unit == 0) "$bytes B" else "%.1f %s".format(value, units[unit]) }
+internal fun formatDuration(seconds: Long): String = if (seconds < 60) "${seconds}秒" else if (seconds < 3600) "${seconds / 60}分${seconds % 60}秒" else "${seconds / 3600}时${seconds % 3600 / 60}分"
 private fun formatPlaybackTime(millis: Long): String {
     val totalSeconds = (millis / 1000).coerceAtLeast(0)
     val hours = totalSeconds / 3600
