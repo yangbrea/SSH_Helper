@@ -213,9 +213,8 @@ function handleTouchMove(event) {
     return;
   }
   if (touchState.moved) {
-    // 用户真正开始滚动：此时收起键盘（focus 属于上一次点击的请求，滚动不再需要）。
-    terminal.blur();
-    window.AndroidTerminal?.onHideKeyboard();
+    // 滚动只改变终端 viewport，不再主动关闭 IME。关闭并重新聚焦会与 Android 的
+    // adjustResize 动画竞争，横屏时尤其容易造成键盘闪烁、丢字和重复 PTY resize。
     const point = touchState.point;
     const rowHeight = point?.rowHeight || 18;
     const rows = Math.trunc((touchState.lastY - touch.clientY) / rowHeight);
@@ -253,10 +252,12 @@ function handleTouchEnd(event) {
       touchState = null;
       return;
     }
+    // 只有点击当前光标单元格才进入输入状态；滚动区、历史输出和空白处保持纯浏览。
     const buffer = terminal.buffer.active;
     const cursorAbsoluteRow = buffer.baseY + buffer.cursorY;
-    if (point && point.absoluteRow === cursorAbsoluteRow) {
-      // 同步置位：随后的合成 mousedown 会据此跳过 blur，保证输入不丢失。
+    const cursorColumn = buffer.cursorX;
+    if (point && point.absoluteRow === cursorAbsoluteRow && point.column === cursorColumn) {
+      // 同步置位让随后的合成 mousedown 跳过 blur，避免刚呼出的 IME 被立刻关闭。
       lastTouchRequestedKeyboard = true;
       window.AndroidTerminal?.onRequestKeyboard();
     }
@@ -286,7 +287,6 @@ terminal.element?.addEventListener('mousedown', event => {
   if (performance.now() < suppressSyntheticMouseUntil || event.sourceCapabilities?.firesTouchEvents) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    terminal.blur();
   }
 }, true);
 

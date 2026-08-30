@@ -10,16 +10,21 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -82,7 +87,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yang136.sshhelper.ai.AiContentBlock
 import com.yang136.sshhelper.ai.AiConversationEntry
@@ -103,6 +110,8 @@ import com.yang136.sshhelper.ui.design.SshStatusTone
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
+enum class AiBubblePresentation { PORTRAIT_SHEET, LANDSCAPE_FLOATING }
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AiBubble(
@@ -120,6 +129,8 @@ fun AiBubble(
     onOpenSettings: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    presentation: AiBubblePresentation = AiBubblePresentation.PORTRAIT_SHEET,
+    endClearance: Dp = 0.dp,
 ) {
     val state by stateFlow.collectAsStateWithLifecycle()
     var expanded by remember { mutableStateOf(false) }
@@ -136,9 +147,18 @@ fun AiBubble(
         }
     }
 
-    Box(modifier) {
+    BoxWithConstraints(modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(end = endClearance)) {
+        val density = LocalDensity.current
+        val bubbleSizePx = with(density) { 52.dp.toPx() }
+        val minOffsetX = -(constraints.maxWidth - bubbleSizePx).coerceAtLeast(0f)
+        val minOffsetY = -(constraints.maxHeight - bubbleSizePx).coerceAtLeast(0f)
+        LaunchedEffect(constraints.maxWidth, constraints.maxHeight, endClearance) {
+            bubbleOffsetX = bubbleOffsetX.coerceIn(minOffsetX, 0f)
+            bubbleOffsetY = bubbleOffsetY.coerceIn(minOffsetY, 0f)
+        }
         Box(
             Modifier
+                .align(Alignment.BottomEnd)
                 .offset { IntOffset(bubbleOffsetX.roundToInt(), bubbleOffsetY.roundToInt()) }
                 .size(52.dp)
                 .shadow(6.dp, CircleShape)
@@ -146,8 +166,8 @@ fun AiBubble(
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        bubbleOffsetX += dragAmount.x
-                        bubbleOffsetY += dragAmount.y
+                        bubbleOffsetX = (bubbleOffsetX + dragAmount.x).coerceIn(minOffsetX, 0f)
+                        bubbleOffsetY = (bubbleOffsetY + dragAmount.y).coerceIn(minOffsetY, 0f)
                     }
                 }
                 .combinedClickable(onClick = { expanded = true }, onLongClick = onClose),
@@ -155,9 +175,39 @@ fun AiBubble(
         ) {
             Icon(Icons.Default.AutoAwesome, "打开 Terminal Agent", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
+        if (expanded && presentation == AiBubblePresentation.LANDSCAPE_FLOATING) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).fillMaxWidth(.52f).widthIn(min = 320.dp, max = 440.dp)
+                    .fillMaxHeight(.92f).zIndex(2f),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 10.dp,
+            ) {
+                AgentPanelContent(
+                    session = session,
+                    state = state,
+                    input = input,
+                    onInputChange = { input = it },
+                    onSend = ::send,
+                    onCancelGeneration = onCancelGeneration,
+                    onClear = onClear,
+                    onCollapse = { expanded = false },
+                    onClose = onClose,
+                    onConfirm = { suggestion ->
+                        if (suggestion.risk == CommandRisk.HIGH) highRiskCommand = suggestion else onConfirmCommand(suggestion.id)
+                    },
+                    onFillTerminal = onFillTerminal,
+                    onInterruptCommand = onInterruptCommand,
+                    onStopWaiting = onStopWaiting,
+                    onAnalyzePartial = onAnalyzePartial,
+                    onOpenSettings = onOpenSettings,
+                )
+            }
+        }
     }
 
-    if (expanded) {
+    if (expanded && presentation == AiBubblePresentation.PORTRAIT_SHEET) {
         // 注意：高度约束必须放在内容 Column 上，而不能放在 ModalBottomSheet 的
         // modifier 上。fillMaxHeight 会压缩 sheet 内部约束，使锚点计算里
         // fullHeight == sheetHeight，Expanded 偏移变成 0 → sheet 渲染在屏幕顶部
@@ -174,41 +224,26 @@ fun AiBubble(
             sheetGesturesEnabled = false,
             dragHandle = { SheetDragHandle(sheetState) { expanded = false } },
         ) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(0.86f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AgentHeader(
-                    sessionName = session.displayName,
-                    generating = state.generating,
-                    onCancelGeneration = onCancelGeneration,
-                    onClear = onClear,
-                    onCollapse = { expanded = false },
-                    onClose = onClose,
-                )
-                HorizontalDivider()
-                AgentConversation(
-                    state = state,
-                    onConfirm = { suggestion ->
-                        if (suggestion.risk == CommandRisk.HIGH) highRiskCommand = suggestion
-                        else onConfirmCommand(suggestion.id)
-                    },
-                    onFillTerminal = onFillTerminal,
-                    onInterruptCommand = onInterruptCommand,
-                    onStopWaiting = onStopWaiting,
-                    onAnalyzePartial = onAnalyzePartial,
-                    modifier = Modifier.weight(1f),
-                )
-                state.error?.let { error ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(error, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        if (error.contains("API Key")) TextButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, null); Text("设置") }
-                    }
-                }
-                AgentInput(
-                    input = input,
-                    enabled = !state.generating && !state.waitingForCommand,
-                    onInputChange = { input = it },
-                    onSend = ::send,
-                )
-            }
+            AgentPanelContent(
+                session = session,
+                state = state,
+                input = input,
+                onInputChange = { input = it },
+                onSend = ::send,
+                onCancelGeneration = onCancelGeneration,
+                onClear = onClear,
+                onCollapse = { expanded = false },
+                onClose = onClose,
+                onConfirm = { suggestion ->
+                    if (suggestion.risk == CommandRisk.HIGH) highRiskCommand = suggestion else onConfirmCommand(suggestion.id)
+                },
+                onFillTerminal = onFillTerminal,
+                onInterruptCommand = onInterruptCommand,
+                onStopWaiting = onStopWaiting,
+                onAnalyzePartial = onAnalyzePartial,
+                onOpenSettings = onOpenSettings,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.86f),
+            )
         }
     }
 
@@ -233,6 +268,59 @@ fun AiBubble(
                 Button(onClick = { highRiskCommand = null; onConfirmCommand(suggestion.id) }) { Text("仍然执行") }
             },
             dismissButton = { TextButton(onClick = { highRiskCommand = null }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun AgentPanelContent(
+    session: ManagedSessionState,
+    state: AiConversationState,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onCancelGeneration: () -> Unit,
+    onClear: () -> Unit,
+    onCollapse: () -> Unit,
+    onClose: () -> Unit,
+    onConfirm: (CommandSuggestion) -> Unit,
+    onFillTerminal: (String) -> Unit,
+    onInterruptCommand: () -> Unit,
+    onStopWaiting: () -> Unit,
+    onAnalyzePartial: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AgentHeader(
+            sessionName = session.displayName,
+            generating = state.generating,
+            onCancelGeneration = onCancelGeneration,
+            onClear = onClear,
+            onCollapse = onCollapse,
+            onClose = onClose,
+        )
+        HorizontalDivider()
+        AgentConversation(
+            state = state,
+            onConfirm = onConfirm,
+            onFillTerminal = onFillTerminal,
+            onInterruptCommand = onInterruptCommand,
+            onStopWaiting = onStopWaiting,
+            onAnalyzePartial = onAnalyzePartial,
+            modifier = Modifier.weight(1f),
+        )
+        state.error?.let { error ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(error, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (error.contains("API Key")) TextButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, null); Text("设置") }
+            }
+        }
+        AgentInput(
+            input = input,
+            enabled = !state.generating && !state.waitingForCommand,
+            onInputChange = onInputChange,
+            onSend = onSend,
         )
     }
 }

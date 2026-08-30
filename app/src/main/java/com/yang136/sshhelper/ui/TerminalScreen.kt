@@ -1,9 +1,11 @@
 package com.yang136.sshhelper.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -22,20 +24,29 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -52,13 +63,13 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -81,18 +92,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.webkit.WebViewAssetLoader
@@ -120,8 +142,8 @@ import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
+import com.yang136.sshhelper.ui.adaptive.currentLayoutMode
 import com.yang136.sshhelper.ui.adaptive.hasHardwareKeyboard
-import com.yang136.sshhelper.ui.adaptive.layoutMode
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
@@ -136,6 +158,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import android.view.WindowInsets as AndroidWindowInsets
+
+private val NullableSessionIdSaver = Saver<SessionId?, String>(
+    save = { it?.value.orEmpty() },
+    restore = { value -> value.takeIf(String::isNotEmpty)?.let(::SessionId) },
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,23 +183,24 @@ fun TerminalScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    val isLandscape = currentLayoutMode() == SshLayoutMode.LANDSCAPE
     val sessions by sessionsViewModel.sessions.collectAsStateWithLifecycle()
     val hostSessions = sessions.filter { it.profile.id == hostId }
     val initialId = initialSessionId?.let(::SessionId)
-    var activeId by remember { mutableStateOf(initialId) }
+    var activeId by rememberSaveable(hostId, stateSaver = NullableSessionIdSaver) { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
     val controller = remember { TerminalController() }
+    val surfaceRevision = remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var closingSession by remember { mutableStateOf<SessionId?>(null) }
     var showFontDialog by remember { mutableStateOf(false) }
     var selectionMode by remember { mutableStateOf(false) }
     var hasSelection by remember { mutableStateOf(false) }
-    var showSearch by remember { mutableStateOf(false) }
-    var searchText by remember { mutableStateOf("") }
-    var searchCaseSensitive by remember { mutableStateOf(false) }
+    var layoutState by rememberSaveable { mutableStateOf(TerminalLayoutState()) }
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var searchCaseSensitive by rememberSaveable { mutableStateOf(false) }
     var searchResult by remember { mutableStateOf(-1 to 0) }
-    var showSnippets by remember { mutableStateOf(false) }
     var variableSnippet by remember { mutableStateOf<CommandSnippet?>(null) }
     var immediateCommand by remember { mutableStateOf<String?>(null) }
     var pendingLink by remember { mutableStateOf<String?>(null) }
@@ -181,18 +209,14 @@ fun TerminalScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     var sessionLimitReached by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
-    var aiHidden by remember { mutableStateOf(false) }
-    // 横屏沉浸模式:默认收起顶部栏/标签行/扩展键行;IME 可见时自动展开,消失后恢复收起。
-    var chromeCollapsed by remember { mutableStateOf(false) }
-    // 物理键盘连接时扩展键行默认隐藏,可通过「更多」菜单临时强制显示。
-    var forceExtraKeys by remember { mutableStateOf(false) }
+    var aiHidden by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
             activeId = hostSessions.first().id
         }
     }
-    LaunchedEffect(activeId) {
+    LaunchedEffect(activeId, surfaceRevision.intValue) {
         val id = activeId ?: return@LaunchedEffect
         sessionsViewModel.enableFeature(id, SessionFeature.SHELL)
         controller.reset()
@@ -224,6 +248,7 @@ fun TerminalScreen(
         controller.onSelectionStateChanged = { active, selected ->
             selectionMode = active
             hasSelection = selected
+            layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.SelectionChanged(active))
         }
         controller.onCopied = { count ->
             scope.launch { snackbarHostState.showSnackbar("已复制 $count 个字符") }
@@ -263,231 +288,216 @@ fun TerminalScreen(
             snippet.executeImmediately -> immediateCommand = expansion.text
             else -> controller.pasteText(expansion.text.orEmpty())
         }
-        if (expansion.missingInputs.isEmpty()) showSnippets = false
+        if (expansion.missingInputs.isEmpty()) {
+            layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ClosePanel)
+        }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val isLandscape = layoutMode() == SshLayoutMode.LANDSCAPE
-        val hasHwKeyboard = hasHardwareKeyboard()
-        val terminalBackground = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(terminalPalette.background))
-        // 横屏默认收起 chrome;IME 可见时自动展开(保证搜索/扩展键可达),消失后恢复收起;竖屏恒展开。
-        LaunchedEffect(isLandscape, imeVisible) {
-            chromeCollapsed = isLandscape && !imeVisible
-        }
-        Scaffold(
-        containerColor = if (isLandscape) terminalBackground else MaterialTheme.colorScheme.background,
-        topBar = {
-            if (!(isLandscape && chromeCollapsed)) {
-            Column {
-            SshTopAppBar(
-                title = current?.displayName ?: "SSH 终端",
-                subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            val profile = current?.profile ?: return@IconButton
-                            sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id -> activeId = id }
-                                ?: run { sessionLimitReached = true }
-                        },
-                        enabled = current != null,
-                    ) { Icon(Icons.Default.Add, "新建会话") }
-                    IconButton(onClick = { showSearch = !showSearch; controller.clearSelection(); if (!showSearch) controller.clearSearch() }) { Icon(Icons.Default.Search, "搜索") }
-                    IconButton(onClick = { controller.clearSelection(); controller.clearSearch(); showSearch = false; showSnippets = true }) { Icon(Icons.Default.Code, "快捷命令") }
-                    if (selectionMode && hasSelection) IconButton(onClick = controller::copySelection) {
-                        Icon(Icons.Default.ContentCopy, "复制所选内容")
-                    }
-                    IconButton(onClick = { showMoreMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
-                    DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
-                        TerminalMoreMenuItems(
-                            selectionMode = selectionMode,
-                            hasHardwareKeyboard = hasHwKeyboard,
-                            forceExtraKeys = forceExtraKeys,
-                            onDismiss = { showMoreMenu = false },
-                            onPaste = { controller.paste(context) },
-                            onSelectText = { controller.enterSelectionMode() },
-                            onForwards = { current?.let { onOpenForwards(it.profile.id) } },
-                            onFont = { showFontDialog = true },
-                            onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
-                            onToggleExtraKeys = { forceExtraKeys = !forceExtraKeys },
-                        )
-                    }
-                },
-                allowImageBackground = false,
+    val hasHwKeyboard = hasHardwareKeyboard()
+    val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))
+    val currentSessionState = rememberUpdatedState(current)
+    val terminalSurface = remember(controller) {
+        movableContentOf<Modifier> { modifier ->
+            TerminalWebView(
+                controller = controller,
+                initialBackground = terminalPalette.background,
+                onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
+                onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+                onSurfaceCreated = { surfaceRevision.intValue += 1 },
+                modifier = modifier,
             )
-            if (hostSessions.isNotEmpty()) {
-                PrimaryScrollableTabRow(selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0), edgePadding = 4.dp) {
-                    hostSessions.forEach { session ->
-                        Tab(
-                            selected = session.id == activeId,
-                            onClick = { activeId = session.id; showSearch = false; controller.clearSearch() },
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${session.displayName} · ${session.connection.presentation().first}", maxLines = 1)
-                                    IconButton(onClick = { closingSession = session.id }) { Icon(Icons.Default.Close, "关闭 ${session.displayName}") }
+        }
+    }
+
+    fun togglePanel(panel: TerminalPanel) {
+        if (panel != TerminalPanel.SELECTION) controller.clearSelection()
+        if (panel != TerminalPanel.SEARCH) controller.clearSearch()
+        layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.TogglePanel(panel))
+    }
+
+    TerminalSystemBarsEffect(isLandscape)
+    Box(Modifier.fillMaxSize().background(terminalBackground)) {
+        if (isLandscape) {
+            LandscapeTerminalLayout(
+                hostSessions = hostSessions,
+                current = current,
+                activeId = activeId,
+                snippets = snippets.filter { it.hostId == null || it.hostId == current?.profile?.id },
+                layoutState = layoutState,
+                settings = settings,
+                searchText = searchText,
+                searchResult = searchResult,
+                searchCaseSensitive = searchCaseSensitive,
+                selectionMode = selectionMode,
+                hasSelection = hasSelection,
+                ctrlArmed = ctrlArmed,
+                renderingDelayed = renderingDelayed,
+                showMoreMenu = showMoreMenu,
+                terminalBackground = terminalBackground,
+                onBack = onBack,
+                onTogglePanel = ::togglePanel,
+                onToggleExtraKeys = {
+                    layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ToggleExtraKeys)
+                },
+                onShowMoreMenuChange = { showMoreMenu = it },
+                onSelectSession = { id ->
+                    activeId = id
+                    controller.clearSearch()
+                    layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ClosePanel)
+                },
+                onNewSession = {
+                    val profile = current?.profile ?: return@LandscapeTerminalLayout
+                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
+                        ?: run { sessionLimitReached = true }
+                },
+                onCloseSession = { closingSession = it },
+                onReconnect = sessionsViewModel::reconnect,
+                onCancelReconnect = sessionsViewModel::cancelReconnect,
+                onUnlockVault = onUnlockVault,
+                onCredentials = { forceCredentialDialog = true },
+                onQueryChange = { searchText = it; controller.search(it, false, searchCaseSensitive) },
+                onSearchPrevious = { controller.search(searchText, true, searchCaseSensitive) },
+                onSearchNext = { controller.search(searchText, false, searchCaseSensitive) },
+                onCaseSensitiveChange = { searchCaseSensitive = it; controller.search(searchText, false, it) },
+                onUseSnippet = ::useSnippet,
+                onManageSnippets = onManageSnippets,
+                onCopy = controller::copySelection,
+                onSelectAll = controller::selectAll,
+                onCancelSelection = controller::clearSelection,
+                onSendKey = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
+                onShowKeyboard = controller::focusAndShowKeyboard,
+                onArmCtrl = controller::armCtrl,
+                onPaste = { controller.paste(context) },
+                onSelectText = controller::enterSelectionMode,
+                onForwards = { current?.let { onOpenForwards(it.profile.id) } },
+                onFont = { showFontDialog = true },
+                onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                terminal = { modifier -> TerminalViewport(current, terminalBackground, modifier, terminalSurface) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    Column {
+                        SshTopAppBar(
+                            title = current?.displayName ?: "SSH 终端",
+                            subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
+                            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                            actions = {
+                                IconButton(
+                                    onClick = {
+                                        val profile = current?.profile ?: return@IconButton
+                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
+                                            ?: run { sessionLimitReached = true }
+                                    },
+                                    enabled = current != null,
+                                ) { Icon(Icons.Default.Add, "新建会话") }
+                                IconButton(onClick = { togglePanel(TerminalPanel.SEARCH) }) { Icon(Icons.Default.Search, "搜索") }
+                                IconButton(onClick = { togglePanel(TerminalPanel.SNIPPETS) }) { Icon(Icons.Default.Code, "快捷命令") }
+                                if (selectionMode && hasSelection) IconButton(onClick = controller::copySelection) {
+                                    Icon(Icons.Default.ContentCopy, "复制所选内容")
+                                }
+                                IconButton(onClick = { showMoreMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                                DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                                    TerminalMoreMenuItems(
+                                        selectionMode = selectionMode,
+                                        hasHardwareKeyboard = hasHwKeyboard,
+                                        forceExtraKeys = layoutState.extraKeysVisible,
+                                        onDismiss = { showMoreMenu = false },
+                                        onPaste = { controller.paste(context) },
+                                        onSelectText = controller::enterSelectionMode,
+                                        onForwards = { current?.let { onOpenForwards(it.profile.id) } },
+                                        onFont = { showFontDialog = true },
+                                        onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                                        onToggleExtraKeys = {
+                                            layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ToggleExtraKeys)
+                                        },
+                                    )
                                 }
                             },
+                            allowImageBackground = false,
                         )
-                    }
-                }
-            }
-            }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { padding ->
-        Box(
-            Modifier.fillMaxSize().padding(padding)
-                .consumeWindowInsets(padding)
-                .imePadding(),
-        ) {
-        Column(
-            Modifier.fillMaxSize()
-                .background(terminalBackground),
-        ) {
-            // WebView 常驻:首帧即创建,避免渲染循环等待就绪时丢失输出;空态只作为覆盖层。
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                TerminalWebView(
-                    controller = controller,
-                    initialBackground = terminalPalette.background,
-                    onInput = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
-                    onResize = { columns, rows -> current?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                    onReady = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-                if (current == null) {
-                    Box(
-                        Modifier.fillMaxSize()
-                            .background(terminalBackground),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("暂无终端会话", style = MaterialTheme.typography.titleMedium)
-                            Text("回到首页打开新终端", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (hostSessions.isNotEmpty()) {
+                            PrimaryScrollableTabRow(
+                                selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0),
+                                edgePadding = 4.dp,
+                            ) {
+                                hostSessions.forEach { session ->
+                                    Tab(
+                                        selected = session.id == activeId,
+                                        onClick = { activeId = session.id; controller.clearSearch(); layoutState = layoutState.copy(panel = TerminalPanel.NONE) },
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("${session.displayName} · ${session.connection.presentation().first}", maxLines = 1)
+                                                IconButton(onClick = { closingSession = session.id }) { Icon(Icons.Default.Close, "关闭 ${session.displayName}") }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-            }
-            val session = current
-            if (session != null && !(isLandscape && chromeCollapsed)) {
-            if (showSearch) {
-                TerminalSearchBar(
-                    query = searchText,
-                    result = searchResult,
-                    caseSensitive = searchCaseSensitive,
-                    onQueryChange = { searchText = it; controller.search(it, backwards = false, caseSensitive = searchCaseSensitive) },
-                    onPrevious = { controller.search(searchText, backwards = true, caseSensitive = searchCaseSensitive) },
-                    onNext = { controller.search(searchText, backwards = false, caseSensitive = searchCaseSensitive) },
-                    onCaseSensitiveChange = { searchCaseSensitive = it; controller.search(searchText, false, it) },
-                    onClose = { showSearch = false; controller.clearSearch() },
-                )
-            } else if (selectionMode) {
-                SelectionKeys(
-                    hasSelection = hasSelection,
-                    onCopy = controller::copySelection,
-                    onSelectAll = controller::selectAll,
-                    onCancel = controller::clearSelection,
-                )
-            } else if (!hasHwKeyboard || forceExtraKeys) {
-                ExtraKeys(
-                    keys = settings.extraKeys,
-                    ctrlArmed = ctrlArmed,
-                    onSend = { sessionsViewModel.send(session.id, it) },
-                    onShowKeyboard = controller::focusAndShowKeyboard,
-                    onArmCtrl = controller::armCtrl,
-                )
-            }
-            }
-            if (current?.needsVaultUnlock == true) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("保险库已锁定，重连需要验证身份", Modifier.weight(1f).padding(horizontal = 8.dp))
-                    TextButton(onClick = onUnlockVault) { Text("解锁") }
-                }
-            }
-            if (renderingDelayed) {
-                Text(
-                    "终端正在处理大量输出，SSH 连接仍保持中…",
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.tertiary,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            when (val connection = current?.connection ?: ConnectionState.Idle) {
-                ConnectionState.Connecting -> Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.padding(end = 10.dp))
-                    Text(if (current?.reconnectAttempt == null) current?.stage?.connectingLabel() ?: "正在建立安全连接…" else "正在执行第 ${current.reconnectAttempt}/3 次自动重连…")
-                    if (current?.reconnectAttempt != null) TextButton(onClick = { sessionsViewModel.cancelReconnect(current.id) }) { Text("取消") }
-                }
-                is ConnectionState.Error -> Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(connection.message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
-                    current?.reconnectAttempt?.let { Text("$it/3", color = MaterialTheme.colorScheme.primary) }
-                    if (current?.reconnectAttempt != null) TextButton(onClick = { sessionsViewModel.cancelReconnect(current.id) }) { Text("取消") }
-                    TextButton(onClick = { forceCredentialDialog = true }) { Text("重新输入") }
-                    TextButton(onClick = { current?.let { sessionsViewModel.reconnect(it.id) } }) { Text("重连") }
-                }
-                is ConnectionState.Disconnected -> Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(connection.reason, Modifier.weight(1f))
-                    current?.reconnectAttempt?.let { Text("第 $it/3 次重连", color = MaterialTheme.colorScheme.primary) }
-                    if (current?.reconnectAttempt != null) TextButton(onClick = { sessionsViewModel.cancelReconnect(current.id) }) { Text("取消") }
-                    TextButton(onClick = { current?.let { sessionsViewModel.reconnect(it.id) } }) { Text("重新连接") }
-                }
-                else -> Unit
-            }
-        }
-            if (settings.aiShowBubble && !aiHidden) {
-                current?.let { session ->
-                    AiBubble(
-                        session = session,
-                        stateFlow = sessionsViewModel.aiState(session.id),
-                        settings = settings,
-                        onSend = { sessionsViewModel.sendAi(session.id, it, settings) },
-                        onConfirmCommand = { sessionsViewModel.confirmAiCommand(session.id, it) },
-                        onFillTerminal = controller::pasteText,
-                        onCancelGeneration = { sessionsViewModel.cancelAiGeneration(session.id) },
-                        onInterruptCommand = { sessionsViewModel.interruptAiCommand(session.id) },
-                        onStopWaiting = { sessionsViewModel.stopAiWaiting(session.id) },
-                        onAnalyzePartial = { sessionsViewModel.analyzePartialAiOutput(session.id, it) },
-                        onClear = { sessionsViewModel.clearAi(session.id) },
-                        onOpenSettings = onOpenSettings,
-                        onClose = { aiHidden = true },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                },
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) { padding ->
+                Column(
+                    Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+                        .background(terminalBackground),
+                ) {
+                    TerminalViewport(current, terminalBackground, Modifier.weight(1f).fillMaxWidth(), terminalSurface)
+                    current?.let { session ->
+                        when (layoutState.panel) {
+                            TerminalPanel.SEARCH -> TerminalSearchBar(
+                                query = searchText,
+                                result = searchResult,
+                                caseSensitive = searchCaseSensitive,
+                                onQueryChange = { searchText = it; controller.search(it, false, searchCaseSensitive) },
+                                onPrevious = { controller.search(searchText, true, searchCaseSensitive) },
+                                onNext = { controller.search(searchText, false, searchCaseSensitive) },
+                                onCaseSensitiveChange = { searchCaseSensitive = it; controller.search(searchText, false, it) },
+                                onClose = { controller.clearSearch(); layoutState = layoutState.copy(panel = TerminalPanel.NONE) },
+                            )
+                            TerminalPanel.SELECTION -> SelectionKeys(hasSelection, controller::copySelection, controller::selectAll, controller::clearSelection)
+                            else -> if (!hasHwKeyboard || layoutState.extraKeysVisible) {
+                                ExtraKeys(settings.extraKeys, ctrlArmed, { sessionsViewModel.send(session.id, it) }, controller::focusAndShowKeyboard, controller::armCtrl)
+                            }
+                        }
+                    }
+                    PortraitTerminalStatus(
+                        current = current,
+                        renderingDelayed = renderingDelayed,
+                        onUnlockVault = onUnlockVault,
+                        onCancelReconnect = sessionsViewModel::cancelReconnect,
+                        onCredentials = { forceCredentialDialog = true },
+                        onReconnect = sessionsViewModel::reconnect,
                     )
                 }
             }
-            if (isLandscape && chromeCollapsed) {
-                TerminalChromeStrip(
-                    hostSessions = hostSessions,
-                    activeId = activeId,
-                    hasHardwareKeyboard = hasHwKeyboard,
-                    showMoreMenu = showMoreMenu,
-                    onShowMoreMenuChange = { showMoreMenu = it },
-                    onSelect = { id -> activeId = id; showSearch = false; controller.clearSearch() },
-                    onBack = onBack,
-                    onExpand = { chromeCollapsed = false },
-                    onShowKeyboard = controller::focusAndShowKeyboard,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    menuItems = {
-                        TerminalMoreMenuItems(
-                            selectionMode = selectionMode,
-                            hasHardwareKeyboard = hasHwKeyboard,
-                            forceExtraKeys = forceExtraKeys,
-                            onDismiss = { showMoreMenu = false },
-                            onPaste = { controller.paste(context) },
-                            onSelectText = { controller.enterSelectionMode() },
-                            onForwards = { current?.let { onOpenForwards(it.profile.id) } },
-                            onFont = { showFontDialog = true },
-                            onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
-                            onToggleExtraKeys = { forceExtraKeys = !forceExtraKeys },
-                        )
-                    },
+        }
+
+        if (settings.aiShowBubble && !aiHidden) {
+            current?.let { session ->
+                AiBubble(
+                    session = session,
+                    stateFlow = sessionsViewModel.aiState(session.id),
+                    settings = settings,
+                    onSend = { sessionsViewModel.sendAi(session.id, it, settings) },
+                    onConfirmCommand = { sessionsViewModel.confirmAiCommand(session.id, it) },
+                    onFillTerminal = controller::pasteText,
+                    onCancelGeneration = { sessionsViewModel.cancelAiGeneration(session.id) },
+                    onInterruptCommand = { sessionsViewModel.interruptAiCommand(session.id) },
+                    onStopWaiting = { sessionsViewModel.stopAiWaiting(session.id) },
+                    onAnalyzePartial = { sessionsViewModel.analyzePartialAiOutput(session.id, it) },
+                    onClear = { sessionsViewModel.clearAi(session.id) },
+                    onOpenSettings = onOpenSettings,
+                    onClose = { aiHidden = true },
+                    presentation = if (isLandscape) AiBubblePresentation.LANDSCAPE_FLOATING else AiBubblePresentation.PORTRAIT_SHEET,
+                    endClearance = if (isLandscape && layoutState.extraKeysVisible) 160.dp else 0.dp,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
                 )
             }
         }
-    }
     }
 
     if ((current?.needsCredential == true || forceCredentialDialog) && current != null) {
@@ -555,12 +565,12 @@ fun TerminalScreen(
         )
     }
 
-    if (showSnippets && current != null) {
+    if (!isLandscape && layoutState.panel == TerminalPanel.SNIPPETS && current != null) {
         SnippetSheet(
             snippets = snippets.filter { it.hostId == null || it.hostId == current.profile.id },
             onSelect = ::useSnippet,
-            onManage = { showSnippets = false; onManageSnippets() },
-            onDismiss = { showSnippets = false },
+            onManage = { layoutState = layoutState.copy(panel = TerminalPanel.NONE); onManageSnippets() },
+            onDismiss = { layoutState = layoutState.copy(panel = TerminalPanel.NONE) },
         )
     }
     variableSnippet?.let { snippet ->
@@ -607,6 +617,506 @@ private fun connectionLabel(state: ConnectionState): String = when (state) {
     is ConnectionState.Connected -> "已连接 · ${state.label}"
     is ConnectionState.Disconnected -> "已断开"
     is ConnectionState.Error -> "连接失败"
+}
+
+@Composable
+private fun TerminalViewport(
+    current: ManagedSessionState?,
+    background: androidx.compose.ui.graphics.Color,
+    modifier: Modifier,
+    terminal: @Composable (Modifier) -> Unit,
+) {
+    Box(modifier.background(background)) {
+        terminal(Modifier.fillMaxSize())
+        if (current == null) {
+            Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("暂无终端会话", style = MaterialTheme.typography.titleMedium)
+                    Text("回到首页打开新终端", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeTerminalLayout(
+    hostSessions: List<ManagedSessionState>,
+    current: ManagedSessionState?,
+    activeId: SessionId?,
+    snippets: List<CommandSnippet>,
+    layoutState: TerminalLayoutState,
+    settings: AppSettings,
+    searchText: String,
+    searchResult: Pair<Int, Int>,
+    searchCaseSensitive: Boolean,
+    selectionMode: Boolean,
+    hasSelection: Boolean,
+    ctrlArmed: Boolean,
+    renderingDelayed: Boolean,
+    showMoreMenu: Boolean,
+    terminalBackground: androidx.compose.ui.graphics.Color,
+    onBack: () -> Unit,
+    onTogglePanel: (TerminalPanel) -> Unit,
+    onToggleExtraKeys: () -> Unit,
+    onShowMoreMenuChange: (Boolean) -> Unit,
+    onSelectSession: (SessionId) -> Unit,
+    onNewSession: () -> Unit,
+    onCloseSession: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
+    onCancelReconnect: (SessionId) -> Unit,
+    onUnlockVault: () -> Unit,
+    onCredentials: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSearchPrevious: () -> Unit,
+    onSearchNext: () -> Unit,
+    onCaseSensitiveChange: (Boolean) -> Unit,
+    onUseSnippet: (CommandSnippet) -> Unit,
+    onManageSnippets: () -> Unit,
+    onCopy: () -> Unit,
+    onSelectAll: () -> Unit,
+    onCancelSelection: () -> Unit,
+    onSendKey: (ByteArray) -> Unit,
+    onShowKeyboard: () -> Unit,
+    onArmCtrl: () -> Unit,
+    onPaste: () -> Unit,
+    onSelectText: () -> Unit,
+    onForwards: () -> Unit,
+    onFont: () -> Unit,
+    onDisconnect: () -> Unit,
+    terminal: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .background(terminalBackground)
+            // 状态栏在横屏隐藏；这里只避让左右挖孔、导航栏与 IME，不制造顶部整排留白。
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
+    ) {
+        LandscapeTerminalRail(
+            current = current,
+            selectedPanel = layoutState.panel,
+            extraKeysVisible = layoutState.extraKeysVisible,
+            selectionMode = selectionMode,
+            showMoreMenu = showMoreMenu,
+            onBack = onBack,
+            onTogglePanel = onTogglePanel,
+            onToggleExtraKeys = onToggleExtraKeys,
+            onShowKeyboard = onShowKeyboard,
+            onShowMoreMenuChange = onShowMoreMenuChange,
+            onPaste = onPaste,
+            onSelectText = onSelectText,
+            onForwards = onForwards,
+            onFont = onFont,
+            onDisconnect = onDisconnect,
+        )
+        if (layoutState.panel != TerminalPanel.NONE) {
+            LandscapeContextPanel(
+                panel = layoutState.panel,
+                hostSessions = hostSessions,
+                current = current,
+                activeId = activeId,
+                snippets = snippets,
+                searchText = searchText,
+                searchResult = searchResult,
+                searchCaseSensitive = searchCaseSensitive,
+                hasSelection = hasSelection,
+                renderingDelayed = renderingDelayed,
+                onClose = { onTogglePanel(layoutState.panel) },
+                onSelectSession = onSelectSession,
+                onNewSession = onNewSession,
+                onCloseSession = onCloseSession,
+                onReconnect = onReconnect,
+                onCancelReconnect = onCancelReconnect,
+                onUnlockVault = onUnlockVault,
+                onCredentials = onCredentials,
+                onQueryChange = onQueryChange,
+                onSearchPrevious = onSearchPrevious,
+                onSearchNext = onSearchNext,
+                onCaseSensitiveChange = onCaseSensitiveChange,
+                onUseSnippet = onUseSnippet,
+                onManageSnippets = onManageSnippets,
+                onCopy = onCopy,
+                onSelectAll = onSelectAll,
+                onCancelSelection = onCancelSelection,
+            )
+        }
+        terminal(Modifier.weight(1f).fillMaxHeight())
+        if (layoutState.extraKeysVisible && current != null) {
+            LandscapeExtraKeys(
+                keys = settings.extraKeys,
+                ctrlArmed = ctrlArmed,
+                onSend = onSendKey,
+                onShowKeyboard = onShowKeyboard,
+                onArmCtrl = onArmCtrl,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LandscapeTerminalRail(
+    current: ManagedSessionState?,
+    selectedPanel: TerminalPanel,
+    extraKeysVisible: Boolean,
+    selectionMode: Boolean,
+    showMoreMenu: Boolean,
+    onBack: () -> Unit,
+    onTogglePanel: (TerminalPanel) -> Unit,
+    onToggleExtraKeys: () -> Unit,
+    onShowKeyboard: () -> Unit,
+    onShowMoreMenuChange: (Boolean) -> Unit,
+    onPaste: () -> Unit,
+    onSelectText: () -> Unit,
+    onForwards: () -> Unit,
+    onFont: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    Surface(Modifier.width(56.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box {
+                    RailButton(selectedPanel == TerminalPanel.SESSIONS, { onTogglePanel(TerminalPanel.SESSIONS) }, "会话") {
+                        Icon(Icons.Default.Terminal, null)
+                    }
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(8.dp).size(8.dp)
+                            .background(connectionColor(current?.connection ?: ConnectionState.Idle), CircleShape),
+                    )
+                }
+                RailButton(false, onShowKeyboard, "软键盘") { Icon(Icons.Default.Keyboard, null) }
+                RailButton(extraKeysVisible, onToggleExtraKeys, "扩展键") { Icon(Icons.Default.Tune, null) }
+                RailButton(selectedPanel == TerminalPanel.SEARCH, { onTogglePanel(TerminalPanel.SEARCH) }, "搜索") { Icon(Icons.Default.Search, null) }
+                RailButton(selectedPanel == TerminalPanel.SNIPPETS, { onTogglePanel(TerminalPanel.SNIPPETS) }, "快捷命令") { Icon(Icons.Default.Code, null) }
+            }
+            Box {
+                IconButton(onClick = { onShowMoreMenuChange(true) }) { Icon(Icons.Default.MoreVert, "更多") }
+                DropdownMenu(expanded = showMoreMenu, onDismissRequest = { onShowMoreMenuChange(false) }) {
+                    TerminalMoreMenuItems(
+                        selectionMode = selectionMode,
+                        hasHardwareKeyboard = false,
+                        forceExtraKeys = false,
+                        onDismiss = { onShowMoreMenuChange(false) },
+                        onPaste = onPaste,
+                        onSelectText = onSelectText,
+                        onForwards = onForwards,
+                        onFont = onFont,
+                        onDisconnect = onDisconnect,
+                        onToggleExtraKeys = {},
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RailButton(
+    selected: Boolean,
+    onClick: () -> Unit,
+    description: String,
+    icon: @Composable () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(48.dp).padding(3.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Box(
+            Modifier.fillMaxSize().clearAndSetSemantics {
+                contentDescription = description
+                this.selected = selected
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            icon()
+        }
+    }
+}
+
+@Composable
+private fun LandscapeContextPanel(
+    panel: TerminalPanel,
+    hostSessions: List<ManagedSessionState>,
+    current: ManagedSessionState?,
+    activeId: SessionId?,
+    snippets: List<CommandSnippet>,
+    searchText: String,
+    searchResult: Pair<Int, Int>,
+    searchCaseSensitive: Boolean,
+    hasSelection: Boolean,
+    renderingDelayed: Boolean,
+    onClose: () -> Unit,
+    onSelectSession: (SessionId) -> Unit,
+    onNewSession: () -> Unit,
+    onCloseSession: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
+    onCancelReconnect: (SessionId) -> Unit,
+    onUnlockVault: () -> Unit,
+    onCredentials: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSearchPrevious: () -> Unit,
+    onSearchNext: () -> Unit,
+    onCaseSensitiveChange: (Boolean) -> Unit,
+    onUseSnippet: (CommandSnippet) -> Unit,
+    onManageSnippets: () -> Unit,
+    onCopy: () -> Unit,
+    onSelectAll: () -> Unit,
+    onCancelSelection: () -> Unit,
+) {
+    Surface(Modifier.widthIn(min = 248.dp, max = 300.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when (panel) {
+                        TerminalPanel.SESSIONS -> "会话"
+                        TerminalPanel.SEARCH -> "搜索"
+                        TerminalPanel.SNIPPETS -> "快捷命令"
+                        TerminalPanel.SELECTION -> "文本选择"
+                        TerminalPanel.NONE -> ""
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "关闭面板") }
+            }
+            when (panel) {
+                TerminalPanel.SESSIONS -> LandscapeSessionsPanel(
+                    hostSessions, current, activeId, renderingDelayed, onSelectSession, onNewSession,
+                    onCloseSession, onReconnect, onCancelReconnect, onUnlockVault, onCredentials,
+                )
+                TerminalPanel.SEARCH -> LandscapeSearchPanel(
+                    searchText, searchResult, searchCaseSensitive, onQueryChange,
+                    onSearchPrevious, onSearchNext, onCaseSensitiveChange,
+                )
+                TerminalPanel.SNIPPETS -> LandscapeSnippetsPanel(snippets, onUseSnippet, onManageSnippets)
+                TerminalPanel.SELECTION -> LandscapeSelectionPanel(hasSelection, onCopy, onSelectAll, onCancelSelection)
+                TerminalPanel.NONE -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeSessionsPanel(
+    sessions: List<ManagedSessionState>,
+    current: ManagedSessionState?,
+    activeId: SessionId?,
+    renderingDelayed: Boolean,
+    onSelect: (SessionId) -> Unit,
+    onNew: () -> Unit,
+    onClose: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
+    onCancelReconnect: (SessionId) -> Unit,
+    onUnlockVault: () -> Unit,
+    onCredentials: () -> Unit,
+) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        item {
+            Button(onClick = onNew, enabled = current != null, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Add, null)
+                Text("新建会话")
+            }
+        }
+        items(sessions, key = { it.id.value }) { session ->
+            Surface(
+                onClick = { onSelect(session.id) },
+                color = if (session.id == activeId) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(connectionColor(session.connection), CircleShape))
+                    Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                        Text(session.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(connectionLabel(session.connection), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { onClose(session.id) }) { Icon(Icons.Default.Close, "关闭 ${session.displayName}") }
+                }
+            }
+        }
+        current?.let { session ->
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (renderingDelayed) Text("大量输出处理中，连接仍保持", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
+                    if (session.needsVaultUnlock) TextButton(onClick = onUnlockVault) { Icon(Icons.Default.Lock, null); Text("解锁凭据保险库") }
+                    when (val connection = session.connection) {
+                        ConnectionState.Connecting -> {
+                            Text(session.stage.connectingLabel(), style = MaterialTheme.typography.bodySmall)
+                            if (session.reconnectAttempt != null) TextButton(onClick = { onCancelReconnect(session.id) }) { Text("取消自动重连") }
+                        }
+                        is ConnectionState.Error -> {
+                            Text(connection.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            Row { TextButton(onClick = onCredentials) { Text("重新输入") }; TextButton(onClick = { onReconnect(session.id) }) { Text("重连") } }
+                        }
+                        is ConnectionState.Disconnected -> {
+                            Text(connection.reason, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { onReconnect(session.id) }) { Icon(Icons.Default.Refresh, null); Text("重新连接") }
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeSearchPanel(
+    query: String,
+    result: Pair<Int, Int>,
+    caseSensitive: Boolean,
+    onQueryChange: (String) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onCaseSensitiveChange: (Boolean) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(query, onQueryChange, Modifier.fillMaxWidth(), placeholder = { Text("搜索终端输出") }, singleLine = true)
+        Text(if (result.second == 0) "没有匹配" else "${result.first + 1} / ${result.second}", style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onPrevious, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("上一个") }
+            OutlinedButton(onNext, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("下一个") }
+        }
+        OutlinedButton(onClick = { onCaseSensitiveChange(!caseSensitive) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (caseSensitive) "区分大小写：开" else "区分大小写：关")
+        }
+    }
+}
+
+@Composable
+private fun LandscapeSnippetsPanel(
+    snippets: List<CommandSnippet>,
+    onSelect: (CommandSnippet) -> Unit,
+    onManage: () -> Unit,
+) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        item { TextButton(onClick = onManage, modifier = Modifier.fillMaxWidth()) { Text("管理快捷命令") } }
+        if (snippets.isEmpty()) item { Text("当前主机没有可用命令", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(snippets, key = CommandSnippet::id) { snippet ->
+            Surface(onClick = { onSelect(snippet) }, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                    Text(snippet.title, style = MaterialTheme.typography.titleSmall)
+                    Text(snippet.command, maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeSelectionPanel(
+    hasSelection: Boolean,
+    onCopy: () -> Unit,
+    onSelectAll: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(if (hasSelection) "已选择文本" else "长按或拖动以选择文本", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = onCopy, enabled = hasSelection, modifier = Modifier.fillMaxWidth()) { Text("复制") }
+        OutlinedButton(onClick = onSelectAll, modifier = Modifier.fillMaxWidth()) { Text("全选") }
+        TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("取消选择") }
+    }
+}
+
+@Composable
+private fun LandscapeExtraKeys(
+    keys: List<ExtraKeyId>,
+    ctrlArmed: Boolean,
+    onSend: (ByteArray) -> Unit,
+    onShowKeyboard: () -> Unit,
+    onArmCtrl: () -> Unit,
+) {
+    Surface(Modifier.width(160.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            keys.chunked(2).forEach { rowKeys ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    rowKeys.forEach { key ->
+                        val action = when (key) {
+                            ExtraKeyId.KEYBOARD -> onShowKeyboard
+                            ExtraKeyId.CTRL -> onArmCtrl
+                            else -> ({ key.sequence?.let { onSend(it.encodeToByteArray()) }; Unit })
+                        }
+                        OutlinedButton(
+                            onClick = action,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                if (key == ExtraKeyId.CTRL && ctrlArmed) "Ctrl…" else key.label,
+                                maxLines = 1,
+                                softWrap = false,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                    if (rowKeys.size == 1) Box(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortraitTerminalStatus(
+    current: ManagedSessionState?,
+    renderingDelayed: Boolean,
+    onUnlockVault: () -> Unit,
+    onCancelReconnect: (SessionId) -> Unit,
+    onCredentials: () -> Unit,
+    onReconnect: (SessionId) -> Unit,
+) {
+    if (current?.needsVaultUnlock == true) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
+            Text("保险库已锁定，重连需要验证身份", Modifier.weight(1f).padding(horizontal = 8.dp))
+            TextButton(onClick = onUnlockVault) { Text("解锁") }
+        }
+    }
+    if (renderingDelayed) {
+        Text(
+            "终端正在处理大量输出，SSH 连接仍保持中…",
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.tertiary,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    when (val connection = current?.connection ?: ConnectionState.Idle) {
+        ConnectionState.Connecting -> Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(24.dp).padding(end = 6.dp))
+            Text(if (current?.reconnectAttempt == null) current?.stage?.connectingLabel() ?: "正在建立安全连接…" else "正在执行第 ${current.reconnectAttempt}/3 次自动重连…")
+            if (current?.reconnectAttempt != null) TextButton(onClick = { onCancelReconnect(current.id) }) { Text("取消") }
+        }
+        is ConnectionState.Error -> Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(connection.message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = onCredentials) { Text("重新输入") }
+            current?.let { TextButton(onClick = { onReconnect(it.id) }) { Text("重连") } }
+        }
+        is ConnectionState.Disconnected -> Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(connection.reason, Modifier.weight(1f))
+            current?.let { TextButton(onClick = { onReconnect(it.id) }) { Text("重新连接") } }
+        }
+        else -> Unit
+    }
 }
 
 private fun ManagedSessionState.credentialProfile(): HostProfile =
@@ -1126,7 +1636,6 @@ private class TerminalBridge(
     private val controller: TerminalController,
     private val inputCallback: (ByteArray) -> Unit,
     private val resizeCallback: (Int, Int) -> Unit,
-    private val readyCallback: () -> Unit,
 ) {
     @JavascriptInterface fun onInput(base64: String) {
         runCatching { Base64.decode(base64, Base64.DEFAULT) }.onSuccess(inputCallback)
@@ -1168,7 +1677,6 @@ private class TerminalBridge(
         view.post {
             controller.markReady()
             resizeCallback(columns, rows)
-            readyCallback()
         }
     }
 }
@@ -1180,9 +1688,14 @@ private fun TerminalWebView(
     initialBackground: String,
     onInput: (ByteArray) -> Unit,
     onResize: (Int, Int) -> Unit,
-    onReady: () -> Unit,
+    onSurfaceCreated: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // WebView 的 JS bridge 生命周期长于一次 Compose 重组，必须间接读取最新回调；
+    // 否则切换会话后 bridge 仍会把输入和 resize 发给旧会话。
+    val inputState = rememberUpdatedState(onInput)
+    val resizeState = rememberUpdatedState(onResize)
+    val surfaceCreatedState = rememberUpdatedState(onSurfaceCreated)
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -1208,7 +1721,16 @@ private fun TerminalWebView(
                         request.url.host != "appassets.androidplatform.net"
                 }
                 controller.attach(this)
-                addJavascriptInterface(TerminalBridge(this, controller, onInput, onResize, onReady), "AndroidTerminal")
+                addJavascriptInterface(
+                    TerminalBridge(
+                        this,
+                        controller,
+                        { inputState.value(it) },
+                        { columns, rows -> resizeState.value(columns, rows) },
+                    ),
+                    "AndroidTerminal",
+                )
+                post { surfaceCreatedState.value() }
                 loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
             }
         },
@@ -1216,57 +1738,40 @@ private fun TerminalWebView(
     )
 }
 
-/**
- * 横屏沉浸模式下的顶部控制条：返回、会话切换、软键盘（物理键盘时）、更多菜单与展开工具栏。
- * 悬浮在终端之上，不占用终端布局空间。
- */
 @Composable
-private fun TerminalChromeStrip(
-    hostSessions: List<ManagedSessionState>,
-    activeId: SessionId?,
-    hasHardwareKeyboard: Boolean,
-    showMoreMenu: Boolean,
-    onShowMoreMenuChange: (Boolean) -> Unit,
-    onSelect: (SessionId) -> Unit,
-    onBack: () -> Unit,
-    onExpand: () -> Unit,
-    onShowKeyboard: () -> Unit,
-    menuItems: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
-            Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                hostSessions.forEach { session ->
-                    FilterChip(
-                        selected = session.id == activeId,
-                        onClick = { onSelect(session.id) },
-                        label = { Text(session.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    )
-                }
+private fun TerminalSystemBarsEffect(isLandscape: Boolean) {
+    val activity = LocalContext.current.findActivity() ?: return
+    DisposableEffect(activity, isLandscape) {
+        if (!isLandscape) return@DisposableEffect onDispose {}
+        val window = activity.window
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        val previousBehavior = controller.systemBarsBehavior
+        val previousCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode
+        } else {
+            null
+        }
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.statusBars())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
-            if (hasHardwareKeyboard) {
-                IconButton(onClick = onShowKeyboard) { Icon(Icons.Default.Keyboard, "显示软键盘") }
+        }
+        onDispose {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+            controller.systemBarsBehavior = previousBehavior
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && previousCutoutMode != null) {
+                window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = previousCutoutMode }
             }
-            Box {
-                IconButton(onClick = { onShowMoreMenuChange(true) }) { Icon(Icons.Default.MoreVert, "更多") }
-                DropdownMenu(expanded = showMoreMenu, onDismissRequest = { onShowMoreMenuChange(false) }) { menuItems() }
-            }
-            IconButton(onClick = onExpand) { Icon(Icons.Default.KeyboardArrowDown, "展开工具栏") }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** 顶部栏与沉浸控制条共用的「更多」菜单内容。 */
