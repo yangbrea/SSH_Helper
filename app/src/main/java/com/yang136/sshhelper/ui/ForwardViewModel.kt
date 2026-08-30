@@ -58,6 +58,28 @@ internal fun PortForwardRule.routeText(state: ForwardState?): String {
     }
 }
 
+/**
+ * Builds the HTTP URL used by the “quick browser open” action for a running local forward.
+ * Only LOCAL forwards listen on this Android device, and only while they are actually
+ * running (the real port is known for auto-allocated rules).
+ */
+internal fun browserUrlForForward(rule: PortForwardRule, state: ForwardState?): String? {
+    if (rule.type != ForwardType.LOCAL) return null
+    val port = when (state) {
+        is ForwardState.Running -> state.actualPort
+        else -> return null
+    }
+    if (port !in 1..65535) return null
+
+    val rawHost = rule.bindAddress.trim()
+    val host = when (rawHost) {
+        "", "0.0.0.0" -> "127.0.0.1"
+        "::" -> "[::1]"
+        else -> if (rawHost.contains(':') && !rawHost.startsWith("[")) "[$rawHost]" else rawHost
+    }
+    return "http://$host:$port/"
+}
+
 internal fun ForwardState.label(): String = when (this) {
     ForwardState.Stopped -> "已停止"
     ForwardState.Starting -> "启动中"

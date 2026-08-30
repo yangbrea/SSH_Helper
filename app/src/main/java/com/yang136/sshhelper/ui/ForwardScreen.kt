@@ -1,7 +1,9 @@
 package com.yang136.sshhelper.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -115,6 +118,9 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
             vm.start(ruleId)
         }
     }
+    val openBrowser: (String) -> Unit = { url ->
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
 
     val running = rules.filter { states[it.id]?.isActive() == true }
     val stopped = rules.filter { states[it.id]?.isActive() != true }
@@ -163,6 +169,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                                 onStart = { startForward(rule.id) },
                                 onStop = { vm.stop(rule.id) },
                                 onDelete = { deleting = rule },
+                                onOpenBrowser = openBrowser,
                             )
                         }
                     }
@@ -175,6 +182,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                                 onStart = { startForward(rule.id) },
                                 onStop = { vm.stop(rule.id) },
                                 onDelete = { deleting = rule },
+                                onOpenBrowser = openBrowser,
                             )
                         }
                     }
@@ -217,6 +225,7 @@ private fun ForwardRuleCard(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onDelete: () -> Unit,
+    onOpenBrowser: (String) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
@@ -247,6 +256,15 @@ private fun ForwardRuleCard(
                     FilledTonalButton(onClick = onStop) { Icon(Icons.Default.Stop, null, Modifier.size(16.dp)); Text("停止", Modifier.padding(start = 6.dp)) }
                 } else {
                     FilledTonalButton(onClick = onStart, enabled = state !is ForwardState.Reconnecting) { Icon(Icons.Default.PlayArrow, null, Modifier.size(16.dp)); Text("启动", Modifier.padding(start = 6.dp)) }
+                }
+                if (rule.type == ForwardType.LOCAL && state is ForwardState.Running) {
+                    val url = browserUrlForForward(rule, state)
+                    if (url != null) {
+                        OutlinedButton(onClick = { onOpenBrowser(url) }) {
+                            Icon(Icons.Default.OpenInBrowser, null, Modifier.size(16.dp))
+                            Text("浏览器", Modifier.padding(start = 6.dp))
+                        }
+                    }
                 }
             }
         }
