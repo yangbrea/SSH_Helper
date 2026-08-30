@@ -65,109 +65,194 @@ data class TerminalPalette(
 
 val LocalTerminalPalette = staticCompositionLocalOf { oceanTerminalPalette(true) }
 
-private val OceanDark = darkColorScheme(
+private fun presetColorScheme(
+    dark: Boolean,
+    primary: Color,
+    secondary: Color,
+    tertiary: Color,
+    background: Color,
+    surface: Color,
+    surfaceVariant: Color,
+    onPrimary: Color,
+    onBackground: Color,
+    onSurfaceVariant: Color,
+    outline: Color,
+    surfaceContainer: Color = surface,
+    surfaceContainerHigh: Color = surfaceVariant,
+): ColorScheme {
+    val accentContainerAmount = if (dark) .24f else .13f
+    val primaryContainer = lerp(surface, primary, accentContainerAmount)
+    val secondaryContainer = lerp(surface, secondary, accentContainerAmount)
+    val tertiaryContainer = lerp(surface, tertiary, accentContainerAmount)
+    val onAccent = if (dark) background else Color.White
+    val error = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A)
+    val errorContainer = if (dark) Color(0xFF93000A) else Color(0xFFFFDAD6)
+    return (if (dark) darkColorScheme() else lightColorScheme()).copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = onBackground,
+        inversePrimary = lerp(primary, onPrimary, if (dark) .32f else .18f),
+        secondary = secondary,
+        onSecondary = onAccent,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onBackground,
+        tertiary = tertiary,
+        onTertiary = onAccent,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onBackground,
+        background = background,
+        onBackground = onBackground,
+        surface = surface,
+        onSurface = onBackground,
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = onSurfaceVariant,
+        surfaceTint = primary,
+        inverseSurface = onBackground,
+        inverseOnSurface = background,
+        error = error,
+        onError = if (dark) Color(0xFF690005) else Color.White,
+        errorContainer = errorContainer,
+        onErrorContainer = if (dark) Color(0xFFFFDAD6) else Color(0xFF410002),
+        outline = outline,
+        outlineVariant = lerp(surfaceVariant, outline, .48f),
+        scrim = Color.Black,
+        surfaceBright = if (dark) lerp(surface, onBackground, .10f) else Color.White,
+        surfaceDim = if (dark) background else lerp(background, outline, .14f),
+        surfaceContainerLowest = if (dark) lerp(background, Color.Black, .18f) else Color.White,
+        surfaceContainerLow = lerp(background, surface, .55f),
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceVariant,
+    )
+}
+
+private val OceanDark = presetColorScheme(
+    dark = true,
     primary = Cyan400,
     secondary = Teal400,
+    tertiary = Color(0xFF8CB4FF),
     background = Navy950,
     surface = Navy900,
     surfaceVariant = Navy800,
     onPrimary = Navy950,
     onBackground = Color(0xFFE6F7FA),
-    onSurface = Color(0xFFE6F7FA),
-    error = Color(0xFFFF7B7B),
+    onSurfaceVariant = Color(0xFFB5CBD1),
+    outline = Color(0xFF73909A),
     surfaceContainer = Color(0xFF102533),
     surfaceContainerHigh = Color(0xFF173241),
-    outline = Color(0xFF73909A),
 )
 
-private val OceanLight = lightColorScheme(
+private val OceanLight = presetColorScheme(
+    dark = false,
     primary = Color(0xFF007C91),
     secondary = Color(0xFF00796B),
+    tertiary = Color(0xFF365E9D),
     background = Color(0xFFF4FAFB),
     surface = Color.White,
     surfaceVariant = Color(0xFFDCEEF1),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF15242B),
+    onSurfaceVariant = Color(0xFF455E65),
+    outline = Color(0xFF657A80),
     surfaceContainer = Color(0xFFEAF3F5),
     surfaceContainerHigh = Color(0xFFDDEBED),
-    outline = Color(0xFF657A80),
 )
 
-private val EmeraldDark = darkColorScheme(
+private val EmeraldDark = presetColorScheme(
+    dark = true,
     primary = Color(0xFF35E07F),
     secondary = Color(0xFF73D99D),
+    tertiary = Color(0xFFC1E86B),
     background = Color(0xFF06130E),
     surface = Color(0xFF0B2118),
     surfaceVariant = Color(0xFF123426),
     onPrimary = Color(0xFF00210D),
     onBackground = Color(0xFFD6FFE4),
-    onSurface = Color(0xFFD6FFE4),
+    onSurfaceVariant = Color(0xFFA9CFB7),
+    outline = Color(0xFF6E947D),
+    surfaceContainer = Color(0xFF0E291E),
+    surfaceContainerHigh = Color(0xFF143629),
 )
 
-private val EmeraldLight = lightColorScheme(
+private val EmeraldLight = presetColorScheme(
+    dark = false,
     primary = Color(0xFF08783B),
     secondary = Color(0xFF286B45),
+    tertiary = Color(0xFF4F6800),
     background = Color(0xFFF3FBF5),
     surface = Color.White,
     surfaceVariant = Color(0xFFDCEFE2),
+    onPrimary = Color.White,
+    onBackground = Color(0xFF15251B),
+    onSurfaceVariant = Color(0xFF496253),
+    outline = Color(0xFF687C6E),
+    surfaceContainer = Color(0xFFEAF5ED),
+    surfaceContainerHigh = Color(0xFFDCEFE2),
 )
 
-private val AmberDark = darkColorScheme(
+private val AmberDark = presetColorScheme(
+    dark = true,
     primary = Color(0xFFD9B45F),
     secondary = Color(0xFFA98D50),
+    tertiary = Color(0xFF8FD7C1),
     background = Color(0xFF0B0B0D),
     surface = Color(0xFF15151A),
     surfaceVariant = Color(0xFF22222B),
     onPrimary = Color(0xFF241A00),
     onBackground = Color(0xFFF2ECDD),
-    onSurface = Color(0xFFF2ECDD),
     onSurfaceVariant = Color(0xFFB3AC9C),
+    outline = Color(0xFF7C7565),
     surfaceContainer = Color(0xFF15151A),
     surfaceContainerHigh = Color(0xFF202027),
-    outline = Color(0xFF7C7565),
 )
 
-private val AmberLight = lightColorScheme(
+private val AmberLight = presetColorScheme(
+    dark = false,
     primary = Color(0xFF765B12),
     secondary = Color(0xFF6E5F3C),
+    tertiary = Color(0xFF356858),
     background = Color(0xFFFAF8F2),
     surface = Color(0xFFFFFFFD),
     surfaceVariant = Color(0xFFECE7DA),
     onPrimary = Color.White,
     onBackground = Color(0xFF29251D),
-    onSurface = Color(0xFF29251D),
     onSurfaceVariant = Color(0xFF625D51),
+    outline = Color(0xFF817A6B),
     surfaceContainer = Color(0xFFF3F0E7),
     surfaceContainerHigh = Color(0xFFECE7DA),
-    outline = Color(0xFF817A6B),
 )
 
-private val VioletDark = darkColorScheme(
+private val VioletDark = presetColorScheme(
+    dark = true,
     primary = Color(0xFFB8C4D6),
     secondary = Color(0xFF8FA7B8),
+    tertiary = Color(0xFFA7C8E8),
     background = Color(0xFF0D1117),
     surface = Color(0xFF161C24),
     surfaceVariant = Color(0xFF232C37),
     onPrimary = Color(0xFF202832),
     onBackground = Color(0xFFE9EEF5),
-    onSurface = Color(0xFFE9EEF5),
     onSurfaceVariant = Color(0xFFB7C1CE),
+    outline = Color(0xFF718090),
     surfaceContainer = Color(0xFF161C24),
     surfaceContainerHigh = Color(0xFF202833),
-    outline = Color(0xFF718090),
 )
 
-private val VioletLight = lightColorScheme(
+private val VioletLight = presetColorScheme(
+    dark = false,
     primary = Color(0xFF465A70),
     secondary = Color(0xFF526B79),
+    tertiary = Color(0xFF3D6380),
     background = Color(0xFFF5F7FA),
     surface = Color.White,
     surfaceVariant = Color(0xFFE1E7ED),
     onPrimary = Color.White,
     onBackground = Color(0xFF1A2028),
-    onSurface = Color(0xFF1A2028),
     onSurfaceVariant = Color(0xFF515C68),
+    outline = Color(0xFF6E7B89),
     surfaceContainer = Color(0xFFEDF1F5),
     surfaceContainerHigh = Color(0xFFE1E7ED),
-    outline = Color(0xFF6E7B89),
 )
 
 private val SshTypography = Typography(

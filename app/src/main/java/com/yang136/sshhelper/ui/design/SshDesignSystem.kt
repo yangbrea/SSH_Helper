@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.ui.imageAwareContainerColor
+import com.yang136.sshhelper.ui.imageAwareContentColor
 import com.yang136.sshhelper.ui.imageAwareScaffoldColor
 
 @Immutable
@@ -116,6 +117,9 @@ fun SshTopAppBar(
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = if (allowImageBackground) imageAwareScaffoldColor() else MaterialTheme.colorScheme.surface,
+            navigationIconContentColor = imageAwareContentColor(),
+            titleContentColor = imageAwareContentColor(),
+            actionIconContentColor = imageAwareContentColor(),
         ),
     )
 }
@@ -237,7 +241,10 @@ fun PreferenceSwitch(
 
 @Composable
 fun PreferenceGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer))) {
+    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+        containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+        contentColor = imageAwareContentColor(),
+    )) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { content() }
     }
 }
@@ -247,7 +254,10 @@ fun SshHostCard(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Co
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer)),
+        colors = CardDefaults.cardColors(
+            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+            contentColor = imageAwareContentColor(),
+        ),
     ) { Column(Modifier.fillMaxWidth().padding(16.dp)) { content() } }
 }
 
@@ -263,7 +273,10 @@ fun SshSessionRow(modifier: Modifier = Modifier, content: @Composable RowScope.(
 
 @Composable
 fun SshActionTile(icon: ImageVector, title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh))) {
+    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(
+        containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentColor = imageAwareContentColor(),
+    )) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
             Text(title, style = MaterialTheme.typography.labelLarge)

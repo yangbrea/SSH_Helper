@@ -54,6 +54,46 @@ class DesignSystemTest {
     }
 
     @Test
+    fun presetSchemes_neverLeakMaterialDefaultPurpleOrPinkIntoAccentRoles() {
+        val materialDefaults = setOf(
+            Color(0xFFD0BCFF), Color(0xFFCCC2DC), Color(0xFFEFB8C8),
+            Color(0xFF4F378B), Color(0xFF4A4458), Color(0xFF633B48),
+            Color(0xFF6750A4), Color(0xFF625B71), Color(0xFF7D5260),
+            Color(0xFFEADDFF), Color(0xFFE8DEF8), Color(0xFFFFD8E4),
+        )
+        ThemePreset.entries.forEach { preset ->
+            listOf(true, false).forEach { dark ->
+                val scheme = colorScheme(preset, dark)
+                val accents = listOf(
+                    scheme.primary,
+                    scheme.primaryContainer,
+                    scheme.secondary,
+                    scheme.secondaryContainer,
+                    scheme.tertiary,
+                    scheme.tertiaryContainer,
+                    scheme.inversePrimary,
+                )
+                accents.forEach { color ->
+                    assertFalse("$preset dark=$dark 泄漏 Material 默认紫色/粉色：$color", color in materialDefaults)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun matrixGreen_usesGreenAndLimeForSelectionRoles() {
+        val dark = colorScheme(ThemePreset.EMERALD, true)
+        val light = colorScheme(ThemePreset.EMERALD, false)
+
+        assertEquals(Color(0xFF35E07F), dark.primary)
+        assertEquals(Color(0xFFC1E86B), dark.tertiary)
+        assertEquals(Color(0xFF08783B), light.primary)
+        assertEquals(Color(0xFF4F6800), light.tertiary)
+        assertTrue(dark.primaryContainer != dark.secondaryContainer)
+        assertTrue(light.primaryContainer != light.secondaryContainer)
+    }
+
+    @Test
     fun terminalPalettes_lightAndDarkVariantsStayStable() {
         val expected = mapOf(
             (ThemePreset.OCEAN to true) to Triple("#07131f", "#dff8fb", "#22d3ee"),

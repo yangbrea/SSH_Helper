@@ -59,6 +59,7 @@ fun SnippetsScreen(
     BackHandler(onBack = onBack)
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             TopAppBar(
                 title = { Text("快捷命令") },

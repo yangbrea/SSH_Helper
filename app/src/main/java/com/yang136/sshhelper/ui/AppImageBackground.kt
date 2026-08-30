@@ -30,6 +30,9 @@ fun imageAwareContainerColor(color: Color, alpha: Float = 0.86f): Color =
     if (LocalImageBackgroundActive.current) color.copy(alpha = alpha) else color
 
 @Composable
+fun imageAwareContentColor(): Color = MaterialTheme.colorScheme.onSurface
+
+@Composable
 fun AppImageBackground(
     bitmap: Bitmap?,
     overlayStrength: Float,

@@ -94,6 +94,7 @@ fun LanDiscoveryScreen(
 
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
                 title = if (state.mode == ScanMode.SSH) "发现 SSH 主机" else "发现局域网设备",

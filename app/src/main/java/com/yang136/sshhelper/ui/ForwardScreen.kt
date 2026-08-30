@@ -121,6 +121,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
 
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
                 title = "端口转发",

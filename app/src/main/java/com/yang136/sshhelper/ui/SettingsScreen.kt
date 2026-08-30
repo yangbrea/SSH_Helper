@@ -267,6 +267,7 @@ fun SettingsScreen(
     Scaffold(
         modifier = modifier,
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
                 title = selected?.title ?: "设置",
@@ -430,7 +431,10 @@ private fun AppearanceSettings(
                     val selected = settings.themePreset == preview.preset
                     Card(
                         onClick = { onPreset(preview.preset) },
-                        colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+                            contentColor = imageAwareContentColor(),
+                        ),
                         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -483,7 +487,10 @@ private fun ImageThemeControls(
     var pendingDelete by remember { mutableStateOf<String?>(null) }
     val light = settings.imageThemeVariant == ImageThemeVariant.BRIGHT
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh))) {
+        Card(colors = CardDefaults.cardColors(
+            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentColor = imageAwareContentColor(),
+        )) {
             Box(Modifier.fillMaxWidth().height(190.dp)) {
                 state.bitmap?.let { bitmap ->
                     Image(bitmap.asImageBitmap(), "当前图片背景预览", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

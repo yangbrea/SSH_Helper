@@ -107,6 +107,7 @@ fun HostEditorScreen(
 
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
                 title = if (hostId == 0L) "添加主机" else "编辑主机",
