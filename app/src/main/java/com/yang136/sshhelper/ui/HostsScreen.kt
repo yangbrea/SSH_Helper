@@ -1,6 +1,8 @@
 package com.yang136.sshhelper.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +25,7 @@ import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.ssh.*
 import com.yang136.sshhelper.ui.design.*
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HostsScreen(
     onAdd: () -> Unit,
@@ -54,6 +57,7 @@ fun HostsScreen(
     var confirmExit by remember { mutableStateOf(false) }
     var sessionLimitReached by remember { mutableStateOf(false) }
     var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
+    var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
     val visibleHosts = remember(hosts, query) {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) hosts else hosts.filter {
@@ -67,6 +71,7 @@ fun HostsScreen(
     Scaffold(
         modifier = modifier,
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
                 title = "主机",
@@ -101,7 +106,15 @@ fun HostsScreen(
                 }
                 if (sessionsExpanded) {
                     items(sessions.take(3), key = { "session-${it.id.value}" }) { session ->
-                        Card(onClick = { onOpenSession(session.id) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f))) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = { onOpenSession(session.id) },
+                                    onLongClick = { deleteArmedSessionId = session.id },
+                                ),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f)),
+                        ) {
                             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -114,6 +127,14 @@ fun HostsScreen(
                                 }
                                 val presentation = session.connection.presentation()
                                 SshStatusBadge(presentation.first, presentation.second)
+                                if (deleteArmedSessionId == session.id) {
+                                    TextButton(onClick = {
+                                        onCloseSession(session.id)
+                                        deleteArmedSessionId = null
+                                    }) {
+                                        Text("删除", color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
                                 IconButton(onClick = { closingSession = session }) { Icon(Icons.Default.Close, "关闭会话") }
                             }
                         }

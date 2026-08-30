@@ -1,7 +1,9 @@
 package com.yang136.sshhelper.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,8 +25,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,11 +52,13 @@ import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import java.io.File
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ActivityScreen(
     hosts: List<HostProfile>,
     sessions: List<ManagedSessionState>,
     onOpenSession: (SessionId) -> Unit,
+    onCloseSession: (SessionId) -> Unit,
     onOpenHost: (Long) -> Unit,
     onOpenForwards: (Long) -> Unit,
     onOpenDocuments: () -> Unit,
@@ -64,11 +72,13 @@ fun ActivityScreen(
     val writebacks by app.container.documentAccessManager.writebacks.collectAsStateWithLifecycle()
     val state = buildActivityUiState(sessions, transfers, rules, forwardStates, writebacks.size)
     val hostNames = hosts.associate { it.id to it.name }
+    var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
     BackHandler(onBack = onBack)
 
     Scaffold(
         modifier = modifier,
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         topBar = { SshTopAppBar("活动", subtitle = "会话、传输与隧道的实时状态") },
     ) { padding ->
         LazyColumn(
@@ -105,6 +115,12 @@ fun ActivityScreen(
                         summary = "${session.profile.name} · ${session.connection.presentation().first}",
                         badge = session.connection.presentation(),
                         onClick = { onOpenSession(session.id) },
+                        onLongClick = { deleteArmedSessionId = session.id },
+                        deleteArmed = deleteArmedSessionId == session.id,
+                        onDelete = {
+                            onCloseSession(session.id)
+                            deleteArmedSessionId = null
+                        },
                     )
                 }
             }
@@ -136,18 +152,56 @@ fun ActivityScreen(
             }
         }
     }
+
 }
 
 @Composable
-private fun ActivityRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, summary: String, badge: Pair<String, SshStatusTone>, onClick: () -> Unit) {
-    Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun ActivityRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    summary: String,
+    badge: Pair<String, SshStatusTone>,
+    onLongClick: (() -> Unit)? = null,
+    deleteArmed: Boolean = false,
+    onDelete: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    if (onLongClick != null) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        ) {
+            ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
+        }
+    } else {
+        Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+            ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
+        }
+    }
+}
+
+@Composable
+private fun ActivityRowContent(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    summary: String,
+    badge: Pair<String, SshStatusTone>,
+    deleteArmed: Boolean = false,
+    onDelete: (() -> Unit)? = null,
+) {
+    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        SshStatusBadge(badge.first, badge.second)
+        if (deleteArmed && onDelete != null) {
+            TextButton(onClick = onDelete) {
+                Text("删除", color = MaterialTheme.colorScheme.error)
             }
-            SshStatusBadge(badge.first, badge.second)
         }
     }
 }

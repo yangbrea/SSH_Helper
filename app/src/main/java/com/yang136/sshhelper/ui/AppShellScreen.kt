@@ -1,5 +1,12 @@
 package com.yang136.sshhelper.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -37,9 +44,11 @@ fun AppShellScreen(
     }
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
+        contentColor = imageAwareContentColor(),
         bottomBar = {
             if (!detailVisible) NavigationBar(
                 containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer, .9f),
+                contentColor = imageAwareContentColor(),
             ) {
                 AppDestination.entries.forEach { destination ->
                     NavigationBarItem(
@@ -54,16 +63,36 @@ fun AppShellScreen(
     ) { padding ->
         val modifier = Modifier.padding(padding)
         Box {
-            stateHolder.SaveableStateProvider(selected.id) {
-                when (selected) {
-                    AppDestination.HOSTS -> hosts(modifier, navigate)
-                    AppDestination.ACTIVITY -> activity(modifier, navigate)
-                    AppDestination.SETTINGS -> settings(modifier, { detailVisible = it }, navigate)
+            AnimatedContent(
+                targetState = selected,
+                transitionSpec = {
+                    val direction = if (targetState.ordinal > initialState.ordinal) {
+                        AnimatedContentTransitionScope.SlideDirection.Left
+                    } else {
+                        AnimatedContentTransitionScope.SlideDirection.Right
+                    }
+                    (slideIntoContainer(direction, tween(BOTTOM_NAV_SLIDE_MILLIS)) +
+                        fadeIn(tween(QUICK_FADE_MILLIS))) togetherWith
+                        (slideOutOfContainer(direction, tween(BOTTOM_NAV_SLIDE_MILLIS)) +
+                            fadeOut(tween(QUICK_FADE_MILLIS))) using
+                        SizeTransform(clip = true)
+                },
+                label = "bottom-navigation-content",
+            ) { destination ->
+                stateHolder.SaveableStateProvider(destination.id) {
+                    when (destination) {
+                        AppDestination.HOSTS -> hosts(modifier, navigate)
+                        AppDestination.ACTIVITY -> activity(modifier, navigate)
+                        AppDestination.SETTINGS -> settings(modifier, { detailVisible = it }, navigate)
+                    }
                 }
             }
         }
     }
 }
+
+private const val BOTTOM_NAV_SLIDE_MILLIS = 190
+private const val QUICK_FADE_MILLIS = 80
 
 private fun AppDestination.icon() = when (this) {
     AppDestination.HOSTS -> Icons.Default.Computer

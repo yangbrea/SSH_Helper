@@ -5,6 +5,12 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
@@ -21,6 +27,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -33,6 +40,7 @@ import com.yang136.sshhelper.ui.HostWorkspaceScreen
 import com.yang136.sshhelper.ui.ActivityScreen
 import com.yang136.sshhelper.ui.AppImageBackground
 import com.yang136.sshhelper.ui.AppDestination
+import com.yang136.sshhelper.ui.imageAwareContentColor
 import com.yang136.sshhelper.ui.AppShellScreen
 import com.yang136.sshhelper.ui.ImageCropScreen
 import com.yang136.sshhelper.ui.SettingsScreen
@@ -130,6 +138,7 @@ class MainActivity : FragmentActivity() {
                         Surface(
                             Modifier.fillMaxSize(),
                             color = if (imageActive) Color.Transparent else androidx.compose.material3.MaterialTheme.colorScheme.background,
+                            contentColor = imageAwareContentColor(),
                         ) {
                     val navController = rememberNavController()
                     val initialDestination = if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) AppDestination.SETTINGS else AppDestination.HOSTS
@@ -139,7 +148,14 @@ class MainActivity : FragmentActivity() {
                         intent?.removeExtra(EXTRA_SETTINGS_SECTION)
                     }
                     val terminalPalette = LocalTerminalPalette.current
-                    NavHost(navController = navController, startDestination = "home") {
+                    NavHost(
+                        navController = navController,
+                        startDestination = "home",
+                        enterTransition = { quickFadeInTransition() },
+                        exitTransition = { quickFadeOutTransition() },
+                        popEnterTransition = { quickFadeInTransition() },
+                        popExitTransition = { quickFadeOutTransition() },
+                    ) {
                         composable("home") {
                             AppShellScreen(
                                 initialDestination = initialDestination,
@@ -171,7 +187,7 @@ class MainActivity : FragmentActivity() {
                                 vaultState = vaultState,
                                 onVaultClick = {
                                     when (vaultState) {
-                                        VaultState.Disabled, is VaultState.Unavailable -> navController.navigate("settings")
+                                        VaultState.Disabled, is VaultState.Unavailable -> navController.navigate("settings?section=security")
                                         VaultState.Locked -> requestVault(request = { container.credentialVault.unlock() })
                                         is VaultState.Unlocked -> container.credentialVault.lock()
                                     }
@@ -188,6 +204,7 @@ class MainActivity : FragmentActivity() {
                                             else navController.navigate("terminal/${session.profile.id}/${id.value}")
                                         }
                                     },
+                                    onCloseSession = sessionsViewModel::close,
                                     onOpenHost = { navController.navigate("host/$it") },
                                     onOpenForwards = { navController.navigate("forwards/$it") },
                                     onOpenDocuments = { navigate(AppDestination.SETTINGS) },
@@ -229,8 +246,21 @@ class MainActivity : FragmentActivity() {
                                 ) },
                             )
                         }
-                        composable("settings") {
+                        composable(
+                            route = "settings?section={section}",
+                            arguments = listOf(
+                                navArgument("section") { type = NavType.StringType; defaultValue = "" },
+                            ),
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) { entry ->
+                            val settingsSection = SettingsDestination.fromId(
+                                entry.arguments?.getString("section")?.takeIf { it.isNotBlank() },
+                            )
                             SettingsScreen(
+                                initialDestination = settingsSection,
                                 settings = settings,
                                 imageThemeState = imageTheme,
                                 onThemeModeChange = settingsViewModel::setThemeMode,
@@ -260,7 +290,13 @@ class MainActivity : FragmentActivity() {
                                 onBack = navController::popBackStack,
                             )
                         }
-                        composable("snippets") {
+                        composable(
+                            route = "snippets",
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) {
                             SnippetsScreen(
                                 snippets = snippets,
                                 hosts = hosts,
@@ -269,7 +305,13 @@ class MainActivity : FragmentActivity() {
                                 onBack = navController::popBackStack,
                             )
                         }
-                        composable("discover") {
+                        composable(
+                            route = "discover",
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) {
                             LanDiscoveryScreen(
                                 hosts = hosts,
                                 onSelect = { name, address, port, existingHostId ->
@@ -449,3 +491,24 @@ class MainActivity : FragmentActivity() {
         const val EXTRA_SETTINGS_SECTION = "com.yang136.sshhelper.SETTINGS_SECTION"
     }
 }
+
+private const val QUICK_NAV_FADE_MILLIS = 120
+private const val TOP_BAR_SLIDE_MILLIS = 220
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.quickFadeInTransition(): EnterTransition =
+    fadeIn(tween(QUICK_NAV_FADE_MILLIS))
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.quickFadeOutTransition(): ExitTransition =
+    fadeOut(tween(QUICK_NAV_FADE_MILLIS))
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.topBarEnterTransition(): EnterTransition =
+    slideIntoContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+        animationSpec = tween(TOP_BAR_SLIDE_MILLIS),
+    ) + fadeIn(tween(QUICK_NAV_FADE_MILLIS))
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.topBarExitTransition(): ExitTransition =
+    slideOutOfContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+        animationSpec = tween(TOP_BAR_SLIDE_MILLIS),
+    ) + fadeOut(tween(QUICK_NAV_FADE_MILLIS))
