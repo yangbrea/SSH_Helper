@@ -52,9 +52,11 @@ class AndroidDiagnosticBackend(context: Context) : DiagnosticBackend {
             network = descriptor,
             interfaceName = properties.interfaceName,
             addresses = properties.linkAddresses.map { "${it.address.hostAddress}/${it.prefixLength}" },
-            gateways = properties.routes.mapNotNull { it.gateway?.hostAddress }.distinct(),
+            gateways = properties.routes.mapNotNull { route ->
+                route.gateway?.takeUnless(InetAddress::isAnyLocalAddress)?.hostAddress
+            }.distinct(),
             dnsServers = properties.dnsServers.mapNotNull(InetAddress::getHostAddress),
-            mtu = properties.mtu.takeIf { it > 0 },
+            mtu = if (Build.VERSION.SDK_INT >= 29) properties.mtu.takeIf { it > 0 } else null,
             privateDnsActive = Build.VERSION.SDK_INT >= 28 && properties.isPrivateDnsActive,
             privateDnsServerName = if (Build.VERSION.SDK_INT >= 28) properties.privateDnsServerName else null,
             httpProxy = properties.httpProxy?.let { proxy -> "${proxy.host}:${proxy.port}" },
