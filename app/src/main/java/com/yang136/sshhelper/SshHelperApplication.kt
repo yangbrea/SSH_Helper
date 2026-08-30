@@ -26,6 +26,8 @@ import com.yang136.sshhelper.discovery.AndroidArpTableReader
 import com.yang136.sshhelper.discovery.AndroidMdnsDiscovery
 import com.yang136.sshhelper.discovery.AndroidNetworkEnvironment
 import com.yang136.sshhelper.discovery.AndroidTcpServiceProbe
+import com.yang136.sshhelper.diagnostics.AndroidDiagnosticBackend
+import com.yang136.sshhelper.diagnostics.DefaultNetworkDiagnosticsEngine
 import com.yang136.sshhelper.discovery.AndroidSsdpDiscovery
 import com.yang136.sshhelper.discovery.AndroidDeviceDescriptionRepository
 import com.yang136.sshhelper.discovery.AssetMacVendorResolver
@@ -78,6 +80,7 @@ class AppContainer(val application: Application) {
         arpTableReader = AndroidArpTableReader(),
         macVendorResolver = AssetMacVendorResolver(application),
     )
+    val networkDiagnosticsEngine = DefaultNetworkDiagnosticsEngine(AndroidDiagnosticBackend(application))
 
     init {
         // 凭据租约按"活动转发"判定：会话管理器查询转发管理器当前活跃转发的会话。
