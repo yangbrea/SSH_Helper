@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -60,6 +61,7 @@ fun HostWorkspaceScreen(
     onFiles: (HostProfile) -> Boolean,
     onNewSession: (HostProfile) -> Boolean,
     onForwards: (Long) -> Unit,
+    onDiagnostics: (Long) -> Unit,
     onEdit: (HostProfile) -> Unit,
     onOpenSession: (SessionId) -> Unit,
     onCloseSession: (SessionId) -> Unit,
@@ -110,10 +112,15 @@ fun HostWorkspaceScreen(
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SshActionTile(Icons.Default.Folder, "文件", { if (!onFiles(host)) sessionLimitReached = true }, Modifier.weight(1f))
-                    SshActionTile(Icons.Default.Public, "端口转发", { onForwards(host.id) }, Modifier.weight(1f))
-                    SshActionTile(Icons.Default.Add, "新建会话", { if (!onNewSession(host)) sessionLimitReached = true }, Modifier.weight(1f))
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SshActionTile(Icons.Default.Folder, "文件", { if (!onFiles(host)) sessionLimitReached = true }, Modifier.weight(1f))
+                        SshActionTile(Icons.Default.Public, "端口转发", { onForwards(host.id) }, Modifier.weight(1f))
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SshActionTile(Icons.Default.Add, "新建会话", { if (!onNewSession(host)) sessionLimitReached = true }, Modifier.weight(1f))
+                        SshActionTile(Icons.Default.NetworkCheck, "连接诊断", { onDiagnostics(host.id) }, Modifier.weight(1f))
+                    }
                 }
             }
             item { SshSectionHeader("系统集成") }
