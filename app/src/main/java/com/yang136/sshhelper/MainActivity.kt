@@ -36,6 +36,9 @@ import com.yang136.sshhelper.ui.HostEditorScreen
 import com.yang136.sshhelper.ui.HostEditorSeed
 import com.yang136.sshhelper.ui.HostsScreen
 import com.yang136.sshhelper.ui.LanDiscoveryScreen
+import com.yang136.sshhelper.ui.NetworkDiagnosticsScreen
+import com.yang136.sshhelper.ui.NETWORK_DIAGNOSTICS_ROUTE_PATTERN
+import com.yang136.sshhelper.ui.networkDiagnosticsRoute
 import com.yang136.sshhelper.ui.HostWorkspaceScreen
 import com.yang136.sshhelper.ui.ActivityScreen
 import com.yang136.sshhelper.ui.AppImageBackground
@@ -162,6 +165,7 @@ class MainActivity : FragmentActivity() {
                                 hosts = { modifier, _ -> HostsScreen(
                                 onAdd = { navController.navigate("edit/0") },
                                 onDiscover = { navController.navigate("discover") },
+                                onDiagnostics = { navController.navigate(networkDiagnosticsRoute()) },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
                                 onConnect = { host ->
@@ -327,6 +331,19 @@ class MainActivity : FragmentActivity() {
                             )
                         }
                         composable(
+                            route = NETWORK_DIAGNOSTICS_ROUTE_PATTERN,
+                            arguments = listOf(navArgument("hostId") { type = NavType.LongType; defaultValue = 0L }),
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) { entry ->
+                            NetworkDiagnosticsScreen(
+                                hostId = entry.arguments?.getLong("hostId") ?: 0L,
+                                onBack = navController::popBackStack,
+                            )
+                        }
+                        composable(
                             route = "host/{hostId}",
                             arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
                         ) { entry ->
@@ -354,6 +371,7 @@ class MainActivity : FragmentActivity() {
                                         } ?: false
                                     },
                                     onForwards = { navController.navigate("forwards/$it") },
+                                    onDiagnostics = { navController.navigate(networkDiagnosticsRoute(it)) },
                                     onEdit = { navController.navigate("edit/${it.id}") },
                                     onOpenSession = { id ->
                                         sessions.firstOrNull { it.id == id }?.let { session ->
