@@ -7,11 +7,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -62,6 +64,8 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.security.VaultState
+import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
+import com.yang136.sshhelper.ui.adaptive.layoutMode
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import kotlinx.coroutines.launch
@@ -123,10 +127,17 @@ fun HostEditorScreen(
             }
         },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val landscape = layoutMode() == SshLayoutMode.LANDSCAPE
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
+                        .then(if (landscape) Modifier.widthIn(max = 720.dp) else Modifier),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
             SshSectionHeader("基本信息", summary = "名称与服务器地址")
             OutlinedTextField(state.name, { vm.update { s -> s.copy(name = it) } }, Modifier.fillMaxWidth(), label = { Text("连接名称") }, singleLine = true)
             OutlinedTextField(state.hostname, { vm.update { s -> s.copy(hostname = it) } }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("192.168.1.10 或 example.com") }, singleLine = true)
@@ -220,7 +231,9 @@ fun HostEditorScreen(
                 }
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
         }
+    }
     }
 
     if (confirmDiscard) {

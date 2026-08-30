@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -47,6 +46,7 @@ import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ui.design.SshActionTile
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusBadge
 import com.yang136.sshhelper.ui.design.SshStatusTone
@@ -67,15 +67,6 @@ fun HostWorkspaceScreen(
     onCloseSession: (SessionId) -> Unit,
     onBack: () -> Unit,
 ) {
-    val app = LocalContext.current.applicationContext as SshHelperApplication
-    val transfers by app.container.transferManager.jobs.collectAsStateWithLifecycle()
-    val rules by app.container.forwardManager.rules.collectAsStateWithLifecycle()
-    val forwardStates by app.container.forwardManager.states.collectAsStateWithLifecycle()
-    val roots by app.container.documentAccessManager.roots.collectAsStateWithLifecycle()
-    val state = buildHostWorkspaceUiState(host, sessions, transfers, rules, forwardStates, roots.map { it.hostId }.toSet())
-    var sessionLimitReached by remember { mutableStateOf(false) }
-    var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
-
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
@@ -88,90 +79,170 @@ fun HostWorkspaceScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f))) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("连接工作区", style = MaterialTheme.typography.titleLarge)
-                                Text(routeSummary(host), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            val status = state.sessions.firstOrNull()?.connection?.presentation() ?: ("离线" to SshStatusTone.OFFLINE)
-                            SshStatusBadge(status.first, status.second)
-                        }
-                        Button(onClick = { if (!onTerminal(host)) sessionLimitReached = true }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Terminal, null)
-                            Text("打开终端", Modifier.padding(start = 8.dp))
-                        }
-                    }
-                }
-            }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SshActionTile(Icons.Default.Folder, "文件", { if (!onFiles(host)) sessionLimitReached = true }, Modifier.weight(1f))
-                        SshActionTile(Icons.Default.Public, "端口转发", { onForwards(host.id) }, Modifier.weight(1f))
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SshActionTile(Icons.Default.Add, "新建会话", { if (!onNewSession(host)) sessionLimitReached = true }, Modifier.weight(1f))
-                        SshActionTile(Icons.Default.NetworkCheck, "连接诊断", { onDiagnostics(host.id) }, Modifier.weight(1f))
-                    }
-                }
-            }
-            item { SshSectionHeader("系统集成") }
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SummaryRow("系统文件访问", if (state.documentAuthorized) "已授权" else "未授权", if (state.documentAuthorized) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
-                        SummaryRow("传输", if (state.activeTransfers > 0) "${state.activeTransfers} 个进行中" else "无进行中任务", if (state.activeTransfers > 0) SshStatusTone.CONNECTING else SshStatusTone.OFFLINE)
-                        SummaryRow("隧道", "${state.runningForwards}/${state.forwardingRules} 运行中", if (state.runningForwards > 0) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
-                    }
-                }
-            }
-            item { SshSectionHeader("已有会话", summary = "${state.sessions.size}") }
-            if (state.sessions.isEmpty()) item { Text("暂无会话", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            else items(state.sessions, key = { it.id.value }) { session ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClick = { onOpenSession(session.id) },
-                            onLongClick = { deleteArmedSessionId = session.id },
-                        ),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                            Text(session.displayName, fontWeight = FontWeight.Medium)
-                            Text(session.features.joinToString(" · ") { it.label() }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        val status = session.connection.presentation()
-                        SshStatusBadge(status.first, status.second)
-                        if (deleteArmedSessionId == session.id) {
-                            TextButton(onClick = {
-                                onCloseSession(session.id)
-                                deleteArmedSessionId = null
-                            }) {
-                                Text("删除", color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                        IconButton(onClick = { onCloseSession(session.id) }) { Icon(Icons.Default.Close, "关闭会话") }
-                    }
-                }
-            }
-        }
+        HostWorkspacePane(
+            host = host,
+            sessions = sessions,
+            onTerminal = onTerminal,
+            onFiles = onFiles,
+            onNewSession = onNewSession,
+            onForwards = onForwards,
+            onDiagnostics = onDiagnostics,
+            onEdit = onEdit,
+            onOpenSession = onOpenSession,
+            onCloseSession = onCloseSession,
+            modifier = Modifier.padding(padding),
+        )
     }
+}
+
+/**
+ * 主机工作区（无 Scaffold 包装）：独立路由与横屏 master-detail 右栏共用。
+ * 负责收集实时状态并承载会话上限提示。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun HostWorkspacePane(
+    host: HostProfile,
+    sessions: List<ManagedSessionState>,
+    onTerminal: (HostProfile) -> Boolean,
+    onFiles: (HostProfile) -> Boolean,
+    onNewSession: (HostProfile) -> Boolean,
+    onForwards: (Long) -> Unit,
+    onDiagnostics: (Long) -> Unit,
+    onEdit: (HostProfile) -> Unit,
+    onOpenSession: (SessionId) -> Unit,
+    onCloseSession: (SessionId) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val app = LocalContext.current.applicationContext as SshHelperApplication
+    val transfers by app.container.transferManager.jobs.collectAsStateWithLifecycle()
+    val rules by app.container.forwardManager.rules.collectAsStateWithLifecycle()
+    val forwardStates by app.container.forwardManager.states.collectAsStateWithLifecycle()
+    val roots by app.container.documentAccessManager.roots.collectAsStateWithLifecycle()
+    val state = buildHostWorkspaceUiState(host, sessions, transfers, rules, forwardStates, roots.map { it.hostId }.toSet())
+    var sessionLimitReached by remember { mutableStateOf(false) }
+    var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
+
+    HostWorkspaceContent(
+        host = host,
+        state = state,
+        onTerminal = onTerminal,
+        onFiles = onFiles,
+        onNewSession = onNewSession,
+        onForwards = onForwards,
+        onDiagnostics = onDiagnostics,
+        onEdit = onEdit,
+        onOpenSession = onOpenSession,
+        onCloseSession = onCloseSession,
+        deleteArmedSessionId = deleteArmedSessionId,
+        onDeleteArmedSessionId = { deleteArmedSessionId = it },
+        onSessionLimitReached = { sessionLimitReached = it },
+        modifier = modifier,
+    )
     if (sessionLimitReached) AlertDialog(
         onDismissRequest = { sessionLimitReached = false }, title = { Text("已达到会话上限") },
         text = { Text("最多可同时保留 8 个会话，请先关闭一个会话。") },
         confirmButton = { TextButton(onClick = { sessionLimitReached = false }) { Text("知道了") } },
     )
+}
+
+/** 主机工作区列表内容，横屏下自动限宽居中。 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun HostWorkspaceContent(
+    host: HostProfile,
+    state: HostWorkspaceUiState,
+    onTerminal: (HostProfile) -> Boolean,
+    onFiles: (HostProfile) -> Boolean,
+    onNewSession: (HostProfile) -> Boolean,
+    onForwards: (Long) -> Unit,
+    onDiagnostics: (Long) -> Unit,
+    onEdit: (HostProfile) -> Unit,
+    onOpenSession: (SessionId) -> Unit,
+    onCloseSession: (SessionId) -> Unit,
+    deleteArmedSessionId: SessionId?,
+    onDeleteArmedSessionId: (SessionId?) -> Unit,
+    onSessionLimitReached: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SshCenteredList(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f))) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("连接工作区", style = MaterialTheme.typography.titleLarge)
+                            Text(routeSummary(host), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        val status = state.sessions.firstOrNull()?.connection?.presentation() ?: ("离线" to SshStatusTone.OFFLINE)
+                        SshStatusBadge(status.first, status.second)
+                    }
+                    Button(onClick = { if (!onTerminal(host)) onSessionLimitReached(true) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Terminal, null)
+                        Text("打开终端", Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SshActionTile(Icons.Default.Folder, "文件", { if (!onFiles(host)) onSessionLimitReached(true) }, Modifier.weight(1f))
+                    SshActionTile(Icons.Default.Public, "端口转发", { onForwards(host.id) }, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SshActionTile(Icons.Default.Add, "新建会话", { if (!onNewSession(host)) onSessionLimitReached(true) }, Modifier.weight(1f))
+                    SshActionTile(Icons.Default.NetworkCheck, "连接诊断", { onDiagnostics(host.id) }, Modifier.weight(1f))
+                }
+            }
+        }
+        item { SshSectionHeader("系统集成") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SummaryRow("系统文件访问", if (state.documentAuthorized) "已授权" else "未授权", if (state.documentAuthorized) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
+                    SummaryRow("传输", if (state.activeTransfers > 0) "${state.activeTransfers} 个进行中" else "无进行中任务", if (state.activeTransfers > 0) SshStatusTone.CONNECTING else SshStatusTone.OFFLINE)
+                    SummaryRow("隧道", "${state.runningForwards}/${state.forwardingRules} 运行中", if (state.runningForwards > 0) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
+                }
+            }
+        }
+        item { SshSectionHeader("已有会话", summary = "${state.sessions.size}") }
+        if (state.sessions.isEmpty()) item { Text("暂无会话", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        else items(state.sessions, key = { it.id.value }) { session ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { onOpenSession(session.id) },
+                        onLongClick = { onDeleteArmedSessionId(session.id) },
+                    ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text(session.displayName, fontWeight = FontWeight.Medium)
+                        Text(session.features.joinToString(" · ") { it.label() }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val status = session.connection.presentation()
+                    SshStatusBadge(status.first, status.second)
+                    if (deleteArmedSessionId == session.id) {
+                        TextButton(onClick = {
+                            onCloseSession(session.id)
+                            onDeleteArmedSessionId(null)
+                        }) {
+                            Text("删除", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    IconButton(onClick = { onCloseSession(session.id) }) { Icon(Icons.Default.Close, "关闭会话") }
+                }
+            }
+        }
+    }
 }
 
 @Composable

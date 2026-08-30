@@ -3,14 +3,20 @@ package com.yang136.sshhelper.ui.design
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ExpandLess
@@ -37,7 +43,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
+import com.yang136.sshhelper.ui.adaptive.layoutMode
 import com.yang136.sshhelper.ui.imageAwareContainerColor
 import com.yang136.sshhelper.ui.imageAwareContentColor
 import com.yang136.sshhelper.ui.imageAwareScaffoldColor
@@ -314,4 +323,29 @@ fun PreferenceSlider(
 @Composable
 fun PreferenceWarning(title: String, summary: String, action: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier) {
     SshInlineBanner(title, summary, modifier, SshStatusTone.WARNING, action)
+}
+
+/**
+ * 横屏下将列表内容限制在 [maxContentWidth] 内并水平居中，避免超宽行阅读困难；
+ * 竖屏保持全宽（与原有 LazyColumn 行为一致）。
+ */
+@Composable
+fun SshCenteredList(
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(12.dp),
+    maxContentWidth: Dp = 760.dp,
+    content: LazyListScope.() -> Unit,
+) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
+        val landscape = layoutMode() == SshLayoutMode.LANDSCAPE
+        LazyColumn(
+            Modifier
+                .fillMaxSize()
+                .then(if (landscape) Modifier.widthIn(max = maxContentWidth) else Modifier),
+            contentPadding = contentPadding,
+            verticalArrangement = verticalArrangement,
+            content = content,
+        )
+    }
 }

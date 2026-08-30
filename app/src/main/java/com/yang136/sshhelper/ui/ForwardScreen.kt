@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -72,6 +71,7 @@ import com.yang136.sshhelper.ssh.ForwardState
 import com.yang136.sshhelper.ssh.PortForwardRule
 import com.yang136.sshhelper.ssh.displayName
 import com.yang136.sshhelper.ssh.isActive
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshEmptyState
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusBadge
@@ -155,8 +155,8 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                     SshEmptyState(Icons.Default.Public, "还没有转发规则", "添加本地、远程或 SOCKS5 转发规则后在这里统一控制")
                 }
             } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
+                SshCenteredList(
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {

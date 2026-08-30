@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
@@ -45,6 +44,7 @@ import com.yang136.sshhelper.ssh.ForwardState
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshEmptyState
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusBadge
@@ -81,8 +81,8 @@ fun ActivityScreen(
         contentColor = imageAwareContentColor(),
         topBar = { SshTopAppBar("活动", subtitle = "会话、传输与隧道的实时状态") },
     ) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
+        SshCenteredList(
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

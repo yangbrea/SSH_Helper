@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -117,6 +117,7 @@ import com.yang136.sshhelper.theme.imageThemeTokens
 import com.yang136.sshhelper.ui.design.PreferenceAction
 import com.yang136.sshhelper.ui.design.PreferenceGroup
 import com.yang136.sshhelper.ui.design.PreferenceSwitch
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshInlineBanner
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusTone
@@ -339,7 +340,12 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsPage(modifier: Modifier = Modifier, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 12.dp, 16.dp, 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    SshCenteredList(
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 12.dp, 16.dp, 32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
+    )
 }
 
 @Composable

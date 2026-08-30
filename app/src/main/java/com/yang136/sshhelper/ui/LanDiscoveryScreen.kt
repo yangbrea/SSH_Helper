@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -71,6 +70,7 @@ import com.yang136.sshhelper.discovery.DiscoveryStatus
 import com.yang136.sshhelper.discovery.ScanMode
 import com.yang136.sshhelper.discovery.ServiceKind
 import com.yang136.sshhelper.discovery.SshConfidence
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshEmptyState
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusBadge
@@ -118,8 +118,8 @@ fun LanDiscoveryScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
+        SshCenteredList(
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp, 10.dp, 16.dp, 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

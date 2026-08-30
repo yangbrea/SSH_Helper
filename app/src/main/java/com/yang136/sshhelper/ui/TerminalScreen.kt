@@ -24,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -50,17 +51,21 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -114,6 +119,9 @@ import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
+import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
+import com.yang136.sshhelper.ui.adaptive.hasHardwareKeyboard
+import com.yang136.sshhelper.ui.adaptive.layoutMode
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
@@ -174,6 +182,10 @@ fun TerminalScreen(
     var sessionLimitReached by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
     var aiHidden by remember { mutableStateOf(false) }
+    // 横屏沉浸模式:默认收起顶部栏/标签行/扩展键行;IME 可见时自动展开,消失后恢复收起。
+    var chromeCollapsed by remember { mutableStateOf(false) }
+    // 物理键盘连接时扩展键行默认隐藏,可通过「更多」菜单临时强制显示。
+    var forceExtraKeys by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
@@ -254,8 +266,16 @@ fun TerminalScreen(
         if (expansion.missingInputs.isEmpty()) showSnippets = false
     }
 
-    Scaffold(
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val isLandscape = layoutMode() == SshLayoutMode.LANDSCAPE
+        val hasHwKeyboard = hasHardwareKeyboard()
+        // 横屏默认收起 chrome;IME 可见时自动展开(保证搜索/扩展键可达),消失后恢复收起;竖屏恒展开。
+        LaunchedEffect(isLandscape, imeVisible) {
+            chromeCollapsed = isLandscape && !imeVisible
+        }
+        Scaffold(
         topBar = {
+            if (!(isLandscape && chromeCollapsed)) {
             Column {
             SshTopAppBar(
                 title = current?.displayName ?: "SSH 终端",
@@ -277,11 +297,18 @@ fun TerminalScreen(
                     }
                     IconButton(onClick = { showMoreMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
                     DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
-                        DropdownMenuItem(text = { Text("粘贴") }, onClick = { showMoreMenu = false; controller.paste(context) }, enabled = !selectionMode)
-                        DropdownMenuItem(text = { Text("选择文本") }, onClick = { showMoreMenu = false; controller.enterSelectionMode() }, enabled = !selectionMode)
-                        DropdownMenuItem(text = { Text("端口转发") }, onClick = { showMoreMenu = false; current?.let { onOpenForwards(it.profile.id) } })
-                        DropdownMenuItem(text = { Text("字体大小") }, onClick = { showMoreMenu = false; showFontDialog = true })
-                        DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { showMoreMenu = false; current?.let { sessionsViewModel.disconnect(it.id) } })
+                        TerminalMoreMenuItems(
+                            selectionMode = selectionMode,
+                            hasHardwareKeyboard = hasHwKeyboard,
+                            forceExtraKeys = forceExtraKeys,
+                            onDismiss = { showMoreMenu = false },
+                            onPaste = { controller.paste(context) },
+                            onSelectText = { controller.enterSelectionMode() },
+                            onForwards = { current?.let { onOpenForwards(it.profile.id) } },
+                            onFont = { showFontDialog = true },
+                            onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                            onToggleExtraKeys = { forceExtraKeys = !forceExtraKeys },
+                        )
                     }
                 },
                 allowImageBackground = false,
@@ -301,6 +328,7 @@ fun TerminalScreen(
                         )
                     }
                 }
+            }
             }
             }
         },
@@ -340,7 +368,7 @@ fun TerminalScreen(
                 }
             }
             val session = current
-            if (session != null) {
+            if (session != null && !(isLandscape && chromeCollapsed)) {
             if (showSearch) {
                 TerminalSearchBar(
                     query = searchText,
@@ -359,7 +387,7 @@ fun TerminalScreen(
                     onSelectAll = controller::selectAll,
                     onCancel = controller::clearSelection,
                 )
-            } else {
+            } else if (!hasHwKeyboard || forceExtraKeys) {
                 ExtraKeys(
                     keys = settings.extraKeys,
                     ctrlArmed = ctrlArmed,
@@ -428,7 +456,36 @@ fun TerminalScreen(
                     )
                 }
             }
+            if (isLandscape && chromeCollapsed) {
+                TerminalChromeStrip(
+                    hostSessions = hostSessions,
+                    activeId = activeId,
+                    hasHardwareKeyboard = hasHwKeyboard,
+                    showMoreMenu = showMoreMenu,
+                    onShowMoreMenuChange = { showMoreMenu = it },
+                    onSelect = { id -> activeId = id; showSearch = false; controller.clearSearch() },
+                    onBack = onBack,
+                    onExpand = { chromeCollapsed = false },
+                    onShowKeyboard = controller::focusAndShowKeyboard,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    menuItems = {
+                        TerminalMoreMenuItems(
+                            selectionMode = selectionMode,
+                            hasHardwareKeyboard = hasHwKeyboard,
+                            forceExtraKeys = forceExtraKeys,
+                            onDismiss = { showMoreMenu = false },
+                            onPaste = { controller.paste(context) },
+                            onSelectText = { controller.enterSelectionMode() },
+                            onForwards = { current?.let { onOpenForwards(it.profile.id) } },
+                            onFont = { showFontDialog = true },
+                            onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                            onToggleExtraKeys = { forceExtraKeys = !forceExtraKeys },
+                        )
+                    },
+                )
+            }
         }
+    }
     }
 
     if ((current?.needsCredential == true || forceCredentialDialog) && current != null) {
@@ -1155,4 +1212,81 @@ private fun TerminalWebView(
         },
         update = { controller.attach(it) },
     )
+}
+
+/**
+ * 横屏沉浸模式下的顶部控制条：返回、会话切换、软键盘（物理键盘时）、更多菜单与展开工具栏。
+ * 悬浮在终端之上，不占用终端布局空间。
+ */
+@Composable
+private fun TerminalChromeStrip(
+    hostSessions: List<ManagedSessionState>,
+    activeId: SessionId?,
+    hasHardwareKeyboard: Boolean,
+    showMoreMenu: Boolean,
+    onShowMoreMenuChange: (Boolean) -> Unit,
+    onSelect: (SessionId) -> Unit,
+    onBack: () -> Unit,
+    onExpand: () -> Unit,
+    onShowKeyboard: () -> Unit,
+    menuItems: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                hostSessions.forEach { session ->
+                    FilterChip(
+                        selected = session.id == activeId,
+                        onClick = { onSelect(session.id) },
+                        label = { Text(session.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    )
+                }
+            }
+            if (hasHardwareKeyboard) {
+                IconButton(onClick = onShowKeyboard) { Icon(Icons.Default.Keyboard, "显示软键盘") }
+            }
+            Box {
+                IconButton(onClick = { onShowMoreMenuChange(true) }) { Icon(Icons.Default.MoreVert, "更多") }
+                DropdownMenu(expanded = showMoreMenu, onDismissRequest = { onShowMoreMenuChange(false) }) { menuItems() }
+            }
+            IconButton(onClick = onExpand) { Icon(Icons.Default.KeyboardArrowDown, "展开工具栏") }
+        }
+    }
+}
+
+/** 顶部栏与沉浸控制条共用的「更多」菜单内容。 */
+@Composable
+private fun TerminalMoreMenuItems(
+    selectionMode: Boolean,
+    hasHardwareKeyboard: Boolean,
+    forceExtraKeys: Boolean,
+    onDismiss: () -> Unit,
+    onPaste: () -> Unit,
+    onSelectText: () -> Unit,
+    onForwards: () -> Unit,
+    onFont: () -> Unit,
+    onDisconnect: () -> Unit,
+    onToggleExtraKeys: () -> Unit,
+) {
+    DropdownMenuItem(text = { Text("粘贴") }, onClick = { onDismiss(); onPaste() }, enabled = !selectionMode)
+    DropdownMenuItem(text = { Text("选择文本") }, onClick = { onDismiss(); onSelectText() }, enabled = !selectionMode)
+    DropdownMenuItem(text = { Text("端口转发") }, onClick = { onDismiss(); onForwards() })
+    DropdownMenuItem(text = { Text("字体大小") }, onClick = { onDismiss(); onFont() })
+    DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { onDismiss(); onDisconnect() })
+    if (hasHardwareKeyboard) {
+        DropdownMenuItem(text = { Text(if (forceExtraKeys) "隐藏扩展键" else "显示扩展键") }, onClick = { onDismiss(); onToggleExtraKeys() })
+    }
 }

@@ -165,7 +165,7 @@ class MainActivity : FragmentActivity() {
                                 hosts = { modifier, _ -> HostsScreen(
                                 onAdd = { navController.navigate("edit/0") },
                                 onDiscover = { navController.navigate("discover") },
-                                onDiagnostics = { navController.navigate(networkDiagnosticsRoute()) },
+                                onDiagnostics = { hostId -> navController.navigate(networkDiagnosticsRoute(hostId)) },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
                                 onConnect = { host ->
@@ -175,6 +175,24 @@ class MainActivity : FragmentActivity() {
                                     } ?: false
                                 },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
+                                onTerminal = { profile ->
+                                    sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
+                                        navController.navigate("terminal/${profile.id}/${id.value}")
+                                        true
+                                    } ?: false
+                                },
+                                onFiles = { profile ->
+                                    sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
+                                        navController.navigate("files/${id.value}")
+                                        true
+                                    } ?: false
+                                },
+                                onNewSession = { profile ->
+                                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
+                                        navController.navigate("terminal/${profile.id}/${id.value}")
+                                        true
+                                    } ?: false
+                                },
                                 sessions = sessions,
                                 onOpenSession = { id ->
                                     sessions.firstOrNull { it.id == id }?.let { session ->

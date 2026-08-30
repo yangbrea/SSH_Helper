@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.data.CommandSnippet
 import com.yang136.sshhelper.data.HostProfile
+import com.yang136.sshhelper.ui.design.SshCenteredList
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,8 +79,8 @@ fun SnippetsScreen(
                 Button(onClick = { adding = true }, modifier = Modifier.padding(top = 16.dp)) { Text("添加命令") }
             }
         } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
+            SshCenteredList(
+                modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

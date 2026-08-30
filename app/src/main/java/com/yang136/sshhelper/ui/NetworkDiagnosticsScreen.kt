@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -47,6 +46,7 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.diagnostics.DiagnosticConclusionKind
 import com.yang136.sshhelper.diagnostics.DiagnosticSample
 import com.yang136.sshhelper.diagnostics.NetworkSnapshot
+import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusBadge
 import com.yang136.sshhelper.ui.design.SshStatusTone
@@ -84,8 +84,8 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
             )
         },
     ) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
+        SshCenteredList(
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp, 10.dp, 16.dp, 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
