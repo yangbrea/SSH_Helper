@@ -70,9 +70,8 @@ class DefaultNetworkDiagnosticsEngine(
             var preferredAddress: String? = null
             var banner: SshBanner? = null
             var bannerAttempted = false
-            repeat(request.sampleCount) { offset ->
-                if (offset > 0) delay(request.sampleIntervalMillis)
-                val index = offset + 1
+            for (index in 1..request.sampleCount) {
+                if (index > 1) delay(request.sampleIntervalMillis)
                 val deadline = nanoTime() + request.connectTimeoutMillis * NANOS_PER_MILLI
                 val candidates = preferredAddress?.let(::listOf) ?: resolved
                 var sample: DiagnosticSample? = null
@@ -100,6 +99,7 @@ class DefaultNetworkDiagnosticsEngine(
                 val completed = sample ?: DiagnosticSample.Failure(index, lastFailure.kind, lastFailure.message)
                 samples += completed
                 emit(DiagnosticEvent.Sampled(completed))
+                if (completed is DiagnosticSample.Failure && completed.kind == DiagnosticFailureKind.PERMISSION) break
             }
             val report = DiagnosticReport(
                 request = request,

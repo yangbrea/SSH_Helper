@@ -16,6 +16,7 @@ import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 class AndroidDiagnosticBackend(context: Context) : DiagnosticBackend {
@@ -64,7 +65,7 @@ class AndroidDiagnosticBackend(context: Context) : DiagnosticBackend {
         )
     }
 
-    override suspend fun resolve(networkId: String, hostname: String): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun resolve(networkId: String, hostname: String): List<String> = runInterruptible(Dispatchers.IO) {
         val network = requireNotNull(networkFor(networkId)) { "所选网络已断开" }
         network.getAllByName(hostname).mapNotNull(InetAddress::getHostAddress)
     }
