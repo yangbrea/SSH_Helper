@@ -14,6 +14,9 @@ import androidx.room.TypeConverters
 import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.yang136.sshhelper.diagnosticlog.DiagnosticEventEntity
+import com.yang136.sshhelper.diagnosticlog.DiagnosticLogDao
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceEntity
 import kotlinx.coroutines.flow.Flow
 
 class Converters {
@@ -228,8 +231,10 @@ interface DocumentAccessDao {
         PortForwardRuleEntity::class,
         DocumentRootEntity::class,
         DocumentWritebackEntity::class,
+        DiagnosticTraceEntity::class,
+        DiagnosticEventEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -244,13 +249,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transferDao(): TransferDao
     abstract fun portForwardRuleDao(): PortForwardRuleDao
     abstract fun documentAccessDao(): DocumentAccessDao
+    abstract fun diagnosticLogDao(): DiagnosticLogDao
 
     companion object {
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "ssh_helper.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -378,6 +384,47 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_document_writebacks_hostId ON document_writebacks(hostId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_document_writebacks_status ON document_writebacks(status)")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS diagnostic_traces (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        target TEXT,
+                        hostId INTEGER,
+                        sessionId TEXT,
+                        feature TEXT,
+                        startedAt INTEGER NOT NULL,
+                        endedAt INTEGER,
+                        status TEXT NOT NULL,
+                        summary TEXT
+                    )""".trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_traces_startedAt ON diagnostic_traces(startedAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_traces_source ON diagnostic_traces(source)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_traces_hostId ON diagnostic_traces(hostId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_traces_status ON diagnostic_traces(status)")
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS diagnostic_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        traceId TEXT NOT NULL,
+                        sequence INTEGER NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        elapsedMillis INTEGER NOT NULL,
+                        level TEXT NOT NULL,
+                        stage TEXT NOT NULL,
+                        hop TEXT,
+                        code TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        detailsJson TEXT NOT NULL,
+                        FOREIGN KEY(traceId) REFERENCES diagnostic_traces(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_events_traceId ON diagnostic_events(traceId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_diagnostic_events_traceId_sequence ON diagnostic_events(traceId, sequence)")
             }
         }
     }

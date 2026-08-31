@@ -32,6 +32,7 @@ import com.yang136.sshhelper.discovery.AndroidSsdpDiscovery
 import com.yang136.sshhelper.discovery.AndroidDeviceDescriptionRepository
 import com.yang136.sshhelper.discovery.AssetMacVendorResolver
 import com.yang136.sshhelper.discovery.DefaultLanDiscoveryEngine
+import com.yang136.sshhelper.diagnosticlog.DiagnosticLogRepository
 
 class SshHelperApplication : Application(), DefaultLifecycleObserver, Configuration.Provider {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -51,6 +52,7 @@ class SshHelperApplication : Application(), DefaultLifecycleObserver, Configurat
 class AppContainer(val application: Application) {
     val database = AppDatabase.create(application)
     val credentialVault = AndroidCredentialVault(application, database)
+    val diagnosticLogRepository = DiagnosticLogRepository(database.diagnosticLogDao())
     val hostRepository = HostRepository(database, credentialVault)
     val configTransferManager = ConfigTransferManager(database)
     val documentAccessManager = DocumentAccessManager(application, database, hostRepository)
