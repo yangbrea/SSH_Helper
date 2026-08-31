@@ -26,8 +26,10 @@ class DiagnosticLogRepository(
     private val starts = ConcurrentHashMap<String, Long>()
     private val dropped = ConcurrentHashMap<String, AtomicLong>()
     private val ready: Deferred<Unit> = scope.async {
-        dao.markInterrupted(now())
-        prune()
+        runCatching {
+            dao.markInterrupted(now())
+            prune()
+        }
     }
 
     init {
@@ -39,7 +41,9 @@ class DiagnosticLogRepository(
                     val next = pending.tryReceive().getOrNull() ?: break
                     batch += next
                 }
-                dao.insertEvents(batch)
+                // Diagnostics must never take down SSH or scanning when storage is temporarily
+                // unavailable. Later events can still be accepted after a failed batch.
+                runCatching { dao.insertEvents(batch) }
             }
         }
     }
@@ -57,23 +61,25 @@ class DiagnosticLogRepository(
         ready.await()
         val id = UUID.randomUUID().toString()
         val startedAt = now()
-        starts[id] = startedAt
-        sequences[id] = AtomicLong(0)
-        dao.insertTrace(
-            DiagnosticTraceEntity(
-                id = id,
-                source = context.source.name,
-                target = DiagnosticRedactor.redactNullable(context.target),
-                hostId = context.hostId,
-                sessionId = context.sessionId,
-                feature = context.feature,
-                startedAt = startedAt,
-                endedAt = null,
-                status = DiagnosticTraceStatus.RUNNING.name,
-                summary = null,
-            ),
-        )
-        return id
+        return runCatching {
+            dao.insertTrace(
+                DiagnosticTraceEntity(
+                    id = id,
+                    source = context.source.name,
+                    target = DiagnosticRedactor.redactNullable(context.target),
+                    hostId = context.hostId,
+                    sessionId = context.sessionId,
+                    feature = context.feature,
+                    startedAt = startedAt,
+                    endedAt = null,
+                    status = DiagnosticTraceStatus.RUNNING.name,
+                    summary = null,
+                ),
+            )
+            starts[id] = startedAt
+            sequences[id] = AtomicLong(0)
+            id
+        }.getOrDefault("noop")
     }
 
     override fun record(
@@ -117,7 +123,7 @@ class DiagnosticLogRepository(
                 details = mapOf("count" to count.toString()),
             )
         }
-        dao.finish(traceId, now(), status.name, DiagnosticRedactor.redactNullable(summary))
+        runCatching { dao.finish(traceId, now(), status.name, DiagnosticRedactor.redactNullable(summary)) }
         starts.remove(traceId)
         sequences.remove(traceId)
     }
@@ -130,11 +136,13 @@ class DiagnosticLogRepository(
 
 object DiagnosticRedactor {
     private val privateKey = Regex("-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\\s\\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----", RegexOption.IGNORE_CASE)
-    private val namedSecret = Regex("(?i)(password|passphrase|authorization|proxy-authorization|private[_ -]?key)\\s*[:=]\\s*([^\\s,;]+)")
+    private val authorizationHeader = Regex("(?im)^(authorization|proxy-authorization)\\s*:\\s*[^\\r\\n]*")
+    private val namedSecret = Regex("(?i)(password|passphrase|private[_ -]?key)\\s*[:=]\\s*([^,;\\r\\n]+)")
     private val control = Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]")
 
     fun redact(value: String): String = value
         .replace(privateKey, "<redacted-private-key>")
+        .replace(authorizationHeader) { "${it.groupValues[1]}: <redacted>" }
         .replace(namedSecret) { "${it.groupValues[1]}=<redacted>" }
         .replace(control, "�")
         .take(MAX_DIAGNOSTIC_TEXT_LENGTH)

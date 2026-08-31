@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FactCheck
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +49,7 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.diagnosticlog.DiagnosticEvent
 import com.yang136.sshhelper.diagnosticlog.DiagnosticEventLevel
 import com.yang136.sshhelper.diagnosticlog.DiagnosticTrace
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource
 import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceStatus
 import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshEmptyState
@@ -107,6 +111,22 @@ fun DiagnosticLogScreen(onBack: () -> Unit) {
             exportError?.let { item { SshInlineBanner("导出失败", it, tone = SshStatusTone.ERROR) } }
             if (selected == null) {
                 item { OutlinedTextField(state.query, vm::updateQuery, label = { Text("搜索目标、来源或结果") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = state.sourceFilter == null, onClick = { vm.selectSource(null) }, label = { Text("全部来源") })
+                            DiagnosticTraceSource.entries.forEach { source ->
+                                FilterChip(selected = state.sourceFilter == source, onClick = { vm.selectSource(source) }, label = { Text(source.displayName()) })
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = state.statusFilter == null, onClick = { vm.selectStatus(null) }, label = { Text("全部状态") })
+                            DiagnosticTraceStatus.entries.forEach { status ->
+                                FilterChip(selected = state.statusFilter == status, onClick = { vm.selectStatus(status) }, label = { Text(status.displayName()) })
+                            }
+                        }
+                    }
+                }
                 if (state.visibleTraces.isEmpty()) item { SshEmptyState(Icons.AutoMirrored.Filled.FactCheck, "暂无诊断记录", "建立 SSH 连接或运行 Port Scanner 后会在这里生成时间线") }
                 items(state.visibleTraces, key = DiagnosticTrace::id) { trace -> TraceCard(trace) { vm.open(trace) } }
             } else {
@@ -171,10 +191,10 @@ private fun EventCard(event: DiagnosticEvent) {
     }
 }
 
-private fun com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource.displayName() = when (this) {
-    com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource.SSH_CONNECTION -> "SSH 连接"
-    com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource.NETWORK_DIAGNOSTIC -> "网络诊断"
-    com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource.PORT_SCAN -> "Port Scanner"
+private fun DiagnosticTraceSource.displayName() = when (this) {
+    DiagnosticTraceSource.SSH_CONNECTION -> "SSH 连接"
+    DiagnosticTraceSource.NETWORK_DIAGNOSTIC -> "网络诊断"
+    DiagnosticTraceSource.PORT_SCAN -> "Port Scanner"
 }
 
 private fun DiagnosticTraceStatus.displayName() = when (this) {

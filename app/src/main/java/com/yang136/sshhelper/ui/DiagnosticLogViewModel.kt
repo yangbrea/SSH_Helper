@@ -8,6 +8,8 @@ import com.yang136.sshhelper.diagnosticlog.DiagnosticEvent
 import com.yang136.sshhelper.diagnosticlog.DiagnosticLogExporter
 import com.yang136.sshhelper.diagnosticlog.DiagnosticLogRepository
 import com.yang136.sshhelper.diagnosticlog.DiagnosticTrace
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceStatus
 import java.io.OutputStream
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,12 +23,17 @@ data class DiagnosticLogUiState(
     val selectedTrace: DiagnosticTrace? = null,
     val events: List<DiagnosticEvent> = emptyList(),
     val query: String = "",
+    val sourceFilter: DiagnosticTraceSource? = null,
+    val statusFilter: DiagnosticTraceStatus? = null,
     val error: String? = null,
 ) {
     val visibleTraces: List<DiagnosticTrace> get() {
         val needle = query.trim().lowercase()
-        return if (needle.isBlank()) traces else traces.filter {
-            it.target.orEmpty().lowercase().contains(needle) || it.source.name.lowercase().contains(needle) || it.summary.orEmpty().lowercase().contains(needle)
+        return traces.filter { trace ->
+            (sourceFilter == null || trace.source == sourceFilter) &&
+                (statusFilter == null || trace.status == statusFilter) &&
+                (needle.isBlank() || trace.target.orEmpty().lowercase().contains(needle) ||
+                    trace.source.name.lowercase().contains(needle) || trace.summary.orEmpty().lowercase().contains(needle))
         }
     }
 }
@@ -45,6 +52,8 @@ class DiagnosticLogViewModel(private val repository: DiagnosticLogRepository) : 
     }
 
     fun updateQuery(value: String) = mutableState.update { it.copy(query = value) }
+    fun selectSource(value: DiagnosticTraceSource?) = mutableState.update { it.copy(sourceFilter = value) }
+    fun selectStatus(value: DiagnosticTraceStatus?) = mutableState.update { it.copy(statusFilter = value) }
 
     fun open(trace: DiagnosticTrace) {
         eventJob?.cancel()
