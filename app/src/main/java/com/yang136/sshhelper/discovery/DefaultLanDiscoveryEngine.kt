@@ -168,6 +168,10 @@ class DefaultLanDiscoveryEngine(
                 val scope = if (request.mode == ScanMode.SSH) "SSH 扫描结果" else "设备发现结果"
                 send(DiscoveryEvent.Notice("系统限制，无法读取 ARP/MAC；不影响$scope"))
             }
+            // Concurrent workers can deliver two progress events out of order even though the
+            // atomic counters themselves are correct. Publish one canonical terminal snapshot
+            // so collectors never finish on a stale completed/total pair.
+            send(DiscoveryEvent.Progress(completed.get(), total.get()))
             send(DiscoveryEvent.Completed)
         } catch (cancelled: CancellationException) {
             throw cancelled

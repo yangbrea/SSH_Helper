@@ -86,8 +86,13 @@ class DefaultPortScanner(
                             PortState.UNREACHABLE -> unreachable.incrementAndGet()
                             PortState.ERROR -> errors.incrementAndGet()
                         }
-                        send(PortScanEvent.Result(result))
-                        send(PortScanEvent.Progress(completed.incrementAndGet(), request.ports.size))
+                        // Closed/filtered results are deliberately aggregated. Emitting 65k
+                        // objects and Compose state updates makes a full scan needlessly costly.
+                        if (result.state == PortState.OPEN) send(PortScanEvent.Result(result))
+                        val progress = completed.incrementAndGet()
+                        if (progress == request.ports.size || progress % PROGRESS_GRANULARITY == 0) {
+                            send(PortScanEvent.Progress(progress, request.ports.size))
+                        }
                     }
                 }
             }
@@ -117,6 +122,8 @@ class DefaultPortScanner(
         backend.cancel()
     }
 }
+
+private const val PROGRESS_GRANULARITY = 32
 
 private fun PortScanSummary.toDetails() = mapOf(
     "address" to address,

@@ -19,7 +19,6 @@ fun parsePortScanList(input: String): Result<Set<Int>> = runCatching {
             val end = token.substring(separator + 1).trim().toIntOrNull()
                 ?: throw IllegalArgumentException("无效端口范围：$token")
             require(start in 1..65_535 && end in 1..65_535 && start <= end) { "无效端口范围：$token" }
-            require(ports.size + (end - start + 1) <= MAX_PORT_SCAN_PORTS) { "一次最多扫描 65535 个端口" }
             ports.addAll(start..end)
         }
         require(ports.size <= MAX_PORT_SCAN_PORTS) { "一次最多扫描 65535 个端口" }

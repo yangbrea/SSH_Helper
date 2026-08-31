@@ -37,6 +37,9 @@ import com.yang136.sshhelper.ui.HostEditorSeed
 import com.yang136.sshhelper.ui.HostsScreen
 import com.yang136.sshhelper.ui.LanDiscoveryScreen
 import com.yang136.sshhelper.ui.NetworkDiagnosticsScreen
+import com.yang136.sshhelper.ui.NetworkToolsScreen
+import com.yang136.sshhelper.ui.PortScannerScreen
+import com.yang136.sshhelper.ui.DiagnosticLogScreen
 import com.yang136.sshhelper.ui.NETWORK_DIAGNOSTICS_ROUTE_PATTERN
 import com.yang136.sshhelper.ui.networkDiagnosticsRoute
 import com.yang136.sshhelper.ui.HostWorkspaceScreen
@@ -233,6 +236,13 @@ class MainActivity : FragmentActivity() {
                                     onBack = { navigate(AppDestination.HOSTS) },
                                     modifier = modifier,
                                 ) },
+                                tools = { modifier, _ -> NetworkToolsScreen(
+                                    onNetworkDiagnostics = { navController.navigate(networkDiagnosticsRoute()) },
+                                    onLanDiscovery = { navController.navigate("discover") },
+                                    onPortScanner = { navController.navigate("port-scanner") },
+                                    onDiagnosticLogs = { navController.navigate("diagnostic-logs") },
+                                    modifier = modifier,
+                                ) },
                                 settings = { modifier, onDetailChanged, navigate -> SettingsScreen(
                                     settings = settings,
                                     imageThemeState = imageTheme,
@@ -360,6 +370,24 @@ class MainActivity : FragmentActivity() {
                                 hostId = entry.arguments?.getLong("hostId") ?: 0L,
                                 onBack = navController::popBackStack,
                             )
+                        }
+                        composable(
+                            route = "port-scanner",
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) {
+                            PortScannerScreen(onBack = navController::popBackStack)
+                        }
+                        composable(
+                            route = "diagnostic-logs",
+                            enterTransition = { topBarEnterTransition() },
+                            exitTransition = { quickFadeOutTransition() },
+                            popEnterTransition = { quickFadeInTransition() },
+                            popExitTransition = { topBarExitTransition() },
+                        ) {
+                            DiagnosticLogScreen(onBack = navController::popBackStack)
                         }
                         composable(
                             route = "host/{hostId}",

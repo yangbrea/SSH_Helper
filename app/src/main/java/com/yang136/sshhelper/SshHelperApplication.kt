@@ -91,7 +91,7 @@ class AppContainer(val application: Application) {
         arpTableReader = AndroidArpTableReader(),
         macVendorResolver = AssetMacVendorResolver(application),
     )
-    val networkDiagnosticsEngine = DefaultNetworkDiagnosticsEngine(AndroidDiagnosticBackend(application))
+    val networkDiagnosticsEngine = DefaultNetworkDiagnosticsEngine(AndroidDiagnosticBackend(application), diagnostics = diagnosticLogRepository)
     val portScanner = DefaultPortScanner(AndroidPortScanBackend(application), diagnosticLogRepository)
 
     init {

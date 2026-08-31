@@ -12,6 +12,7 @@ import com.yang136.sshhelper.ui.design.SshStatusTone
 enum class AppDestination(val id: String, val label: String) {
     HOSTS("hosts", "主机"),
     ACTIVITY("activity", "活动"),
+    TOOLS("tools", "工具"),
     SETTINGS("settings", "设置"),
     ;
 

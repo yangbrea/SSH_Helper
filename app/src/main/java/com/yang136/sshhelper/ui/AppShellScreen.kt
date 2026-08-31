@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -40,6 +41,7 @@ fun AppShellScreen(
     initialDestination: AppDestination = AppDestination.HOSTS,
     hosts: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
     activity: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
+    tools: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
     settings: @Composable (Modifier, (Boolean) -> Unit, (AppDestination) -> Unit) -> Unit,
 ) {
     var selectedId by rememberSaveable { mutableStateOf(initialDestination.id) }
@@ -71,7 +73,7 @@ fun AppShellScreen(
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) {
-                    AppShellContent(selected, Modifier, stateHolder, navigate, { detailVisible = it }, hosts, activity, settings)
+                    AppShellContent(selected, Modifier, stateHolder, navigate, { detailVisible = it }, hosts, activity, tools, settings)
                 }
             }
         } else {
@@ -95,7 +97,7 @@ fun AppShellScreen(
                 },
             ) { padding ->
                 Box(Modifier.padding(padding)) {
-                    AppShellContent(selected, Modifier, stateHolder, navigate, { detailVisible = it }, hosts, activity, settings)
+                    AppShellContent(selected, Modifier, stateHolder, navigate, { detailVisible = it }, hosts, activity, tools, settings)
                 }
             }
         }
@@ -111,6 +113,7 @@ private fun AppShellContent(
     onDetailVisibleChange: (Boolean) -> Unit,
     hosts: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
     activity: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
+    tools: @Composable (Modifier, (AppDestination) -> Unit) -> Unit,
     settings: @Composable (Modifier, (Boolean) -> Unit, (AppDestination) -> Unit) -> Unit,
 ) {
     AnimatedContent(
@@ -133,6 +136,7 @@ private fun AppShellContent(
             when (destination) {
                 AppDestination.HOSTS -> hosts(screenModifier, navigate)
                 AppDestination.ACTIVITY -> activity(screenModifier, navigate)
+                AppDestination.TOOLS -> tools(screenModifier, navigate)
                 AppDestination.SETTINGS -> settings(screenModifier, onDetailVisibleChange, navigate)
             }
         }
@@ -145,5 +149,6 @@ private const val QUICK_FADE_MILLIS = 80
 private fun AppDestination.icon() = when (this) {
     AppDestination.HOSTS -> Icons.Default.Computer
     AppDestination.ACTIVITY -> Icons.Default.Timeline
+    AppDestination.TOOLS -> Icons.Default.Build
     AppDestination.SETTINGS -> Icons.Default.Settings
 }

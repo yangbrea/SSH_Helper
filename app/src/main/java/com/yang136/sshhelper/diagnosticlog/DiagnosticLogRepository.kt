@@ -4,8 +4,10 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -23,12 +25,12 @@ class DiagnosticLogRepository(
     private val sequences = ConcurrentHashMap<String, AtomicLong>()
     private val starts = ConcurrentHashMap<String, Long>()
     private val dropped = ConcurrentHashMap<String, AtomicLong>()
+    private val ready: Deferred<Unit> = scope.async {
+        dao.markInterrupted(now())
+        prune()
+    }
 
     init {
-        scope.launch {
-            dao.markInterrupted(now())
-            prune()
-        }
         scope.launch {
             for (first in pending) {
                 val batch = ArrayList<DiagnosticEventEntity>(EVENT_BATCH_SIZE)
@@ -52,6 +54,7 @@ class DiagnosticLogRepository(
     suspend fun clear() = dao.clear()
 
     override suspend fun startTrace(context: DiagnosticTraceContext): String {
+        ready.await()
         val id = UUID.randomUUID().toString()
         val startedAt = now()
         starts[id] = startedAt
@@ -117,7 +120,6 @@ class DiagnosticLogRepository(
         dao.finish(traceId, now(), status.name, DiagnosticRedactor.redactNullable(summary))
         starts.remove(traceId)
         sequences.remove(traceId)
-        prune()
     }
 
     private suspend fun prune() {
