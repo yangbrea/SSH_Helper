@@ -87,6 +87,10 @@ class JschSshSession(
     override suspend fun openSftpClient(): SftpClient = withContext(Dispatchers.IO) {
         val activeSession = session?.takeIf(Session::isConnected) ?: error("SSH 连接不可用")
         val sftp = activeSession.openChannel("sftp") as ChannelSftp
+        // 提升局域网 SFTP 吞吐：允许更多未确认请求在途，并关闭写 flush workaround，
+        // 避免每个数据包都等待一次往返，导致速度被 RTT 限制在 ~1MiB/s。
+        sftp.setBulkRequests(64)
+        sftp.setUseWriteFlushWorkaround(false)
         sftp.connect(15_000)
         JschSftpClient(sftp)
     }

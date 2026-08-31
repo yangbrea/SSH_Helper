@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -64,8 +65,7 @@ import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.security.VaultState
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.layoutMode
+import com.yang136.sshhelper.ui.adaptive.adaptiveInfo
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import kotlinx.coroutines.launch
@@ -121,21 +121,30 @@ fun HostEditorScreen(
         },
         bottomBar = {
             Surface(shadowElevation = 8.dp, tonalElevation = 3.dp) {
-                Button(onClick = saveHost, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Text(if (hostId == 0L) "创建主机" else "保存修改")
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Button(
+                        onClick = saveHost,
+                        modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Text(if (hostId == 0L) "创建主机" else "保存修改")
+                    }
                 }
             }
         },
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val landscape = layoutMode() == SshLayoutMode.LANDSCAPE
+            val adaptive = adaptiveInfo()
+            val bounded = adaptive.isLandscape || adaptive.isLargeScreen
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                 Column(
                     Modifier
-                        .fillMaxSize()
+                        .then(
+                            if (bounded) Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                            else Modifier.fillMaxWidth(),
+                        )
+                        .fillMaxHeight()
                         .verticalScroll(rememberScrollState())
-                        .padding(16.dp)
-                        .then(if (landscape) Modifier.widthIn(max = 720.dp) else Modifier),
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
             SshSectionHeader("基本信息", summary = "名称与服务器地址")

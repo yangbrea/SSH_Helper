@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.aspectRatio
@@ -56,6 +57,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -122,6 +124,7 @@ import com.yang136.sshhelper.ui.design.SshInlineBanner
 import com.yang136.sshhelper.ui.design.SshSectionHeader
 import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.design.SshTopAppBar
+import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -240,6 +243,7 @@ fun SettingsScreen(
     val writebacks by app.container.documentAccessManager.writebacks.collectAsStateWithLifecycle()
     var selectedId by rememberSaveable { mutableStateOf(initialDestination?.id) }
     val selected = SettingsDestination.fromId(selectedId)
+    val adaptive = currentAdaptiveInfo()
     var confirmVaultReset by remember { mutableStateOf(false) }
     var confirmDiscardAi by remember { mutableStateOf(false) }
     var aiBaseUrl by rememberSaveable { mutableStateOf(settings.aiBaseUrl) }
@@ -247,7 +251,9 @@ fun SettingsScreen(
     var aiModel by rememberSaveable { mutableStateOf(settings.aiModel) }
     val aiDirty = aiBaseUrl != settings.aiBaseUrl || aiApiKey != settings.aiApiKey || aiModel != settings.aiModel
 
-    LaunchedEffect(selectedId) { onDetailChanged(selectedId != null) }
+    LaunchedEffect(selectedId, adaptive.useTwoPane) {
+        onDetailChanged(selectedId != null && !adaptive.useTwoPane)
+    }
 
     LaunchedEffect(settings.aiBaseUrl, settings.aiApiKey, settings.aiModel) {
         if (!aiDirty) {
@@ -265,16 +271,43 @@ fun SettingsScreen(
     }
     BackHandler(onBack = handleBack)
 
+    val homeState = buildSettingsHomeUiState(settings, vaultState.displayName(), roots.size, writebacks.size)
+    val detailContent: @Composable (SettingsDestination, Modifier) -> Unit = { destination, contentModifier ->
+        when (destination) {
+            SettingsDestination.APPEARANCE -> AppearanceSettings(
+                settings = settings,
+                imageThemeState = imageThemeState,
+                onMode = onThemeModeChange,
+                onPreset = onThemePresetChange,
+                onSource = onThemeSourceChange,
+                onImport = onImportImageTheme,
+                onVariant = onImageVariantChange,
+                onOverlay = onImageOverlayChange,
+                onSelectImage = onSelectImageTheme,
+                onDeleteImage = onDeleteImageTheme,
+                onClearError = onClearImageThemeError,
+                modifier = contentModifier,
+            )
+            SettingsDestination.TERMINAL -> TerminalSettings(settings, onFontSizeChange, onExtraKeysChange, contentModifier)
+            SettingsDestination.AI -> AiSettings(settings, aiBaseUrl, { aiBaseUrl = it }, aiApiKey, { aiApiKey = it }, aiModel, { aiModel = it }, onAiSendContextChange, onAiShowBubbleChange, contentModifier)
+            SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, contentModifier)
+            SettingsDestination.SECURITY -> SecuritySettings(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, { confirmVaultReset = true }, contentModifier)
+            SettingsDestination.DOCUMENTS -> DocumentsSettings(roots.size, writebacks.size, contentModifier)
+            SettingsDestination.DATA -> DataSettings(contentModifier)
+            SettingsDestination.ABOUT -> AboutSettings(contentModifier)
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
         topBar = {
             SshTopAppBar(
-                title = selected?.title ?: "设置",
-                subtitle = selected?.let { "SSH Helper 偏好设置" },
+                title = if (adaptive.useTwoPane) "设置" else selected?.title ?: "设置",
+                subtitle = if (adaptive.useTwoPane) selected?.title else selected?.let { "SSH Helper 偏好设置" },
                 navigationIcon = {
-                    if (selected != null || showRootBack) IconButton(onClick = handleBack) {
+                    if ((!adaptive.useTwoPane && selected != null) || showRootBack) IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
@@ -290,32 +323,31 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
-        when (selected) {
-            null -> SettingsHome(
-                buildSettingsHomeUiState(settings, vaultState.displayName(), roots.size, writebacks.size),
-                Modifier.padding(padding),
-            ) { selectedId = it.id }
-            SettingsDestination.APPEARANCE -> AppearanceSettings(
-                settings = settings,
-                imageThemeState = imageThemeState,
-                onMode = onThemeModeChange,
-                onPreset = onThemePresetChange,
-                onSource = onThemeSourceChange,
-                onImport = onImportImageTheme,
-                onVariant = onImageVariantChange,
-                onOverlay = onImageOverlayChange,
-                onSelectImage = onSelectImageTheme,
-                onDeleteImage = onDeleteImageTheme,
-                onClearError = onClearImageThemeError,
-                modifier = Modifier.padding(padding),
-            )
-            SettingsDestination.TERMINAL -> TerminalSettings(settings, onFontSizeChange, onExtraKeysChange, Modifier.padding(padding))
-            SettingsDestination.AI -> AiSettings(settings, aiBaseUrl, { aiBaseUrl = it }, aiApiKey, { aiApiKey = it }, aiModel, { aiModel = it }, onAiSendContextChange, onAiShowBubbleChange, Modifier.padding(padding))
-            SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, Modifier.padding(padding))
-            SettingsDestination.SECURITY -> SecuritySettings(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, { confirmVaultReset = true }, Modifier.padding(padding))
-            SettingsDestination.DOCUMENTS -> DocumentsSettings(roots.size, writebacks.size, Modifier.padding(padding))
-            SettingsDestination.DATA -> DataSettings(Modifier.padding(padding))
-            SettingsDestination.ABOUT -> AboutSettings(Modifier.padding(padding))
+        if (adaptive.useTwoPane) {
+            Row(Modifier.fillMaxSize().padding(padding)) {
+                SettingsHome(
+                    state = homeState,
+                    modifier = Modifier.width(340.dp).fillMaxHeight(),
+                    selected = selected,
+                    onDestination = { selectedId = it.id },
+                )
+                VerticalDivider(Modifier.fillMaxHeight())
+                if (selected != null) {
+                    detailContent(selected, Modifier.weight(1f).fillMaxHeight())
+                } else {
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.SettingsBackupRestore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("选择一项设置", style = MaterialTheme.typography.titleMedium)
+                            Text("从左侧目录打开详细配置", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else if (selected == null) {
+            SettingsHome(homeState, Modifier.padding(padding), onDestination = { selectedId = it.id })
+        } else {
+            detailContent(selected, Modifier.padding(padding))
         }
     }
 
@@ -349,7 +381,12 @@ private fun SettingsPage(modifier: Modifier = Modifier, content: androidx.compos
 }
 
 @Composable
-private fun SettingsHome(state: SettingsHomeUiState, modifier: Modifier, onDestination: (SettingsDestination) -> Unit) {
+private fun SettingsHome(
+    state: SettingsHomeUiState,
+    modifier: Modifier,
+    selected: SettingsDestination? = null,
+    onDestination: (SettingsDestination) -> Unit,
+) {
     SettingsPage(modifier) {
         item {
             Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp)) {
@@ -359,7 +396,10 @@ private fun SettingsHome(state: SettingsHomeUiState, modifier: Modifier, onDesti
         }
         state.categories.forEach { category ->
             item(category.destination.id) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = if (selected == category.destination) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                ) {
                     PreferenceAction(category.destination.icon, category.destination.title, category.summary, { onDestination(category.destination) })
                 }
             }

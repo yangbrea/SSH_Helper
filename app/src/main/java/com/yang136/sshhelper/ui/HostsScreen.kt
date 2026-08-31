@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,11 +23,10 @@ import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.ssh.*
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.currentLayoutMode
+import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import com.yang136.sshhelper.ui.design.*
 
-/** 横屏 master-detail 中左栏主机列表的宽度。 */
+/** Expanded 与手机横屏 master-detail 中左栏主机列表的宽度。 */
 private val HOSTS_MASTER_LIST_WIDTH = 360.dp
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -66,9 +66,10 @@ fun HostsScreen(
     var sessionLimitReached by remember { mutableStateOf(false) }
     var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
     var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
-    // 横屏 master-detail 中右栏选中的主机；竖屏不使用（点击即进入工作区路由）。
+    // 大窗口与手机横屏内联工作区中选中的主机；窗口缩放时保留选择。
     var selectedHostId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val landscape = currentLayoutMode() == SshLayoutMode.LANDSCAPE
+    val adaptive = currentAdaptiveInfo()
+    val selectedHost = selectedHostId?.let { id -> hosts.firstOrNull { it.id == id } }
     val visibleHosts = remember(hosts, query) {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) hosts else hosts.filter {
@@ -77,7 +78,12 @@ fun HostsScreen(
     }
 
     BackHandler {
-        if (landscape && selectedHostId != null) selectedHostId = null else confirmExit = true
+        if (adaptive.isLargeScreen && selectedHostId != null) selectedHostId = null
+        else if (adaptive.useHostListDetail && selectedHostId != null) selectedHostId = null
+        else confirmExit = true
+    }
+    LaunchedEffect(hosts, selectedHostId) {
+        if (selectedHostId != null && selectedHost == null) selectedHostId = null
     }
     LaunchedEffect(deleteError) { deleteError?.let { snackbar.showSnackbar(it); vm.clearDeleteError() } }
 
@@ -99,10 +105,10 @@ fun HostsScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (!landscape) ExtendedFloatingActionButton(onClick = onAdd, icon = { Icon(Icons.Default.Add, null) }, text = { Text("添加主机") })
+            if (!adaptive.useNavigationRail) ExtendedFloatingActionButton(onClick = onAdd, icon = { Icon(Icons.Default.Add, "添加主机") }, text = { Text("添加主机") })
         },
     ) { padding ->
-        if (landscape) {
+        if (adaptive.useHostListDetail) {
             Row(Modifier.fillMaxSize().padding(padding)) {
                 HostsList(
                     query = query,
@@ -127,11 +133,10 @@ fun HostsScreen(
                     onDeleteArmedSession = { deleteArmedSessionId = it },
                     modifier = Modifier.width(HOSTS_MASTER_LIST_WIDTH).fillMaxHeight(),
                 )
-                val detailHost = selectedHostId?.let { id -> hosts.firstOrNull { it.id == id } }
-                if (detailHost != null) {
+                if (selectedHost != null) {
                     Box(Modifier.weight(1f).fillMaxHeight().padding(start = 8.dp)) {
                         HostWorkspacePane(
-                            host = detailHost,
+                            host = selectedHost,
                             sessions = sessions,
                             onTerminal = onTerminal,
                             onFiles = onFiles,
@@ -149,6 +154,39 @@ fun HostsScreen(
                     }
                 }
             }
+        } else if (adaptive.isLargeScreen && selectedHost != null) {
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { selectedHostId = null }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回主机列表")
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(selectedHost.name, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "${selectedHost.username}@${selectedHost.hostname}:${selectedHost.port}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider()
+                HostWorkspacePane(
+                    host = selectedHost,
+                    sessions = sessions,
+                    onTerminal = onTerminal,
+                    onFiles = onFiles,
+                    onNewSession = onNewSession,
+                    onForwards = onForwards,
+                    onDiagnostics = onDiagnostics,
+                    onEdit = onEdit,
+                    onOpenSession = onOpenSession,
+                    onCloseSession = onCloseSession,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+            }
         } else {
             HostsList(
                 query = query,
@@ -158,9 +196,11 @@ fun HostsScreen(
                 sessions = sessions,
                 sessionsExpanded = sessionsExpanded,
                 onToggleSessions = { sessionsExpanded = !sessionsExpanded },
-                onOpenHost = onOpenHost,
+                onOpenHost = if (adaptive.isLargeScreen) {
+                    { host -> selectedHostId = host.id }
+                } else onOpenHost,
                 onConnect = { host -> if (!onConnect(host)) sessionLimitReached = true },
-                onAdd = null,
+                onAdd = if (adaptive.isLargeScreen) onAdd else null,
                 onSessionClick = onOpenSession,
                 onAskCloseSession = { closingSession = it },
                 onDeleteSessionNow = onCloseSession,

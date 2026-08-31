@@ -33,8 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.layoutMode
+import com.yang136.sshhelper.ui.adaptive.adaptiveInfo
 
 @Composable
 fun AppShellScreen(
@@ -52,9 +51,10 @@ fun AppShellScreen(
         detailVisible = false
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (layoutMode() == SshLayoutMode.LANDSCAPE) {
+        val adaptive = adaptiveInfo()
+        if (adaptive.useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
-                if (!detailVisible) {
+                if (!detailVisible || adaptive.usePersistentNavigationRail) {
                     NavigationRail(
                         modifier = Modifier.fillMaxHeight(),
                         containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer, .9f),

@@ -14,7 +14,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -96,6 +95,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -131,8 +131,7 @@ import com.yang136.sshhelper.ssh.CredentialRole
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.ManagedSessionState
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.currentLayoutMode
+import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import com.yang136.sshhelper.preview.PreviewKind
 import com.yang136.sshhelper.preview.PreviewPlaybackManager
 import com.yang136.sshhelper.preview.SftpImage
@@ -179,7 +178,7 @@ fun SftpScreen(
     val transfers by viewModel.transfers.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var mobilePane by remember { mutableStateOf(MobilePane.REMOTE) }
+    var mobilePane by rememberSaveable { mutableStateOf(MobilePane.REMOTE) }
     var remoteSearching by remember { mutableStateOf(false) }
     var localSearching by remember { mutableStateOf(false) }
     var showTransfers by remember { mutableStateOf(false) }
@@ -245,12 +244,13 @@ fun SftpScreen(
         ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    val landscape = currentLayoutMode() == SshLayoutMode.LANDSCAPE
+    val adaptive = currentAdaptiveInfo()
+    val desktopWorkspace = adaptive.useDesktopWorkspace
     Scaffold(
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
         topBar = {
-            if (!landscape) {
+            if (!desktopWorkspace) {
                 SshTopAppBar(
                     title = session?.displayName ?: "SFTP 文件",
                     subtitle = session?.connection.sftpLabel(),
@@ -267,7 +267,7 @@ fun SftpScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (!landscape) {
+            if (!desktopWorkspace) {
                 val active = transfers.filter { it.status.isActive() }
                 if (active.isNotEmpty()) {
                     Surface(tonalElevation = 3.dp, shadowElevation = 5.dp) {
@@ -283,8 +283,8 @@ fun SftpScreen(
             }
         },
     ) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            if (landscape) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            if (desktopWorkspace) {
                 Column(Modifier.fillMaxSize()) {
                     if (session?.needsVaultUnlock == true) SftpVaultUnlockBanner(onUnlockVault)
                     SftpCredentialGate(session, onDismiss = onBack, onConnect = viewModel::connect)
@@ -310,25 +310,16 @@ fun SftpScreen(
                 Column(Modifier.fillMaxSize()) {
                     if (session?.needsVaultUnlock == true) SftpVaultUnlockBanner(onUnlockVault)
                     SftpCredentialGate(session, onDismiss = onBack, onConnect = viewModel::connect)
-                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                        if (maxWidth >= 840.dp) {
-                            Row(Modifier.fillMaxSize()) {
-                                RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxHeight(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
-                                LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxHeight(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
-                            }
+                    Column(Modifier.weight(1f).fillMaxWidth()) {
+                        CompactPaneSwitcher(
+                            pane = mobilePane,
+                            enabled = state.selectedRemote.isEmpty() && state.selectedLocal.isEmpty(),
+                            onPane = { mobilePane = it },
+                        )
+                        if (mobilePane == MobilePane.REMOTE) {
+                            RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
                         } else {
-                            Column(Modifier.fillMaxSize()) {
-                                CompactPaneSwitcher(
-                                    pane = mobilePane,
-                                    enabled = state.selectedRemote.isEmpty() && state.selectedLocal.isEmpty(),
-                                    onPane = { mobilePane = it },
-                                )
-                                if (mobilePane == MobilePane.REMOTE) {
-                                    RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
-                                } else {
-                                    LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
-                                }
-                            }
+                            LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
                         }
                     }
                 }

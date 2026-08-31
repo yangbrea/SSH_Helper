@@ -141,8 +141,7 @@ import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.currentLayoutMode
+import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import com.yang136.sshhelper.ui.adaptive.hasHardwareKeyboard
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 import java.io.ByteArrayOutputStream
@@ -183,7 +182,10 @@ fun TerminalScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
-    val isLandscape = currentLayoutMode() == SshLayoutMode.LANDSCAPE
+    val adaptive = currentAdaptiveInfo()
+    val isLandscape = adaptive.isLandscape
+    val useSideRail = adaptive.useTerminalSideRail
+    val allowSimultaneousPanels = adaptive.useTwoPane
     val sessions by sessionsViewModel.sessions.collectAsStateWithLifecycle()
     val hostSessions = sessions.filter { it.profile.id == hostId }
     val initialId = initialSessionId?.let(::SessionId)
@@ -312,12 +314,26 @@ fun TerminalScreen(
     fun togglePanel(panel: TerminalPanel) {
         if (panel != TerminalPanel.SELECTION) controller.clearSelection()
         if (panel != TerminalPanel.SEARCH) controller.clearSearch()
-        layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.TogglePanel(panel))
+        val next = reduceTerminalLayout(layoutState, TerminalLayoutAction.TogglePanel(panel))
+        layoutState = if (!allowSimultaneousPanels && next.panel != TerminalPanel.NONE) {
+            next.copy(extraKeysVisible = false)
+        } else next
+    }
+
+    fun toggleExtraKeys() {
+        val next = reduceTerminalLayout(layoutState, TerminalLayoutAction.ToggleExtraKeys)
+        if (!allowSimultaneousPanels && next.extraKeysVisible) {
+            controller.clearSelection()
+            controller.clearSearch()
+            layoutState = next.copy(panel = TerminalPanel.NONE)
+        } else {
+            layoutState = next
+        }
     }
 
     TerminalSystemBarsEffect(isLandscape)
     Box(Modifier.fillMaxSize().background(terminalBackground)) {
-        if (isLandscape) {
+        if (useSideRail) {
             LandscapeTerminalLayout(
                 hostSessions = hostSessions,
                 current = current,
@@ -334,11 +350,11 @@ fun TerminalScreen(
                 renderingDelayed = renderingDelayed,
                 showMoreMenu = showMoreMenu,
                 terminalBackground = terminalBackground,
+                statusBarHidden = isLandscape,
+                expandedWindow = adaptive.useTwoPane,
                 onBack = onBack,
                 onTogglePanel = ::togglePanel,
-                onToggleExtraKeys = {
-                    layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ToggleExtraKeys)
-                },
+                onToggleExtraKeys = ::toggleExtraKeys,
                 onShowMoreMenuChange = { showMoreMenu = it },
                 onSelectSession = { id ->
                     activeId = id
@@ -410,9 +426,7 @@ fun TerminalScreen(
                                         onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                                         onFont = { showFontDialog = true },
                                         onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
-                                        onToggleExtraKeys = {
-                                            layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ToggleExtraKeys)
-                                        },
+                                        onToggleExtraKeys = ::toggleExtraKeys,
                                     )
                                 }
                             },
@@ -492,8 +506,8 @@ fun TerminalScreen(
                     onClear = { sessionsViewModel.clearAi(session.id) },
                     onOpenSettings = onOpenSettings,
                     onClose = { aiHidden = true },
-                    presentation = if (isLandscape) AiBubblePresentation.LANDSCAPE_FLOATING else AiBubblePresentation.PORTRAIT_SHEET,
-                    endClearance = if (isLandscape && layoutState.extraKeysVisible) 160.dp else 0.dp,
+                    presentation = if (useSideRail) AiBubblePresentation.LANDSCAPE_FLOATING else AiBubblePresentation.PORTRAIT_SHEET,
+                    endClearance = if (useSideRail && layoutState.extraKeysVisible) 160.dp else 0.dp,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
                 )
             }
@@ -565,7 +579,7 @@ fun TerminalScreen(
         )
     }
 
-    if (!isLandscape && layoutState.panel == TerminalPanel.SNIPPETS && current != null) {
+    if (!useSideRail && layoutState.panel == TerminalPanel.SNIPPETS && current != null) {
         SnippetSheet(
             snippets = snippets.filter { it.hostId == null || it.hostId == current.profile.id },
             onSelect = ::useSnippet,
@@ -657,6 +671,8 @@ private fun LandscapeTerminalLayout(
     renderingDelayed: Boolean,
     showMoreMenu: Boolean,
     terminalBackground: androidx.compose.ui.graphics.Color,
+    statusBarHidden: Boolean,
+    expandedWindow: Boolean,
     onBack: () -> Unit,
     onTogglePanel: (TerminalPanel) -> Unit,
     onToggleExtraKeys: () -> Unit,
@@ -691,8 +707,12 @@ private fun LandscapeTerminalLayout(
     Row(
         modifier
             .background(terminalBackground)
-            // 状态栏在横屏隐藏；这里只避让左右挖孔、导航栏与 IME，不制造顶部整排留白。
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    if (statusBarHidden) WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+                    else WindowInsetsSides.Horizontal + WindowInsetsSides.Vertical,
+                ),
+            ),
     ) {
         LandscapeTerminalRail(
             current = current,
@@ -740,6 +760,7 @@ private fun LandscapeTerminalLayout(
                 onCopy = onCopy,
                 onSelectAll = onSelectAll,
                 onCancelSelection = onCancelSelection,
+                maxWidth = if (expandedWindow) 360.dp else 300.dp,
             )
         }
         terminal(Modifier.weight(1f).fillMaxHeight())
@@ -870,8 +891,9 @@ private fun LandscapeContextPanel(
     onCopy: () -> Unit,
     onSelectAll: () -> Unit,
     onCancelSelection: () -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp,
 ) {
-    Surface(Modifier.widthIn(min = 248.dp, max = 300.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
+    Surface(Modifier.widthIn(min = 248.dp, max = maxWidth).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(

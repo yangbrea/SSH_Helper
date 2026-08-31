@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,8 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.yang136.sshhelper.ui.adaptive.SshLayoutMode
-import com.yang136.sshhelper.ui.adaptive.layoutMode
+import com.yang136.sshhelper.ui.adaptive.SshWindowWidthClass
+import com.yang136.sshhelper.ui.adaptive.adaptiveInfo
 import com.yang136.sshhelper.ui.imageAwareContainerColor
 import com.yang136.sshhelper.ui.imageAwareContentColor
 import com.yang136.sshhelper.ui.imageAwareScaffoldColor
@@ -326,23 +327,31 @@ fun PreferenceWarning(title: String, summary: String, action: (@Composable () ->
 }
 
 /**
- * 横屏下将列表内容限制在 [maxContentWidth] 内并水平居中，避免超宽行阅读困难；
- * 竖屏保持全宽（与原有 LazyColumn 行为一致）。
+ * 在横屏和大窗口下限制内容宽度并水平居中，避免超宽行阅读困难。
  */
 @Composable
 fun SshCenteredList(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(12.dp),
-    maxContentWidth: Dp = 760.dp,
+    maxContentWidth: Dp = 960.dp,
     content: LazyListScope.() -> Unit,
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
-        val landscape = layoutMode() == SshLayoutMode.LANDSCAPE
+        val adaptive = adaptiveInfo()
+        val bounded = adaptive.isLandscape || adaptive.isLargeScreen
+        val effectiveMaxWidth = when (adaptive.widthClass) {
+            SshWindowWidthClass.COMPACT -> minOf(maxContentWidth, 760.dp)
+            SshWindowWidthClass.MEDIUM -> minOf(maxContentWidth, 720.dp)
+            SshWindowWidthClass.EXPANDED -> minOf(maxContentWidth, 960.dp)
+        }
         LazyColumn(
             Modifier
-                .fillMaxSize()
-                .then(if (landscape) Modifier.widthIn(max = maxContentWidth) else Modifier),
+                .then(
+                    if (bounded) Modifier.widthIn(max = effectiveMaxWidth).fillMaxWidth()
+                    else Modifier.fillMaxWidth(),
+                )
+                .fillMaxHeight(),
             contentPadding = contentPadding,
             verticalArrangement = verticalArrangement,
             content = content,

@@ -277,10 +277,11 @@ class DefaultTransferManager(
         val tempPath = joinRemotePath(target.substringBeforeLast('/', "/"), temporary)
         dao.setTemporaryPath(job.id, tempPath, total)
         val offset = if (job.conflictPolicy == ConflictPolicy.RESUME) runCatching { client.stat(tempPath).size }.getOrDefault(0) else 0
+        val progress = ProgressThrottle(job.id)
         resolver.openInputStream(sourceUri)?.use { input ->
             if (offset > 0) input.skipFully(offset)
             client.upload(input, tempPath, offset) { transferred ->
-                scope.launch { dao.setProgress(job.id, offset + transferred, total, TransferStatus.RUNNING) }
+                progress.report(offset + transferred, total)
                 running[job.id]?.isActive == true
             }
         } ?: error("无法读取本地文件")
@@ -307,19 +308,23 @@ class DefaultTransferManager(
             ?: error("无法创建本地临时文件")
         dao.setTemporaryPath(job.id, part.toString(), remote.size)
         var offset = if (job.conflictPolicy == ConflictPolicy.RESUME) localDocumentSize(context, part) else 0
+        val progress = ProgressThrottle(job.id)
         context.contentResolver.openFileDescriptor(part, "rw")?.use { descriptor ->
-            java.io.FileOutputStream(descriptor.fileDescriptor).use { output ->
+            java.io.FileOutputStream(descriptor.fileDescriptor).use { file ->
                 if (offset > 0) {
-                    runCatching { output.channel.position(offset) }.onFailure {
+                    runCatching { file.channel.position(offset) }.onFailure {
                         // Some cloud-backed SAF providers cannot seek. Restart explicitly instead
                         // of pretending that the task resumed successfully.
                         offset = 0
-                        output.channel.truncate(0)
+                        file.channel.truncate(0)
                     }
-                } else output.channel.truncate(0)
-                client.download(job.source, output, offset) { transferred ->
-                    scope.launch { dao.setProgress(job.id, offset + transferred, remote.size, TransferStatus.RUNNING) }
-                    running[job.id]?.isActive == true
+                } else file.channel.truncate(0)
+                // 使用较大缓冲写出，避免 SAF/文件提供者在小块写入时成为下载瓶颈。
+                java.io.BufferedOutputStream(file, 256 * 1024).use { output ->
+                    client.download(job.source, output, offset) { transferred ->
+                        progress.report(offset + transferred, remote.size)
+                        running[job.id]?.isActive == true
+                    }
                 }
             }
         } ?: error("无法写入本地文件")
@@ -340,10 +345,11 @@ class DefaultTransferManager(
             dao.setTemporaryPath(job.id, temporary, source.size)
             val pipeIn = java.io.PipedInputStream(256 * 1024)
             val pipeOut = java.io.PipedOutputStream(pipeIn)
+            val progress = ProgressThrottle(job.id)
             val download = scope.launch { pipeOut.use { sourceClient.download(job.source, it) } }
             pipeIn.use { input ->
                 second.upload(input, temporary) { transferred ->
-                    scope.launch { dao.setProgress(job.id, transferred, source.size, TransferStatus.RUNNING) }
+                    progress.report(transferred, source.size)
                     running[job.id]?.isActive == true
                 }
             }
@@ -398,6 +404,38 @@ class DefaultTransferManager(
         val network = connectivity.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    /**
+     * 节流进度写入：JSch 每个数据包都会回调，若每次都启动协程写 Room，
+     * 高速传输时 IO 会被进度更新拖慢。这里限制至少间隔一段时间或至少增长一定字节才落库。
+     */
+    private inner class ProgressThrottle(
+        private val jobId: Long,
+        private val intervalMs: Long = 200L,
+        private val minBytes: Long = 512L * 1024L,
+    ) {
+        private var lastWriteAt = 0L
+        private var lastWrittenBytes = -1L
+
+        fun report(absoluteBytes: Long, totalBytes: Long) {
+            val now = System.currentTimeMillis()
+            val shouldWrite = synchronized(this) {
+                val changed = absoluteBytes != lastWrittenBytes
+                val enoughTime = lastWrittenBytes < 0 || now - lastWriteAt >= intervalMs
+                val enoughBytes = lastWrittenBytes < 0 || absoluteBytes - lastWrittenBytes >= minBytes
+                if (changed && (enoughTime || enoughBytes)) {
+                    lastWrittenBytes = absoluteBytes
+                    lastWriteAt = now
+                    true
+                } else {
+                    false
+                }
+            }
+            if (shouldWrite) {
+                scope.launch { dao.setProgress(jobId, absoluteBytes, totalBytes, TransferStatus.RUNNING) }
+            }
+        }
     }
 
     private companion object {

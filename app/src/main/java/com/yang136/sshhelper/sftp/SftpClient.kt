@@ -112,7 +112,9 @@ class JschSftpClient(private val channel: ChannelSftp) : SftpClient {
 
     override suspend fun download(path: String, output: OutputStream, offset: Long, progress: (Long) -> Boolean) = ioUnit {
         val monitor = CountingMonitor(progress)
-        channel.get(normalizeRemotePath(path), output, monitor, ChannelSftp.RESUME, offset.coerceAtLeast(0))
+        // 非续传下载使用 OVERWRITE，避免 RESUME 路径引入额外状态/seek 开销。
+        val mode = if (offset > 0) ChannelSftp.RESUME else ChannelSftp.OVERWRITE
+        channel.get(normalizeRemotePath(path), output, monitor, mode, offset.coerceAtLeast(0))
     }
 
     override suspend fun upload(input: InputStream, path: String, offset: Long, progress: (Long) -> Boolean) = ioUnit {
