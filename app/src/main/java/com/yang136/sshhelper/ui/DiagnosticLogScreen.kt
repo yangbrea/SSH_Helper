@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -107,7 +107,7 @@ fun DiagnosticLogScreen(onBack: () -> Unit) {
             exportError?.let { item { SshInlineBanner("导出失败", it, tone = SshStatusTone.ERROR) } }
             if (selected == null) {
                 item { OutlinedTextField(state.query, vm::updateQuery, label = { Text("搜索目标、来源或结果") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
-                if (state.visibleTraces.isEmpty()) item { SshEmptyState(Icons.Default.FactCheck, "暂无诊断记录", "建立 SSH 连接或运行 Port Scanner 后会在这里生成时间线") }
+                if (state.visibleTraces.isEmpty()) item { SshEmptyState(Icons.AutoMirrored.Filled.FactCheck, "暂无诊断记录", "建立 SSH 连接或运行 Port Scanner 后会在这里生成时间线") }
                 items(state.visibleTraces, key = DiagnosticTrace::id) { trace -> TraceCard(trace) { vm.open(trace) } }
             } else {
                 item { SshSectionHeader("事件时间线", summary = "${state.events.size}") }

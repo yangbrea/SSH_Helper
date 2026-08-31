@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material3.Card
@@ -44,7 +44,7 @@ fun NetworkToolsScreen(
         NetworkTool("网络诊断", "DNS、TCP 延迟、网络接口与 SSH Banner", Icons.Default.NetworkCheck, onNetworkDiagnostics),
         NetworkTool("局域网发现", "发现设备、服务、mDNS、SSDP 与 ARP 信息", Icons.Default.Devices, onLanDiscovery),
         NetworkTool("Port Scanner", "单目标 TCP Connect Scan、Banner 与服务识别", Icons.Default.Radar, onPortScanner),
-        NetworkTool("诊断记录", "查看并导出连接、扫描和断连时间线", Icons.Default.FactCheck, onDiagnosticLogs),
+        NetworkTool("诊断记录", "查看并导出连接、扫描和断连时间线", Icons.AutoMirrored.Filled.FactCheck, onDiagnosticLogs),
     )
     Scaffold(
         modifier = modifier,
