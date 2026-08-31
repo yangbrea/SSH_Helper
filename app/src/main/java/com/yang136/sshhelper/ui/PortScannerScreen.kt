@@ -1,5 +1,6 @@
 package com.yang136.sshhelper.ui
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,10 +55,30 @@ import com.yang136.sshhelper.ui.design.SshStatusBadge
 import com.yang136.sshhelper.ui.design.SshStatusTone
 import com.yang136.sshhelper.ui.design.SshTopAppBar
 
+const val PORT_SCANNER_ROUTE_PATTERN = "port-scanner?target={target}&networkId={networkId}&full={full}"
+
+fun portScannerRoute(
+    target: String = "",
+    networkId: String = "",
+    fullScan: Boolean = false,
+): String = "port-scanner?target=${Uri.encode(target)}&networkId=${Uri.encode(networkId)}&full=$fullScan"
+
 @Composable
-fun PortScannerScreen(onBack: () -> Unit) {
+fun PortScannerScreen(
+    initialTarget: String = "",
+    initialNetworkId: String = "",
+    autoStartFullScan: Boolean = false,
+    onBack: () -> Unit,
+) {
     val app = LocalContext.current.applicationContext as SshHelperApplication
-    val vm: PortScannerViewModel = viewModel(factory = PortScannerViewModel.factory(app.container))
+    val vm: PortScannerViewModel = viewModel(
+        factory = PortScannerViewModel.factory(
+            container = app.container,
+            initialTarget = initialTarget,
+            initialNetworkId = initialNetworkId,
+            autoStartFullScan = autoStartFullScan,
+        ),
+    )
     val state by vm.state.collectAsStateWithLifecycle()
     var networkMenu by remember { mutableStateOf(false) }
     var addressMenu by remember { mutableStateOf(false) }

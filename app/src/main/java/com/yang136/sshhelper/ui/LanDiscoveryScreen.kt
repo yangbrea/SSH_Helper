@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Search
@@ -81,6 +82,7 @@ import com.yang136.sshhelper.ui.design.SshTopAppBar
 fun LanDiscoveryScreen(
     hosts: List<HostProfile>,
     onSelect: (name: String, address: String, port: Int, existingHostId: Long?) -> Unit,
+    onPortScan: (address: String, networkId: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -235,6 +237,7 @@ fun LanDiscoveryScreen(
                         mode = state.mode,
                         hosts = hosts,
                         onSelect = onSelect,
+                        onPortScan = { onPortScan(device.address, device.networkId) },
                         onOpenDetails = { vm.openDetails(device.address) },
                     )
                 }
@@ -273,6 +276,10 @@ fun LanDiscoveryScreen(
             onDismiss = vm::closeDetails,
             onSelectSsh = onSelect,
             onRequestWeb = { pendingWebUrl = it },
+            onPortScan = {
+                vm.closeDetails()
+                onPortScan(device.address, device.networkId)
+            },
         )
     }
 
@@ -298,6 +305,7 @@ private fun DiscoveryDeviceCard(
     mode: ScanMode,
     hosts: List<HostProfile>,
     onSelect: (String, String, Int, Long?) -> Unit,
+    onPortScan: () -> Unit,
     onOpenDetails: () -> Unit,
 ) {
     val modifier = if (mode == ScanMode.GENERAL) Modifier.clickable(onClick = onOpenDetails) else Modifier
@@ -338,6 +346,10 @@ private fun DiscoveryDeviceCard(
             } else {
                 Text("点击查看服务与操作", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
+            OutlinedButton(onClick = onPortScan, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Radar, null)
+                Text(" 完整端口扫描")
+            }
         }
     }
 }
@@ -352,6 +364,7 @@ private fun DeviceDetailsSheet(
     onDismiss: () -> Unit,
     onSelectSsh: (String, String, Int, Long?) -> Unit,
     onRequestWeb: (String) -> Unit,
+    onPortScan: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -366,6 +379,10 @@ private fun DeviceDetailsSheet(
                 Text(confidenceLabel(device.classification.confidence), style = MaterialTheme.typography.labelMedium)
             }
             DiscoveryMetadata(device)
+            OutlinedButton(onClick = onPortScan, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Radar, null)
+                Text(" 完整端口扫描")
+            }
             if (loading) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.padding(end = 12.dp))

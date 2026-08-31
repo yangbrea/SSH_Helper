@@ -44,10 +44,21 @@ data class PortScannerUiState(
     val canStart: Boolean get() = status != PortScannerStatus.SCANNING && selectedNetworkId != null && targetInput.isNotBlank()
 }
 
-class PortScannerViewModel(private val scanner: PortScanner) : ViewModel() {
-    private val mutableState = MutableStateFlow(PortScannerUiState())
+class PortScannerViewModel(
+    private val scanner: PortScanner,
+    initialTarget: String = "",
+    private val initialNetworkId: String = "",
+    autoStartFullScan: Boolean = false,
+) : ViewModel() {
+    private val mutableState = MutableStateFlow(
+        PortScannerUiState(
+            targetInput = initialTarget,
+            portsInput = if (autoStartFullScan && initialTarget.isNotBlank()) "1-65535" else commonPortScanInput(),
+        ),
+    )
     val state: StateFlow<PortScannerUiState> = mutableState.asStateFlow()
     private var scanJob: Job? = null
+    private var pendingAutoStart = autoStartFullScan && initialTarget.isNotBlank()
 
     init { refreshNetworks() }
 
@@ -55,9 +66,27 @@ class PortScannerViewModel(private val scanner: PortScanner) : ViewModel() {
         if (mutableState.value.status == PortScannerStatus.SCANNING) return
         viewModelScope.launch {
             val networks = runCatching { scanner.availableNetworks() }.getOrDefault(emptyList())
-            val selected = networks.firstOrNull { it.id == mutableState.value.selectedNetworkId }
+            val requestedNetworkId = initialNetworkId.takeIf { pendingAutoStart && it.isNotBlank() }
+            val requestedNetworkMissing = requestedNetworkId != null && networks.none { it.id == requestedNetworkId }
+            val selected = networks.firstOrNull { it.id == requestedNetworkId }
+                ?: networks.firstOrNull { it.id == mutableState.value.selectedNetworkId }
                 ?: networks.firstOrNull(PortScanNetwork::isDefault) ?: networks.firstOrNull()
-            mutableState.update { it.copy(networks = networks, selectedNetworkId = selected?.id, status = PortScannerStatus.IDLE, error = if (selected == null) "未找到可用网络" else null) }
+            mutableState.update {
+                it.copy(
+                    networks = networks,
+                    selectedNetworkId = selected?.id,
+                    status = PortScannerStatus.IDLE,
+                    error = when {
+                        selected == null -> "未找到可用网络"
+                        requestedNetworkMissing -> "发现设备时使用的网络已断开，请重新选择网络后开始扫描"
+                        else -> null
+                    },
+                )
+            }
+            if (pendingAutoStart && selected != null && !requestedNetworkMissing) {
+                pendingAutoStart = false
+                startScan()
+            }
         }
     }
 
@@ -130,9 +159,19 @@ class PortScannerViewModel(private val scanner: PortScanner) : ViewModel() {
     override fun onCleared() { scanner.cancel(); scanJob?.cancel() }
 
     companion object {
-        fun factory(container: AppContainer): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        fun factory(
+            container: AppContainer,
+            initialTarget: String = "",
+            initialNetworkId: String = "",
+            autoStartFullScan: Boolean = false,
+        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = PortScannerViewModel(container.portScanner) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = PortScannerViewModel(
+                scanner = container.portScanner,
+                initialTarget = initialTarget,
+                initialNetworkId = initialNetworkId,
+                autoStartFullScan = autoStartFullScan,
+            ) as T
         }
     }
 }

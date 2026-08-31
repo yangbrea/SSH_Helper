@@ -39,6 +39,8 @@ import com.yang136.sshhelper.ui.LanDiscoveryScreen
 import com.yang136.sshhelper.ui.NetworkDiagnosticsScreen
 import com.yang136.sshhelper.ui.NetworkToolsScreen
 import com.yang136.sshhelper.ui.PortScannerScreen
+import com.yang136.sshhelper.ui.PORT_SCANNER_ROUTE_PATTERN
+import com.yang136.sshhelper.ui.portScannerRoute
 import com.yang136.sshhelper.ui.DiagnosticLogScreen
 import com.yang136.sshhelper.ui.NETWORK_DIAGNOSTICS_ROUTE_PATTERN
 import com.yang136.sshhelper.ui.networkDiagnosticsRoute
@@ -239,7 +241,7 @@ class MainActivity : FragmentActivity() {
                                 tools = { modifier, _ -> NetworkToolsScreen(
                                     onNetworkDiagnostics = { navController.navigate(networkDiagnosticsRoute()) },
                                     onLanDiscovery = { navController.navigate("discover") },
-                                    onPortScanner = { navController.navigate("port-scanner") },
+                                    onPortScanner = { navController.navigate(portScannerRoute()) },
                                     onDiagnosticLogs = { navController.navigate("diagnostic-logs") },
                                     modifier = modifier,
                                 ) },
@@ -355,6 +357,15 @@ class MainActivity : FragmentActivity() {
                                         )
                                     }
                                 },
+                                onPortScan = { address, networkId ->
+                                    navController.navigate(
+                                        portScannerRoute(
+                                            target = address,
+                                            networkId = networkId,
+                                            fullScan = true,
+                                        ),
+                                    )
+                                },
                                 onBack = navController::popBackStack,
                             )
                         }
@@ -372,13 +383,23 @@ class MainActivity : FragmentActivity() {
                             )
                         }
                         composable(
-                            route = "port-scanner",
+                            route = PORT_SCANNER_ROUTE_PATTERN,
+                            arguments = listOf(
+                                navArgument("target") { type = NavType.StringType; defaultValue = "" },
+                                navArgument("networkId") { type = NavType.StringType; defaultValue = "" },
+                                navArgument("full") { type = NavType.BoolType; defaultValue = false },
+                            ),
                             enterTransition = { topBarEnterTransition() },
                             exitTransition = { quickFadeOutTransition() },
                             popEnterTransition = { quickFadeInTransition() },
                             popExitTransition = { topBarExitTransition() },
-                        ) {
-                            PortScannerScreen(onBack = navController::popBackStack)
+                        ) { entry ->
+                            PortScannerScreen(
+                                initialTarget = entry.arguments?.getString("target").orEmpty(),
+                                initialNetworkId = entry.arguments?.getString("networkId").orEmpty(),
+                                autoStartFullScan = entry.arguments?.getBoolean("full") ?: false,
+                                onBack = navController::popBackStack,
+                            )
                         }
                         composable(
                             route = "diagnostic-logs",
