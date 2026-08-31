@@ -33,6 +33,8 @@ import com.yang136.sshhelper.discovery.AndroidDeviceDescriptionRepository
 import com.yang136.sshhelper.discovery.AssetMacVendorResolver
 import com.yang136.sshhelper.discovery.DefaultLanDiscoveryEngine
 import com.yang136.sshhelper.diagnosticlog.DiagnosticLogRepository
+import com.yang136.sshhelper.scanner.AndroidPortScanBackend
+import com.yang136.sshhelper.scanner.DefaultPortScanner
 
 class SshHelperApplication : Application(), DefaultLifecycleObserver, Configuration.Provider {
     val container: AppContainer by lazy { AppContainer(this) }
@@ -90,6 +92,7 @@ class AppContainer(val application: Application) {
         macVendorResolver = AssetMacVendorResolver(application),
     )
     val networkDiagnosticsEngine = DefaultNetworkDiagnosticsEngine(AndroidDiagnosticBackend(application))
+    val portScanner = DefaultPortScanner(AndroidPortScanBackend(application), diagnosticLogRepository)
 
     init {
         // 凭据租约按"活动转发"判定：会话管理器查询转发管理器当前活跃转发的会话。
