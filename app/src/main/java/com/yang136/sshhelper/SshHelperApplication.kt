@@ -56,11 +56,18 @@ class AppContainer(val application: Application) {
     val hostRepository = HostRepository(database, credentialVault)
     val configTransferManager = ConfigTransferManager(database)
     val documentAccessManager = DocumentAccessManager(application, database, hostRepository)
-    val documentsBackend = SshDocumentsBackend(application, database, documentAccessManager)
+    val documentsBackend = SshDocumentsBackend(application, database, documentAccessManager, diagnosticLogRepository)
     val snippetRepository = SnippetRepository(database)
     val settingsRepository = DataStoreSettingsRepository(application)
     val imageThemeRepository = ImageThemeRepository(application)
-    val sessionManager = DefaultSessionManager(application, hostRepository, database.knownHostDao(), credentialVault = credentialVault, settings = settingsRepository)
+    val sessionManager = DefaultSessionManager(
+        application,
+        hostRepository,
+        database.knownHostDao(),
+        diagnosticSink = diagnosticLogRepository,
+        credentialVault = credentialVault,
+        settings = settingsRepository,
+    )
     val aiClient = OkHttpAiClient()
     val terminalCommandRunner = TerminalCommandRunner(sessionManager)
     val aiAgentManager = AiAgentManager(

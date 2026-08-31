@@ -7,6 +7,8 @@ import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.HostRepository
 import com.yang136.sshhelper.data.KnownHostDao
+import com.yang136.sshhelper.diagnosticlog.DiagnosticSink
+import com.yang136.sshhelper.diagnosticlog.NoOpDiagnosticSink
 import com.yang136.sshhelper.security.CredentialVault
 import com.yang136.sshhelper.security.VaultLockedException
 import com.yang136.sshhelper.security.VaultState
@@ -93,7 +95,8 @@ class DefaultSessionManager(
     context: Context,
     private val hostRepository: HostRepository,
     private val knownHostDao: KnownHostDao,
-    private val sessionFactory: SshSessionFactory = SshSessionFactory { JschSshSession(knownHostDao) },
+    private val diagnosticSink: DiagnosticSink = NoOpDiagnosticSink,
+    private val sessionFactory: SshSessionFactory = SshSessionFactory { JschSshSession(knownHostDao, diagnostics = diagnosticSink) },
     private val credentialVault: CredentialVault? = null,
     private val settings: SettingsRepository? = null,
 ) : SessionManager {
@@ -351,7 +354,7 @@ class DefaultSessionManager(
         }
         appendLocal(runtime, "\r\n\u001b[36m—— 正在建立新的 SSH Shell ——\u001b[0m\r\n")
         runtime.ssh.connect(
-            SshRoute(runtime.state.value.profile, runtime.state.value.jumpProfile),
+            diagnosticRoute(runtime),
             routeCredentials,
             openShell = openShellFor(runtime),
         )
@@ -526,7 +529,7 @@ class DefaultSessionManager(
         replaceRouteCredentials(runtime, stored)
         try {
             runtime.ssh.connect(
-                SshRoute(runtime.state.value.profile, jumpSnapshot),
+                diagnosticRoute(runtime, jumpSnapshot),
                 stored,
                 openShell = openShellFor(runtime),
             )
@@ -559,7 +562,7 @@ class DefaultSessionManager(
             while (!networkAvailable()) delay(1_000)
             val routeCredentials = runtime.routeCredentials ?: break
             runtime.ssh.connect(
-                SshRoute(runtime.state.value.profile, runtime.state.value.jumpProfile),
+                diagnosticRoute(runtime),
                 routeCredentials,
                 openShell = openShellFor(runtime),
             )
@@ -641,6 +644,14 @@ class DefaultSessionManager(
     /** 会话是否需要 shell 通道：只有 SHELL 功能会话才创建（转发专用会话不创建）。 */
     private fun openShellFor(runtime: RuntimeSession): Boolean =
         SessionFeature.SHELL in runtime.state.value.features
+
+    private fun diagnosticRoute(runtime: RuntimeSession, jump: HostProfile? = runtime.state.value.jumpProfile): SshRoute =
+        SshRoute(
+            target = runtime.state.value.profile,
+            jump = jump,
+            diagnosticSessionId = runtime.id.value,
+            diagnosticFeature = runtime.state.value.features.sortedBy(SessionFeature::name).joinToString("+") { it.name },
+        )
 
     private suspend fun restoreVaultCredentials() {
         synchronized(runtimes) { runtimes.values.toList() }.forEach { runtime ->

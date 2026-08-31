@@ -19,6 +19,14 @@ import com.yang136.sshhelper.data.ForwardType
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
+import com.yang136.sshhelper.diagnosticlog.DiagnosticEventLevel
+import com.yang136.sshhelper.diagnosticlog.DiagnosticEventStage
+import com.yang136.sshhelper.diagnosticlog.DiagnosticHop
+import com.yang136.sshhelper.diagnosticlog.DiagnosticSink
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceContext
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceStatus
+import com.yang136.sshhelper.diagnosticlog.NoOpDiagnosticSink
 import com.yang136.sshhelper.sftp.JschSftpClient
 import com.yang136.sshhelper.sftp.SftpClient
 import java.io.IOException
@@ -58,6 +66,7 @@ import kotlinx.coroutines.sync.withLock
 class JschSshSession(
     private val knownHostDao: KnownHostDao,
     private val allowHostKeyPrompt: Boolean = true,
+    private val diagnostics: DiagnosticSink = NoOpDiagnosticSink,
 ) : SshSession, SftpCapableSession, PortForwardCapableSession {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -66,6 +75,7 @@ class JschSshSession(
     private val mutableStage = MutableStateFlow(ConnectionStage.READY)
     private val hostKeyDecision = AtomicReference<CompletableDeferred<Boolean>?>(null)
     private val writeMutex = Mutex()
+    private val activeTraceId = AtomicReference<String?>(null)
 
     override val state: StateFlow<ConnectionState> = mutableState.asStateFlow()
     override val output: Flow<ByteArray> = mutableOutput.asSharedFlow()
@@ -147,6 +157,27 @@ class JschSshSession(
 
     private suspend fun connectLocked(route: SshRoute, credentials: RouteCredentials, openShell: Boolean) {
         disconnectInternal("正在重新连接", DisconnectCause.UNKNOWN, publishState = false)
+        finishDiagnostics(DiagnosticTraceStatus.SUCCEEDED, "连接被新的连接替换")
+        val traceId = diagnostics.startTrace(
+            DiagnosticTraceContext(
+                source = DiagnosticTraceSource.SSH_CONNECTION,
+                target = "${route.target.hostname}:${route.target.port}",
+                hostId = route.target.id.takeIf { it > 0 },
+                sessionId = route.diagnosticSessionId,
+                feature = route.diagnosticFeature ?: if (openShell) "SHELL" else "HEADLESS",
+            ),
+        )
+        activeTraceId.set(traceId)
+        diagnostics.record(
+            traceId,
+            DiagnosticEventStage.LIFECYCLE,
+            "ssh.connect_started",
+            "开始建立 SSH 连接",
+            details = mapOf(
+                "route" to if (route.jump == null) "direct" else "jump",
+                "target" to "${route.target.hostname}:${route.target.port}",
+            ),
+        )
         mutableStage.value = if (route.jump != null) ConnectionStage.JUMP_AUTH else ConnectionStage.TARGET_AUTH
         mutableState.value = ConnectionState.Connecting
         try {
@@ -156,6 +187,7 @@ class JschSshSession(
                     route.jump,
                     jumpCredential,
                     HostKeySubject.JUMP,
+                    traceId = traceId,
                     proxyPassword = credentials.jumpProxyPassword,
                 ).also { jumpSession = it }
             } else null
@@ -164,6 +196,7 @@ class JschSshSession(
                 route.target,
                 credentials.target,
                 HostKeySubject.TARGET,
+                traceId = traceId,
                 proxyVia = jump,
                 proxyPassword = credentials.targetProxyPassword,
             )
@@ -178,6 +211,7 @@ class JschSshSession(
                 writer = newChannel.outputStream
                 channel = newChannel
                 newChannel.connect(SSH_CONNECT_TIMEOUT_MS)
+                diagnostics.record(traceId, DiagnosticEventStage.CHANNEL, "ssh.shell_opened", "Shell 通道已建立", hop = DiagnosticHop.TARGET)
                 shellEnabled = true
                 newChannel.inputStream
             } else {
@@ -193,12 +227,24 @@ class JschSshSession(
             }
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Connected(connectedLabel(route))
+            diagnostics.record(traceId, DiagnosticEventStage.LIFECYCLE, "ssh.connected", "SSH 连接已就绪", hop = DiagnosticHop.TARGET)
             readerJob = scope.launch {
                 val stream = input
                 if (stream != null) readOutput(stream) else watchTransport()
             }
         } catch (error: Throwable) {
-            if (error is CancellationException) throw error
+            if (error is CancellationException) {
+                diagnostics.record(traceId, DiagnosticEventStage.LIFECYCLE, "ssh.connect_cancelled", "SSH 连接已取消", DiagnosticEventLevel.WARNING)
+                finishDiagnostics(DiagnosticTraceStatus.CANCELLED, "连接已取消")
+                throw error
+            }
+            diagnostics.record(
+                traceId,
+                DiagnosticEventStage.LIFECYCLE,
+                "ssh.connect_failed",
+                error.toChineseMessage(),
+                DiagnosticEventLevel.ERROR,
+            )
             val pendingHostKey = mutableHostKeyRequest.value
             disconnectInternal("连接失败", DisconnectCause.UNKNOWN, publishState = false)
             if (pendingHostKey?.issue == HostKeyIssue.CHANGED) {
@@ -206,6 +252,7 @@ class JschSshSession(
             }
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Error(error.toChineseMessage())
+            finishDiagnostics(DiagnosticTraceStatus.FAILED, error.toChineseMessage())
         }
     }
 
@@ -246,12 +293,20 @@ class JschSshSession(
         profile: HostProfile,
         credential: Credential,
         subject: HostKeySubject,
+        traceId: String,
         proxyVia: Session? = null,
         proxyPassword: String? = null,
     ): Session {
         val expected = runBlocking { knownHostDao.find(profile.hostname, profile.port) }
         val verifier = SessionHostKeyRepository(profile, expected, subject)
-        val jsch = JSch().apply { hostKeyRepository = verifier }
+        val hop = when (subject) {
+            HostKeySubject.JUMP -> DiagnosticHop.JUMP
+            HostKeySubject.TARGET -> if (proxyVia == null) DiagnosticHop.DIRECT else DiagnosticHop.TARGET
+        }
+        val jsch = JSch().apply {
+            hostKeyRepository = verifier
+            setInstanceLogger(JschDiagnosticLogger(diagnostics, traceId, hop))
+        }
         when (credential) {
             is Credential.PrivateKey -> {
                 val passphrase = credential.passphrase?.concatToString()?.encodeToByteArray()
@@ -298,7 +353,30 @@ class JschSshSession(
                 profile.connectionProxy(proxyPassword)?.let { setProxy(it) }
             }
         }
+        diagnostics.record(
+            traceId,
+            if (profile.proxyType == null && proxyVia == null) DiagnosticEventStage.TCP else DiagnosticEventStage.PROXY,
+            "ssh.transport_started",
+            "正在连接 ${profile.hostname}:${profile.port}",
+            hop = hop,
+            details = mapOf("transport" to when {
+                proxyVia != null -> "jump-direct-tcpip"
+                profile.proxyType != null -> profile.proxyType.name
+                else -> "tcp"
+            }),
+        )
         newSession.connect(SSH_CONNECT_TIMEOUT_MS)
+        diagnostics.record(
+            traceId,
+            DiagnosticEventStage.HOST_KEY,
+            "ssh.host_key_verified",
+            "服务器主机密钥已验证",
+            hop = hop,
+            details = mapOf(
+                "keyType" to (newSession.hostKey?.type ?: "unknown"),
+                "serverVersion" to newSession.serverVersion,
+            ),
+        )
         return newSession
     }
 
@@ -387,7 +465,11 @@ class JschSshSession(
 
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
         lifecycleMutex.withLock {
+            activeTraceId.get()?.let { traceId ->
+                diagnostics.record(traceId, DiagnosticEventStage.DISCONNECT, "ssh.user_disconnect", "用户主动断开 SSH 连接")
+            }
             disconnectInternal("连接已关闭", DisconnectCause.USER, publishState = true)
+            finishDiagnostics(DiagnosticTraceStatus.SUCCEEDED, "用户主动断开连接")
         }
     }
 
@@ -421,7 +503,29 @@ class JschSshSession(
     }
 
     private fun publishUnexpectedDisconnect(disconnected: ConnectionState.Disconnected) {
-        if (mutableState.value is ConnectionState.Connected) mutableState.value = disconnected
+        if (mutableState.value is ConnectionState.Connected) {
+            mutableState.value = disconnected
+            activeTraceId.get()?.let { traceId ->
+                diagnostics.record(
+                    traceId,
+                    DiagnosticEventStage.DISCONNECT,
+                    "ssh.unexpected_disconnect",
+                    disconnected.reason,
+                    DiagnosticEventLevel.ERROR,
+                    details = mapOf("cause" to disconnected.cause.name),
+                )
+            }
+            finishDiagnosticsAsync(DiagnosticTraceStatus.FAILED, disconnected.reason)
+        }
+    }
+
+    private suspend fun finishDiagnostics(status: DiagnosticTraceStatus, summary: String) {
+        activeTraceId.getAndSet(null)?.let { diagnostics.finishTrace(it, status, summary) }
+    }
+
+    private fun finishDiagnosticsAsync(status: DiagnosticTraceStatus, summary: String) {
+        val traceId = activeTraceId.getAndSet(null) ?: return
+        scope.launch { diagnostics.finishTrace(traceId, status, summary) }
     }
 
     private fun classifyDisconnect(error: Throwable?): ConnectionState.Disconnected {
@@ -508,6 +612,12 @@ class JschSshSession(
         job?.cancel()
         mutableStage.value = ConnectionStage.READY
         mutableState.value = ConnectionState.Disconnected("应用已关闭连接", DisconnectCause.APP_CLOSED)
+        activeTraceId.getAndSet(null)?.let { traceId ->
+            diagnostics.record(traceId, DiagnosticEventStage.DISCONNECT, "ssh.app_closed", "应用已关闭连接")
+            runBlocking(Dispatchers.IO) {
+                diagnostics.finishTrace(traceId, DiagnosticTraceStatus.SUCCEEDED, "应用已关闭连接")
+            }
+        }
         scope.cancel()
     }
 
@@ -524,7 +634,13 @@ class JschSshSession(
             }
             if (expected != null) {
                 if (compareHostKey(expected.keyBase64, key) == HostKeyMatch.MATCH) {
+                    activeTraceId.get()?.let { traceId ->
+                        diagnostics.record(traceId, DiagnosticEventStage.HOST_KEY, "ssh.host_key_match", "主机密钥与已保存指纹一致", hop = subject.toDiagnosticHop())
+                    }
                     return HostKeyRepository.OK
+                }
+                activeTraceId.get()?.let { traceId ->
+                    diagnostics.record(traceId, DiagnosticEventStage.HOST_KEY, "ssh.host_key_changed", "主机密钥与已保存指纹不一致", DiagnosticEventLevel.ERROR, subject.toDiagnosticHop())
                 }
                 mutableHostKeyRequest.value = HostKeyRequest(
                     profile.hostname,
@@ -548,6 +664,9 @@ class JschSshSession(
                 subject = subject,
             )
             if (!allowHostKeyPrompt) {
+                activeTraceId.get()?.let { traceId ->
+                    diagnostics.record(traceId, DiagnosticEventStage.HOST_KEY, "ssh.host_key_unknown", "未知主机密钥，当前连接不允许交互确认", DiagnosticEventLevel.WARNING, subject.toDiagnosticHop())
+                }
                 mutableHostKeyRequest.value = request
                 return HostKeyRepository.NOT_INCLUDED
             }
@@ -558,6 +677,17 @@ class JschSshSession(
             val accepted = runBlocking {
                 withTimeoutOrNull(HOST_KEY_CONFIRM_TIMEOUT_MS) { decision.await() }
             } ?: false
+            activeTraceId.get()?.let { traceId ->
+                diagnostics.record(
+                    traceId,
+                    DiagnosticEventStage.HOST_KEY,
+                    if (accepted) "ssh.host_key_accepted" else "ssh.host_key_rejected",
+                    if (accepted) "用户接受新的主机密钥" else "用户拒绝或未确认新的主机密钥",
+                    if (accepted) DiagnosticEventLevel.INFO else DiagnosticEventLevel.WARNING,
+                    subject.toDiagnosticHop(),
+                    mapOf("keyType" to request.keyType, "fingerprint" to request.fingerprint),
+                )
+            }
             mutableHostKeyRequest.value = null
             if (!accepted) return HostKeyRepository.NOT_INCLUDED
             runBlocking {
@@ -652,6 +782,11 @@ private inline fun <reified T : Throwable> Throwable?.hasCause(): Boolean {
 }
 
 private fun Throwable.safeMessage(): String = message?.takeIf(String::isNotBlank)?.take(160) ?: this::class.java.simpleName
+
+private fun HostKeySubject.toDiagnosticHop(): DiagnosticHop = when (this) {
+    HostKeySubject.JUMP -> DiagnosticHop.JUMP
+    HostKeySubject.TARGET -> DiagnosticHop.TARGET
+}
 
 internal const val SSH_CONNECT_TIMEOUT_MS = 15_000
 /**

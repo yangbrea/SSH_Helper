@@ -11,6 +11,8 @@ import com.yang136.sshhelper.data.HostProfile
 data class SshRoute(
     val target: HostProfile,
     val jump: HostProfile? = null,
+    val diagnosticSessionId: String? = null,
+    val diagnosticFeature: String? = null,
 )
 
 /** Credentials for each hop; [jump] is null when the route is direct. */

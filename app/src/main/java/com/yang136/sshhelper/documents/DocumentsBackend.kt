@@ -11,6 +11,8 @@ import com.yang136.sshhelper.MainActivity
 import com.yang136.sshhelper.R
 import com.yang136.sshhelper.data.AppDatabase
 import com.yang136.sshhelper.data.HostProfile
+import com.yang136.sshhelper.diagnosticlog.DiagnosticSink
+import com.yang136.sshhelper.diagnosticlog.NoOpDiagnosticSink
 import com.yang136.sshhelper.sftp.RemoteFile
 import com.yang136.sshhelper.sftp.RemoteFileType
 import com.yang136.sshhelper.sftp.SftpClient
@@ -64,8 +66,9 @@ class SshDocumentsBackend(
     private val context: Context,
     private val database: AppDatabase,
     private val access: DocumentAccessManager,
+    diagnostics: DiagnosticSink = NoOpDiagnosticSink,
 ) : DocumentsBackend {
-    private val pool = DocumentsSessionPool(database, access)
+    private val pool = DocumentsSessionPool(database, access, diagnostics)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val cacheDirectory = File(context.noBackupFilesDir, "documents-provider").apply { mkdirs() }
 
@@ -267,6 +270,7 @@ class SshDocumentsBackend(
 private class DocumentsSessionPool(
     private val database: AppDatabase,
     private val access: DocumentAccessManager,
+    private val diagnostics: DiagnosticSink,
 ) {
     private data class Slot(val session: JschSshSession, var leases: Int = 0, var lastUsed: Long = 0)
     private val mutex = Mutex()
@@ -301,9 +305,9 @@ private class DocumentsSessionPool(
             check(slots.size < MAX_SESSIONS) { "系统文件连接数已达到上限，请稍后重试" }
         }
         val authorized = access.authorizedRoute(hostId)
-        val session = JschSshSession(database.knownHostDao(), allowHostKeyPrompt = false)
+        val session = JschSshSession(database.knownHostDao(), allowHostKeyPrompt = false, diagnostics = diagnostics)
         try {
-            session.connect(authorized.route, authorized.credentials, openShell = false)
+            session.connect(authorized.route.copy(diagnosticFeature = "DOCUMENTS"), authorized.credentials, openShell = false)
         } finally {
             clearCredential(authorized.credentials.target)
             clearCredential(authorized.credentials.jump)
