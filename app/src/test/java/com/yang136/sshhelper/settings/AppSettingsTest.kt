@@ -11,6 +11,7 @@ class AppSettingsTest {
         assertEquals(14, AppSettings().terminalFontSize)
         // 锁库后活动转发隧道凭据租约默认开启（产品决策）。
         assertEquals(true, AppSettings().forwardReconnectAfterLock)
+        assertEquals(null, AppSettings().lastLocalRootUri)
     }
 
     @Test

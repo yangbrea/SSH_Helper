@@ -3,6 +3,7 @@ package com.yang136.sshhelper.sftp
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.yang136.sshhelper.data.AppDatabase
@@ -25,6 +26,17 @@ data class LocalTreeEntry(val file: LocalFile, val relativePath: String)
 
 class SftpRepository(private val context: Context, private val database: AppDatabase) {
     val localRoots: Flow<List<LocalRootEntity>> = database.localRootDao().observeAll()
+
+    /**
+     * 返回系统外部存储 Download 目录的 SAF 初始 URI，用于打开目录选择器时尽量定位到 Download。
+     * 某些设备/ROM 可能不支持该 provider 或路径，此时返回 null，选择器回退到默认位置。
+     */
+    fun downloadInitialUri(): Uri? = runCatching {
+        DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            "primary:${Environment.DIRECTORY_DOWNLOADS}",
+        )
+    }.getOrNull()
 
     fun bookmarks(hostId: Long): Flow<List<SftpBookmarkEntity>> = database.sftpBookmarkDao().observeForHost(hostId)
 

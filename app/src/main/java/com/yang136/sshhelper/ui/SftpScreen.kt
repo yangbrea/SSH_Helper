@@ -185,6 +185,7 @@ fun SftpScreen(
     var showCreateDirectory by remember { mutableStateOf(false) }
     var deletingRemote by remember { mutableStateOf(false) }
     var deletingLocal by remember { mutableStateOf(false) }
+    var pendingRemoveRoot by remember { mutableStateOf<LocalRootEntity?>(null) }
     var properties by remember { mutableStateOf<RemoteFile?>(null) }
     var preview by remember { mutableStateOf<RemotePreview?>(null) }
     var imagePreview by remember { mutableStateOf<RemoteFile?>(null) }
@@ -302,7 +303,8 @@ fun SftpScreen(
                         onPropertiesRemote = { properties = it },
                         onPreview = openPreview,
                         onShowTransfers = { showTransfers = true },
-                        onAddLocalRoot = { rootPicker.launch(null) },
+                        onAddLocalRoot = { rootPicker.launch(viewModel.downloadInitialUri()) },
+                        onRemoveLocalRoot = { pendingRemoveRoot = it },
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )
                 }
@@ -319,7 +321,7 @@ fun SftpScreen(
                         if (mobilePane == MobilePane.REMOTE) {
                             RemotePane(viewModel, state, remoteSearching, { remoteSearching = it }, Modifier.weight(1f).fillMaxWidth(), onCreateDirectory = { showCreateDirectory = true }, onDelete = { deletingRemote = true }, onProperties = { properties = it }, onPreview = openPreview, onDownload = viewModel::downloadSelected)
                         } else {
-                            LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(null) }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
+                            LocalPane(viewModel, state, roots, localSearching, { localSearching = it }, Modifier.weight(1f).fillMaxWidth(), onAddRoot = { rootPicker.launch(viewModel.downloadInitialUri()) }, onRemoveRoot = { pendingRemoveRoot = it }, onDelete = { deletingLocal = true }, onUpload = viewModel::uploadSelected)
                         }
                     }
                 }
@@ -343,6 +345,20 @@ fun SftpScreen(
     if (showCreateDirectory) NameDialog("新建远程目录", "目录名称", { showCreateDirectory = false }) { viewModel.createRemoteDirectory(it); showCreateDirectory = false }
     if (deletingRemote) ConfirmDeleteDialog(state.selectedRemote.size, { deletingRemote = false }) { viewModel.deleteSelectedRemote(); deletingRemote = false }
     if (deletingLocal) ConfirmDeleteDialog(state.selectedLocal.size, { deletingLocal = false }) { viewModel.deleteSelectedLocal(); deletingLocal = false }
+    pendingRemoveRoot?.let { root ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoveRoot = null },
+            title = { Text("移除本地目录授权？") },
+            text = { Text("将不再显示“${root.displayName}”，并释放该目录的访问权限。不会删除手机上的任何文件。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removeLocalRoot(root)
+                    pendingRemoveRoot = null
+                }) { Text("移除") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRemoveRoot = null }) { Text("取消") } },
+        )
+    }
     properties?.let { file -> RemotePropertiesDialog(file, onDismiss = { properties = null }, onApply = { mode, uid, gid -> viewModel.chmod(file, mode); viewModel.chown(file, uid, gid); properties = null }) }
     if (showTransfers) TransferSheet(transfers, viewModel, onDismiss = { showTransfers = false })
     preview?.let { item -> PreviewDialog(item, editingText, onTextChange = { editingText = it }, onDismiss = {
@@ -495,6 +511,7 @@ private fun LocalPane(
     onSearchingChange: (Boolean) -> Unit,
     modifier: Modifier,
     onAddRoot: () -> Unit,
+    onRemoveRoot: (LocalRootEntity) -> Unit,
     onDelete: () -> Unit,
     onUpload: () -> Unit,
 ) {
@@ -527,7 +544,17 @@ private fun LocalPane(
                 onMore = { browseMenu = true },
                 menu = {
                     DropdownMenu(rootsMenu, { rootsMenu = false }) {
-                        roots.forEach { root -> DropdownMenuItem({ Text(root.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = { rootsMenu = false; vm.chooseLocalRoot(root) }) }
+                        roots.forEach { root ->
+                            DropdownMenuItem(
+                                text = { Text(root.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { rootsMenu = false; vm.chooseLocalRoot(root) },
+                                trailingIcon = {
+                                    IconButton(onClick = { rootsMenu = false; onRemoveRoot(root) }) {
+                                        Icon(Icons.Default.Close, "移除授权")
+                                    }
+                                },
+                            )
+                        }
                         DropdownMenuItem({ Text("授权新目录") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { rootsMenu = false; onAddRoot() })
                     }
                     LocalBrowseMenu(

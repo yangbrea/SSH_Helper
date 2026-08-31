@@ -169,7 +169,6 @@ class MainActivity : FragmentActivity() {
                                 initialDestination = initialDestination,
                                 hosts = { modifier, _ -> HostsScreen(
                                 onAdd = { navController.navigate("edit/0") },
-                                onDiscover = { navController.navigate("discover") },
                                 onDiagnostics = { hostId -> navController.navigate(networkDiagnosticsRoute(hostId)) },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
@@ -397,7 +396,18 @@ class MainActivity : FragmentActivity() {
                             PortScannerScreen(
                                 initialTarget = entry.arguments?.getString("target").orEmpty(),
                                 initialNetworkId = entry.arguments?.getString("networkId").orEmpty(),
-                                autoStartFullScan = entry.arguments?.getBoolean("full") ?: false,
+                                preselectFullScan = entry.arguments?.getBoolean("full") ?: false,
+                                hosts = hosts,
+                                onSsh = { name, address, port, existingHostId ->
+                                    if (existingHostId != null) {
+                                        navController.navigate("edit/$existingHostId")
+                                    } else {
+                                        navController.navigate(
+                                            "edit/0?seedName=${Uri.encode(name)}&seedHost=${Uri.encode(address)}&seedPort=$port",
+                                        )
+                                    }
+                                },
+                                onDiagnosticLogs = { navController.navigate("diagnostic-logs") },
                                 onBack = navController::popBackStack,
                             )
                         }

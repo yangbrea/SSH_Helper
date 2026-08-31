@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -124,11 +126,24 @@ class SftpViewModel(
                 connected = nowConnected
             }
         }
+        // 自动恢复上次选中的本地根目录：只要当前还没选中，且记忆 URI 仍在已授权列表中。
+        viewModelScope.launch {
+            combine(container.sftpRepository.localRoots, container.settingsRepository.settings) { roots, settings ->
+                roots to settings.lastLocalRootUri
+            }.collect { (roots, lastUri) ->
+                if (mutableState.value.localRoot == null) {
+                    roots.firstOrNull { it.uri == lastUri }?.let(::chooseLocalRoot)
+                }
+            }
+        }
     }
 
     fun connect(credential: Credential, remember: Boolean) = viewModelScope.launch {
         container.sessionManager.connect(sessionId, credential, remember)
     }
+
+    /** 打开本地目录选择器时使用的初始 URI，尽量定位到系统 Download 目录。 */
+    fun downloadInitialUri(): Uri? = container.sftpRepository.downloadInitialUri()
 
     fun respondToHostKey(accept: Boolean) = container.sessionManager.respondToHostKey(sessionId, accept)
     fun forgetChangedHostKey() = viewModelScope.launch { container.sessionManager.forgetChangedHostKey(sessionId) }
@@ -156,6 +171,7 @@ class SftpViewModel(
 
     fun chooseLocalRoot(root: LocalRootEntity) {
         mutableState.value = mutableState.value.copy(localRoot = root, localUri = Uri.parse(root.uri), localBackStack = emptyList(), selectedLocal = emptySet())
+        viewModelScope.launch { container.settingsRepository.setLastLocalRootUri(root.uri) }
         refreshLocal()
     }
 
@@ -182,11 +198,32 @@ class SftpViewModel(
     }
 
     fun addLocalRoot(uri: Uri, name: String) = viewModelScope.launch {
-        runCatching { container.sftpRepository.addLocalRoot(uri, name) }
-            .onFailure { mutableState.value = mutableState.value.copy(error = it.message) }
+        runCatching {
+            container.sftpRepository.addLocalRoot(uri, name)
+            container.sftpRepository.localRoots.first().firstOrNull { it.uri == uri.toString() }
+        }.onSuccess { root ->
+            root?.let(::chooseLocalRoot)
+        }.onFailure {
+            mutableState.value = mutableState.value.copy(error = it.message)
+        }
     }
 
-    fun removeLocalRoot(root: LocalRootEntity) = viewModelScope.launch { container.sftpRepository.removeLocalRoot(root) }
+    fun removeLocalRoot(root: LocalRootEntity) = viewModelScope.launch {
+        container.sftpRepository.removeLocalRoot(root)
+        if (mutableState.value.localRoot?.id == root.id) {
+            mutableState.value = mutableState.value.copy(
+                localRoot = null,
+                localUri = null,
+                localBackStack = emptyList(),
+                localFiles = emptyList(),
+                selectedLocal = emptySet(),
+            )
+        }
+        val settings = container.settingsRepository.settings.first()
+        if (settings.lastLocalRootUri == root.uri) {
+            container.settingsRepository.setLastLocalRootUri(null)
+        }
+    }
 
     fun setRemoteQuery(value: String) = updateRemoteView { copy(query = value) }
     fun setRemoteShowHidden(value: Boolean) = updateRemoteView { copy(showHidden = value) }

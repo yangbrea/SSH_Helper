@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
-device="${SSH_HELPER_ADB_TARGET:-192.168.2.35:43631}"
+device="${SSH_HELPER_ADB_TARGET:-192.168.1.100:5555}"
 apk_path="${SSH_HELPER_APK_PATH:-$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk}"
 launch_app=true
 package_name="com.yang136.sshhelper"
@@ -22,7 +22,7 @@ show_help() {
   --no-launch           安装后不启动应用
   -h, --help            显示帮助
 
-默认设备：192.168.2.35:43631
+默认设备：192.168.1.100:5555
 环境变量：SSH_HELPER_ADB_TARGET、SSH_HELPER_APK_PATH
 EOF
 }

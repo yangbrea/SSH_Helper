@@ -63,6 +63,8 @@ data class AppSettings(
      * 开启时凭据的生命周期 = 隧道生命周期；关闭时断线后必须回应用解锁才能恢复。
      */
     val forwardReconnectAfterLock: Boolean = true,
+    /** SFTP 本地面板上次选中的本地根目录 URI；为空表示没有记忆或已失效。 */
+    val lastLocalRootUri: String? = null,
 )
 
 val AppSettings.effectiveThemeMode: ThemeMode
@@ -88,6 +90,7 @@ interface SettingsRepository {
     suspend fun setAiSendContext(enabled: Boolean)
     suspend fun setAiShowBubble(enabled: Boolean)
     suspend fun setForwardReconnectAfterLock(enabled: Boolean)
+    suspend fun setLastLocalRootUri(uri: String?)
 }
 
 private val Context.settingsDataStore by preferencesDataStore(name = "app_settings")
@@ -116,6 +119,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 aiSendContext = preferences[AI_SEND_CONTEXT] ?: true,
                 aiShowBubble = preferences[AI_SHOW_BUBBLE] ?: true,
                 forwardReconnectAfterLock = preferences[FORWARD_RECONNECT_AFTER_LOCK] ?: true,
+                lastLocalRootUri = preferences[LAST_LOCAL_ROOT_URI],
             )
         }
 
@@ -171,6 +175,12 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         dataStore.edit { it[FORWARD_RECONNECT_AFTER_LOCK] = enabled }
     }
 
+    override suspend fun setLastLocalRootUri(uri: String?) {
+        dataStore.edit {
+            if (uri == null) it.remove(LAST_LOCAL_ROOT_URI) else it[LAST_LOCAL_ROOT_URI] = uri
+        }
+    }
+
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
@@ -185,6 +195,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val AI_SEND_CONTEXT = booleanPreferencesKey("ai_send_context")
         val AI_SHOW_BUBBLE = booleanPreferencesKey("ai_show_bubble")
         val FORWARD_RECONNECT_AFTER_LOCK = booleanPreferencesKey("forward_reconnect_after_lock")
+        val LAST_LOCAL_ROOT_URI = stringPreferencesKey("last_local_root_uri")
     }
 }
 

@@ -6,9 +6,9 @@
 #
 # 用法示例:
 #   scripts/deploy.sh -t debug                       # 构建 debug 并安装到 mDNS 发现的设备
-#   scripts/deploy.sh -t release -d 192.168.2.35:41289
-#   scripts/deploy.sh -t release -d 41289 --ip 192.168.2.35
-#   scripts/deploy.sh -t release --no-build -d 192.168.2.35:41289   # 只装已有产物
+#   scripts/deploy.sh -t release -d 192.168.1.100:41289
+#   scripts/deploy.sh -t release -d 41289 --ip 192.168.1.100
+#   scripts/deploy.sh -t release --no-build -d 192.168.1.100:41289   # 只装已有产物
 #   scripts/deploy.sh -t release --apk /path/app-release.apk -d ... # 装指定 APK
 
 set -Eeuo pipefail
@@ -40,7 +40,7 @@ show_help() {
 选项：
   -t, --type debug|release   构建类型（默认 debug）
   -d, --device TARGET        ADB 目标：ip:port / 纯端口 / 设备序列号
-  --ip IP                    设备 IP；纯端口参数或 mDNS 扫描时用于匹配（默认 192.168.2.35）
+  --ip IP                    设备 IP；纯端口参数或 mDNS 扫描时用于匹配（默认 192.168.1.100）
   -s, --scan                 强制 mDNS 扫描发现设备（默认：未指定 device 时自动尝试）
       --no-scan              禁用自动扫描（未指定 device 时直接报错）
   -a, --apk PATH             使用指定 APK 并跳过构建
@@ -82,7 +82,7 @@ while (($# > 0)); do
     esac
 done
 
-[[ -z "$ip" ]] && ip="${SSH_HELPER_IP:-192.168.2.35}"
+[[ -z "$ip" ]] && ip="${SSH_HELPER_IP:-192.168.1.100}"
 
 # ---------- 解析 ADB 目标 ----------
 resolve_target() {

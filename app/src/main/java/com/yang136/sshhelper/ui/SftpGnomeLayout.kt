@@ -92,6 +92,7 @@ internal fun GnomeSftpLayout(
     onPreview: (RemoteFile) -> Unit,
     onShowTransfers: () -> Unit,
     onAddLocalRoot: () -> Unit,
+    onRemoveLocalRoot: (LocalRootEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var activePane by rememberSaveable { mutableStateOf(GnomePane.REMOTE) }
@@ -188,6 +189,7 @@ internal fun GnomeSftpLayout(
                 onRemoveBookmark = vm::removeBookmark,
                 onChooseRoot = { root -> switchPane(GnomePane.LOCAL); vm.chooseLocalRoot(root) },
                 onAddRoot = onAddLocalRoot,
+                onRemoveRoot = onRemoveLocalRoot,
                 onShowTransfers = onShowTransfers,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -449,6 +451,7 @@ private fun GnomePlacesSidebar(
     onRemoveBookmark: (SftpBookmarkEntity) -> Unit,
     onChooseRoot: (LocalRootEntity) -> Unit,
     onAddRoot: () -> Unit,
+    onRemoveRoot: (LocalRootEntity) -> Unit,
     onShowTransfers: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -471,11 +474,12 @@ private fun GnomePlacesSidebar(
         PlacesHeader("本地")
         roots.forEach { root ->
             Row(
-                Modifier.fillMaxWidth().clickable { onChooseRoot(root) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().clickable { onChooseRoot(root) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Default.Folder, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(root.displayName, Modifier.padding(start = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                Text(root.displayName, Modifier.weight(1f).padding(horizontal = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                IconButton(onClick = { onRemoveRoot(root) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "移除授权", Modifier.size(16.dp)) }
             }
         }
         Row(Modifier.fillMaxWidth().clickable(onClick = onAddRoot).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

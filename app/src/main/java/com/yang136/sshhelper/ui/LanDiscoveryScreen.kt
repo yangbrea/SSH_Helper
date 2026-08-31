@@ -237,7 +237,6 @@ fun LanDiscoveryScreen(
                         mode = state.mode,
                         hosts = hosts,
                         onSelect = onSelect,
-                        onPortScan = { onPortScan(device.address, device.networkId) },
                         onOpenDetails = { vm.openDetails(device.address) },
                     )
                 }
@@ -305,12 +304,10 @@ private fun DiscoveryDeviceCard(
     mode: ScanMode,
     hosts: List<HostProfile>,
     onSelect: (String, String, Int, Long?) -> Unit,
-    onPortScan: () -> Unit,
     onOpenDetails: () -> Unit,
 ) {
-    val modifier = if (mode == ScanMode.GENERAL) Modifier.clickable(onClick = onOpenDetails) else Modifier
     Card(
-        modifier = modifier,
+        modifier = Modifier.clickable(onClick = onOpenDetails),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .72f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -343,12 +340,9 @@ private fun DiscoveryDeviceCard(
                 device.endpoints.values.sortedBy(DiscoveredService::port).forEach { endpoint ->
                     SshEndpointAction(device, endpoint, hosts, onSelect)
                 }
+                Text("点击查看详情与完整端口扫描", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             } else {
                 Text("点击查看服务与操作", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-            }
-            OutlinedButton(onClick = onPortScan, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Radar, null)
-                Text(" 完整端口扫描")
             }
         }
     }

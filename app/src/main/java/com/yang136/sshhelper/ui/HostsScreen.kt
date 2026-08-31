@@ -33,7 +33,6 @@ private val HOSTS_MASTER_LIST_WIDTH = 360.dp
 @Composable
 fun HostsScreen(
     onAdd: () -> Unit,
-    onDiscover: () -> Unit,
     onDiagnostics: (Long) -> Unit,
     onEdit: (HostProfile) -> Unit,
     onOpenHost: (HostProfile) -> Unit,
@@ -96,8 +95,6 @@ fun HostsScreen(
                 title = "主机",
                 subtitle = "${hosts.size} 台主机 · ${sessions.size} 个活动会话",
                 actions = {
-                    IconButton(onClick = { onDiagnostics(0L) }) { Icon(Icons.Default.NetworkCheck, "网络诊断") }
-                    IconButton(onClick = onDiscover) { Icon(Icons.Default.Devices, "扫描局域网") }
                     IconButton(onClick = onVaultClick) { Icon(vaultIcon(vaultState), vaultDescription(vaultState)) }
                     IconButton(onClick = onSnippets) { Icon(Icons.Default.Terminal, "快捷命令") }
                 },
