@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 import androidx.compose.runtime.Composable
@@ -12,8 +11,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.yang136.sshhelper.terminal.GhosttyNativeBridge
-import com.yang136.sshhelper.terminal.RenderSnapshotDecoder
+import com.yang136.sshhelper.terminal.GhosttyRenderCell
 import com.yang136.sshhelper.terminal.GhosttyRenderSnapshot
+import com.yang136.sshhelper.terminal.RenderSnapshotDecoder
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -49,6 +49,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var rows = 0
     private var backgroundArgb = Color.BLACK
     private var foregroundArgb = Color.WHITE
+
+    // Grid cache for partial redraws: native snapshots may only contain dirty
+    // rows, but drawing every frame must still render the untouched rows.
+    private var grid: Array<Array<GhosttyRenderCell?>>? = null
 
     private var snapshotBuffer = ByteBuffer
         .allocateDirect(INITIAL_BUFFER_BYTES)
@@ -105,6 +109,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         if (newCols == cols && newRows == rows) return
         cols = newCols
         rows = newRows
+        grid = null
         GhosttyNativeBridge.nativeResize(
             handle,
             cols,
@@ -115,11 +120,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         onGridResize?.invoke(cols, rows)
     }
 
+    private fun ensureGrid(snapshot: GhosttyRenderSnapshot) {
+        val current = grid
+        if (current != null &&
+            current.size == snapshot.rows &&
+            (snapshot.rows == 0 || current[0].size == snapshot.cols)
+        ) {
+            return
+        }
+        grid = Array(snapshot.rows) {
+            arrayOfNulls<GhosttyRenderCell>(snapshot.cols)
+        }
+    }
+
+    private fun updateGrid(snapshot: GhosttyRenderSnapshot) {
+        ensureGrid(snapshot)
+        val target = grid ?: return
+        for (row in snapshot.rowsData) {
+            if (row.rowIndex !in target.indices) continue
+            target[row.rowIndex] = Array(snapshot.cols) { column ->
+                row.cells.getOrNull(column)
+            }
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (handle == 0L) return
-
-        canvas.drawColor(backgroundArgb)
 
         snapshotBuffer.clear()
         val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, snapshotBuffer)
@@ -133,28 +160,46 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
         backgroundArgb = snapshot.backgroundArgb
         foregroundArgb = snapshot.foregroundArgb
+        updateGrid(snapshot)
 
-        for (row in snapshot.rowsData) {
-            val y = row.rowIndex * cellHeightPx
+        canvas.drawColor(backgroundArgb)
+
+        val target = grid ?: return
+        for (rowIndex in target.indices) {
+            val rowCells = target[rowIndex] ?: continue
+            val y = rowIndex * cellHeightPx
             var x = 0f
-            for (cell in row.cells) {
-                val cellLeft = x
-                val cellRight = x + cellWidthPx * if (cell.wide) 2f else 1f
-                if (cell.bgArgb != snapshot.backgroundArgb) {
-                    fillPaint.color = cell.bgArgb
-                    canvas.drawRect(cellLeft, y, cellRight, y + cellHeightPx, fillPaint)
+            for (cell in rowCells) {
+                if (cell == null) {
+                    x += cellWidthPx
+                    continue
+                }
+                val effectiveBg = if (cell.inverse) cell.fgArgb else cell.bgArgb
+                val effectiveFg = if (cell.inverse) cell.bgArgb else cell.fgArgb
+                val cellWidth = cellWidthPx * if (cell.wide) 2f else 1f
+                if (cell.inverse || effectiveBg != snapshot.backgroundArgb) {
+                    fillPaint.color = effectiveBg
+                    canvas.drawRect(x, y, x + cellWidth, y + cellHeightPx, fillPaint)
                 }
                 if (cell.text.isNotEmpty() && !cell.invisible && !cell.wideTail) {
-                    textPaint.color = if (cell.inverse) cell.bgArgb else cell.fgArgb
+                    textPaint.color = effectiveFg
+                    textPaint.alpha = if (cell.faint) FAINT_ALPHA else 255
                     textPaint.isFakeBoldText = cell.bold
+                    textPaint.textSkewX = if (cell.italic) ITALIC_SKEW_X else 0f
                     textPaint.isStrikeThruText = cell.strikethrough
                     textPaint.isUnderlineText = cell.underline
-                    canvas.drawText(cell.text, cellLeft, y + baselinePx, textPaint)
+                    canvas.drawText(cell.text, x, y + baselinePx, textPaint)
+                    if (cell.overline) {
+                        canvas.drawLine(x, y + OVERLINE_OFFSET, x + cellWidth, y + OVERLINE_OFFSET, textPaint)
+                    }
                 }
+                textPaint.color = foregroundArgb
+                textPaint.alpha = 255
                 textPaint.isFakeBoldText = false
+                textPaint.textSkewX = 0f
                 textPaint.isStrikeThruText = false
                 textPaint.isUnderlineText = false
-                x = cellRight
+                x += cellWidth
             }
         }
 
@@ -191,6 +236,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private companion object {
         const val DEFAULT_FONT_SIZE_SP = 14f
         const val INITIAL_BUFFER_BYTES = 1 shl 20
+        const val FAINT_ALPHA = 150
+        const val ITALIC_SKEW_X = -0.2f
+        const val OVERLINE_OFFSET = 1f
     }
 }
 
