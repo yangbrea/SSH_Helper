@@ -45,7 +45,20 @@ android {
         val file = File(System.getProperty("user.home"), ".android/ssh_helper-release.properties")
         if (file.isFile) FileInputStream(file).use { load(it) }
     }
+    // 固定项目内 debug keystore（不提交仓库），避免 ANDROID_USER_HOME / ~/.android
+    // 变化导致 debug 签名漂移。签名一变 Android 就会把 App 当成另一个应用，
+    // Keystore 中的已保存凭据全部失效。文件不存在时回退 AGP 默认 debug 签名，
+    // 保证新克隆仓库仍可直接构建。
+    val projectDebugKeystore = rootProject.file("keystore/debug.keystore")
     signingConfigs {
+        getByName("debug") {
+            if (projectDebugKeystore.isFile) {
+                storeFile = projectDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (releaseSigning.isNotEmpty()) {
             create("release") {
                 storeFile = file(releaseSigning.getProperty("storeFile"))
@@ -57,6 +70,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

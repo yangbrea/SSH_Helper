@@ -531,6 +531,7 @@ fun TerminalScreen(
         CredentialDialog(
             authType = current.credentialProfile().authType,
             subject = current.credentialSubjectLabel(),
+            rememberByDefault = current.credentialProfile().rememberCredential,
             onDismiss = { forceCredentialDialog = false; if (current.needsCredential) closeTab(current.id) },
             onConnect = { credential, remember -> forceCredentialDialog = false; sessionsViewModel.connect(current.id, credential, remember) },
         )
@@ -1352,6 +1353,7 @@ private fun ExtraKeys(
 internal fun CredentialDialog(
     authType: AuthType,
     subject: String = "SSH 服务器",
+    rememberByDefault: Boolean = false,
     onDismiss: () -> Unit,
     onConnect: (Credential, Boolean) -> Unit,
 ) {
@@ -1360,7 +1362,7 @@ internal fun CredentialDialog(
     var passphrase by remember { mutableStateOf("") }
     var keyBytes by remember { mutableStateOf<ByteArray?>(null) }
     var keyName by remember { mutableStateOf<String?>(null) }
-    var rememberCredential by remember { mutableStateOf(false) }
+    var rememberCredential by remember { mutableStateOf(rememberByDefault) }
     var error by remember { mutableStateOf<String?>(null) }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) runCatching {

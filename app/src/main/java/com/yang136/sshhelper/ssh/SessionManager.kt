@@ -16,6 +16,7 @@ import com.yang136.sshhelper.settings.SettingsRepository
 import com.yang136.sshhelper.sftp.SftpClient
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -496,6 +497,13 @@ class DefaultSessionManager(
             CredentialLoad.Loaded(hostRepository.credentialFor(profile) ?: return CredentialLoad.Missing)
         } catch (error: VaultLockedException) {
             CredentialLoad.Locked
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // 签名变化/数据恢复后，Keystore 旧密文可能无法解密。若继续保留这条坏凭据，
+            // 每次启动都会尝试解密并失败，甚至不会弹出输入框。这里直接清掉，让用户重新输入。
+            hostRepository.deleteStoredCredential(profile)
+            CredentialLoad.Missing
         }
     }
 

@@ -20,3 +20,7 @@ build-*.log
 /app/build/ghostty/
 /.zig-cache-global/
 /.zig-cache/
+
+# Debug keystore is intentionally not committed; missing file falls back to AGP default.
+/keystore/
+
