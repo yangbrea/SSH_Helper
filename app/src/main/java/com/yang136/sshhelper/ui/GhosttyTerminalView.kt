@@ -41,14 +41,31 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var onGridResize: ((cols: Int, rows: Int) -> Unit)? = null
     private var onScrollLines: ((Int) -> Unit)? = null
     private var onInputBytes: ((ByteArray) -> Unit)? = null
+    private var onSelectionPress: ((Int, Int) -> Unit)? = null
+    private var onSelectionDrag: ((Int, Int) -> Unit)? = null
+    private var onSelectionRelease: ((Int, Int) -> Unit)? = null
+    private var onSelectionClear: (() -> Unit)? = null
+    private var onCellTap: ((Int, Int) -> Unit)? = null
     private var scrollAccum = 0f
     private var flingVelocityY = 0f
+    private var pointerDown = false
+    private var selectionActive = false
+    private var selectionModeArmed = false
 
     private val scrollDetector = GestureDetector(
         context,
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
                 flingVelocityY = 0f
+                scrollAccum = 0f
+                pointerDown = true
+                if (selectionModeArmed) {
+                    selectionModeArmed = false
+                    cellAt(e.x, e.y)?.let { (col, row) ->
+                        selectionActive = true
+                        onSelectionPress?.invoke(col, row)
+                    }
+                }
                 return true
             }
 
@@ -58,6 +75,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 distanceX: Float,
                 distanceY: Float,
             ): Boolean {
+                if (selectionActive) {
+                    cellAt(e2.x, e2.y)?.let { (col, row) ->
+                        onSelectionDrag?.invoke(col, row)
+                    }
+                    return true
+                }
                 if (cellHeightPx <= 0f) return false
                 scrollAccum += distanceY
                 val delta = (scrollAccum / cellHeightPx).toInt()
@@ -74,9 +97,22 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 velocityX: Float,
                 velocityY: Float,
             ): Boolean {
-                if (cellHeightPx <= 0f) return false
+                if (selectionActive || cellHeightPx <= 0f) return false
                 flingVelocityY = velocityY
                 postOnAnimation(flingRunnable)
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                if (!pointerDown || selectionActive) return
+                val cell = cellAt(e.x, e.y) ?: return
+                selectionActive = true
+                onSelectionPress?.invoke(cell.first, cell.second)
+            }
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (selectionActive) return false
+                cellAt(e.x, e.y)?.let { (col, row) -> onCellTap?.invoke(col, row) }
                 return true
             }
         },
@@ -174,6 +210,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         onInputBytes = callback
     }
 
+    fun setOnSelectionCallbacks(
+        onPress: (Int, Int) -> Unit,
+        onDrag: (Int, Int) -> Unit,
+        onRelease: (Int, Int) -> Unit,
+        onClear: () -> Unit,
+    ) {
+        onSelectionPress = onPress
+        onSelectionDrag = onDrag
+        onSelectionRelease = onRelease
+        onSelectionClear = onClear
+    }
+
+    fun setOnCellTap(callback: (Int, Int) -> Unit) {
+        onCellTap = callback
+    }
+
+    fun armSelectionMode() {
+        selectionModeArmed = true
+        selectionActive = false
+        requestFocus()
+    }
+
+    fun clearSelectionAndResetGesture() {
+        selectionModeArmed = false
+        selectionActive = false
+    }
+
     fun focusAndShowKeyboard() {
         requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -187,11 +250,30 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            scrollAccum = 0f
-            requestFocus()
+        val handled = scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                pointerDown = true
+                requestFocus()
+            }
+            MotionEvent.ACTION_UP -> {
+                pointerDown = false
+                if (selectionActive) {
+                    cellAt(event.x, event.y)?.let { (col, row) ->
+                        onSelectionRelease?.invoke(col, row)
+                    } ?: onSelectionRelease?.invoke(-1, -1)
+                    selectionActive = false
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                pointerDown = false
+                if (selectionActive) {
+                    onSelectionRelease?.invoke(-1, -1)
+                    selectionActive = false
+                }
+            }
         }
-        return scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
+        return handled
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
@@ -277,6 +359,13 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         removeCallbacks(cursorBlinkRunnable)
         removeCallbacks(flingRunnable)
         super.onDetachedFromWindow()
+    }
+
+    private fun cellAt(x: Float, y: Float): Pair<Int, Int>? {
+        if (cellWidthPx <= 0f || cellHeightPx <= 0f || cols <= 0 || rows <= 0) return null
+        val col = (x / cellWidthPx).toInt().coerceIn(0, cols - 1)
+        val row = (y / cellHeightPx).toInt().coerceIn(0, rows - 1)
+        return col to row
     }
 
     private fun updateMetrics() {
@@ -430,10 +519,18 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     x += cellWidthPx
                     continue
                 }
-                val effectiveBg = if (cell.inverse) cell.fgArgb else cell.bgArgb
-                val effectiveFg = if (cell.inverse) cell.bgArgb else cell.fgArgb
+                val effectiveBg = when {
+                    cell.selected -> SELECTION_BG_ARGB
+                    cell.inverse -> cell.fgArgb
+                    else -> cell.bgArgb
+                }
+                val effectiveFg = when {
+                    cell.selected -> foregroundArgb
+                    cell.inverse -> cell.bgArgb
+                    else -> cell.fgArgb
+                }
                 val cellWidth = cellWidthPx * if (cell.wide) 2f else 1f
-                if (cell.inverse || effectiveBg != snapshot.backgroundArgb) {
+                if (cell.selected || cell.inverse || effectiveBg != snapshot.backgroundArgb) {
                     fillPaint.color = effectiveBg
                     canvas.drawRect(x, y, x + cellWidth, y + cellHeightPx, fillPaint)
                 }
@@ -501,6 +598,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val CURSOR_BLINK_INTERVAL_MS = 500L
         const val FLING_STOP_VELOCITY_PX = 40f
         const val FLING_DECELERATION = 0.92f
+        const val SELECTION_BG_ARGB = 0xFF155E75.toInt()
     }
 }
 
@@ -525,6 +623,13 @@ internal fun GhosttyTerminalSurface(
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
                 setOnScrollLines { delta -> frontend.scrollLines(delta) }
                 setOnInputBytes { bytes -> frontend.sendUserInput(bytes) }
+                setOnSelectionCallbacks(
+                    onPress = frontend::selectionPress,
+                    onDrag = frontend::selectionDrag,
+                    onRelease = frontend::selectionRelease,
+                    onClear = { frontend.clearSelection() },
+                )
+                setOnCellTap(frontend::cellTap)
                 frontend.attachView(this)
             }
         },
@@ -533,6 +638,13 @@ internal fun GhosttyTerminalSurface(
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
             view.setOnScrollLines { delta -> frontend.scrollLines(delta) }
             view.setOnInputBytes { bytes -> frontend.sendUserInput(bytes) }
+            view.setOnSelectionCallbacks(
+                onPress = frontend::selectionPress,
+                onDrag = frontend::selectionDrag,
+                onRelease = frontend::selectionRelease,
+                onClear = { frontend.clearSelection() },
+            )
+            view.setOnCellTap(frontend::cellTap)
             frontend.attachView(view)
         },
         onRelease = { view ->

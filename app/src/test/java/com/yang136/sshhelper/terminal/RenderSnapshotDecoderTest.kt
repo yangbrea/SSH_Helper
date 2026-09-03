@@ -73,6 +73,8 @@ class RenderSnapshotDecoderTest {
 
         // Row 0: two cells.
         body.putInt(0) // row index
+        body.putInt(0) // selection start x
+        body.putInt(0) // selection end x
         body.putInt(2) // cell count
 
         // Cell 0: foreground red, background black, bold flag.
@@ -102,6 +104,8 @@ class RenderSnapshotDecoderTest {
         assertTrue(row.cells[0].bold)
         assertFalse(row.cells[1].bold)
         assertEquals("", row.cells[1].text)
+        assertTrue(row.cells[0].selected)
+        assertFalse(row.cells[1].selected)
     }
 
     @Test

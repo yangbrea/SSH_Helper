@@ -176,10 +176,10 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
     return out;
 }
 
-// Snapshot binary format v2 (little-endian).
+// Snapshot binary format v3 (little-endian).
 //
 // Header (14 * int32):
-//   [0]  version = 2
+//   [0]  version = 3
 //   [1]  dirty_kind (0 none, 1 partial, 2 full)
 //   [2]  cols
 //   [3]  rows
@@ -196,6 +196,8 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
 //
 // Row record:
 //   int32 row_index
+//   int32 selection_start_x (-1 when no selection on this row)
+//   int32 selection_end_x (-1 when no selection on this row)
 //   int32 cell_count
 //   repeated cell:
 //     int32 fg ARGB
@@ -204,7 +206,7 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
 //     uint16 text_len
 //     uint8  text[text_len]
 
-constexpr uint16_t kSnapshotVersion = 2;
+constexpr uint16_t kSnapshotVersion = 3;
 constexpr uint16_t kCellFlagBold = 1 << 0;
 constexpr uint16_t kCellFlagItalic = 1 << 1;
 constexpr uint16_t kCellFlagFaint = 1 << 2;
@@ -362,7 +364,22 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
         }
 
         const uint16_t cell_count = raw_view.len > cols ? cols : static_cast<uint16_t>(raw_view.len);
+
+        GhosttyRenderStateRowSelection row_selection =
+            GHOSTTY_INIT_SIZED(GhosttyRenderStateRowSelection);
+        int32_t selection_start_x = -1;
+        int32_t selection_end_x = -1;
+        if (ghostty_render_state_row_get(
+                native->row_iter,
+                GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION,
+                &row_selection) == GHOSTTY_SUCCESS) {
+            selection_start_x = row_selection.start_x;
+            selection_end_x = row_selection.end_x;
+        }
+
         putI32(out, row_y);
+        putI32(out, selection_start_x);
+        putI32(out, selection_end_x);
         putI32(out, cell_count);
 
         for (uint16_t x = 0; x < cell_count; ++x) {

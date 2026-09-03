@@ -148,7 +148,43 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         engine.requestPasteText(text)
     }
 
-    override fun enterSelectionMode() = Unit
+    override fun enterSelectionMode() {
+        view?.armSelectionMode()
+    }
+
+    override fun clearSelection() {
+        view?.clearSelectionAndResetGesture()
+        ensureStarted()
+        engine.requestSelectionClear()
+    }
+
+    internal fun selectionPress(col: Int, row: Int) {
+        ensureStarted()
+        engine.requestSelectionPress(col, row)
+    }
+
+    internal fun selectionDrag(col: Int, row: Int) {
+        ensureStarted()
+        engine.requestSelectionDrag(col, row)
+    }
+
+    internal fun selectionRelease(col: Int, row: Int) {
+        ensureStarted()
+        engine.requestSelectionRelease(col, row)
+    }
+
+    internal fun cellTap(col: Int, row: Int) {
+        ensureStarted()
+        engine.requestLinkUriAt(col, row) { uri ->
+            frontendScope.launch {
+                if (uri.isNullOrEmpty()) {
+                    view?.focusAndShowKeyboard()
+                } else {
+                    onOpenLink?.invoke(uri)
+                }
+            }
+        }
+    }
 
     override fun selectAll() {
         ensureStarted()
@@ -164,8 +200,6 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
             copySink?.invoke(text)
         }
     }
-
-    override fun clearSelection() = Unit
 
     override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) {
         ensureStarted()

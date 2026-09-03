@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets
 /**
  * Cell style flags produced by nativeRenderSnapshot.
  */
-internal const val SNAPSHOT_VERSION = 2
+internal const val SNAPSHOT_VERSION = 3
 
 internal const val SNAPSHOT_DIRTY_NONE = 0
 internal const val SNAPSHOT_DIRTY_PARTIAL = 1
@@ -31,6 +31,7 @@ internal data class GhosttyRenderCell(
     val bgArgb: Int,
     val flags: Int,
     val text: String,
+    val selected: Boolean = false,
 ) {
     val bold: Boolean get() = flags and CELL_FLAG_BOLD != 0
     val italic: Boolean get() = flags and CELL_FLAG_ITALIC != 0
@@ -107,8 +108,10 @@ internal object RenderSnapshotDecoder {
 
             val rowsData = ArrayList<GhosttyRenderRow>(rowCount)
             repeat(rowCount) {
-                if (buffer.remaining() < Int.SIZE_BYTES * 2) return null
+                if (buffer.remaining() < Int.SIZE_BYTES * 4) return null
                 val rowIndex = buffer.int
+                val selectionStartX = buffer.int
+                val selectionEndX = buffer.int
                 val cellCount = buffer.int
                 if (cellCount < 0 || cellCount > cols * 4) return null
 
@@ -123,11 +126,15 @@ internal object RenderSnapshotDecoder {
                     val textBytes = ByteArray(textLength)
                     buffer.get(textBytes)
                     val text = String(textBytes, StandardCharsets.UTF_8)
+                    val column = cells.size
                     cells += GhosttyRenderCell(
                         fgArgb = fgArgb,
                         bgArgb = bgArgb,
                         flags = flags,
                         text = text,
+                        selected = selectionStartX >= 0 &&
+                            selectionEndX >= selectionStartX &&
+                            column in selectionStartX..selectionEndX,
                     )
                 }
                 rowsData += GhosttyRenderRow(rowIndex = rowIndex, cells = cells)
