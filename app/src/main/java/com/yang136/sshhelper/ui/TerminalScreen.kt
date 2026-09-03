@@ -43,10 +43,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -534,6 +536,25 @@ fun TerminalScreen(
                     )
                 }
             }
+        }
+
+        if (!isLandscape) {
+            // TerminalScreen has an additional outer background layer around its Scaffold.
+            // On edge-to-edge OEM layouts the top bar may reserve, but not paint, the
+            // status-bar inset and expose that terminal layer. Paint only this screen's
+            // notification row with the same navigation surface used by SshTopAppBar.
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .windowInsetsTopHeight(WindowInsets.statusBars)
+                    .background(
+                        structuralSurfaceColor(
+                            MaterialTheme.colorScheme.surfaceContainer,
+                            StructuralSurfaceRole.NAVIGATION,
+                        ),
+                    ),
+            )
         }
 
         if (settings.aiShowBubble && !aiHidden) {
