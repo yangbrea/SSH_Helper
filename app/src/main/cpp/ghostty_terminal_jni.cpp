@@ -24,6 +24,10 @@ namespace {
 constexpr const char* kClassName =
     "com/yang136/sshhelper/terminal/GhosttyNativeBridge";
 
+constexpr uint32_t kEventBell = 1u << 0;
+constexpr uint32_t kEventTitle = 1u << 1;
+constexpr uint32_t kEventPwd = 1u << 2;
+
 struct NativeTerminal {
     GhosttyTerminal terminal = nullptr;
     GhosttyRenderState render_state = nullptr;
@@ -32,6 +36,9 @@ struct NativeTerminal {
 
     // Bytes libghostty asks us to write back to the PTY (DSR/mode queries).
     std::vector<uint8_t> pending_pty_writes;
+
+    // Effect flags (bell/title/pwd) observed since the last drain.
+    uint32_t pending_events = 0;
 
     // Incremented on reset; Kotlin can discard stale output generations.
     uint64_t generation = 0;
@@ -52,6 +59,45 @@ void writePtyCallback(
     if (native == nullptr || data == nullptr || len == 0) return;
     native->pending_pty_writes.insert(
         native->pending_pty_writes.end(), data, data + len);
+}
+
+void bellCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native != nullptr) native->pending_events |= kEventBell;
+}
+
+void titleChangedCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native != nullptr) native->pending_events |= kEventTitle;
+}
+
+void pwdChangedCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native != nullptr) native->pending_events |= kEventPwd;
+}
+
+jbyteArray terminalStringData(
+    JNIEnv* env,
+    NativeTerminal* native,
+    GhosttyTerminalData key) {
+    if (native == nullptr || native->terminal == nullptr) return nullptr;
+    GhosttyString str{};
+    if (ghostty_terminal_get(native->terminal, key, &str) != GHOSTTY_SUCCESS ||
+        str.ptr == nullptr || str.len == 0) {
+        return nullptr;
+    }
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(str.len));
+    if (out == nullptr) return nullptr;
+    env->SetByteArrayRegion(
+        out, 0, static_cast<jsize>(str.len),
+        reinterpret_cast<const jbyte*>(str.ptr));
+    return out;
 }
 
 void freeNativeTerminal(NativeTerminal* native) {
@@ -414,6 +460,15 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
             native->terminal,
             GHOSTTY_TERMINAL_OPT_WRITE_PTY,
             (const void*)writePtyCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_BELL,
+            (const void*)bellCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
+            (const void*)titleChangedCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_PWD_CHANGED,
+            (const void*)pwdChangedCallback);
 
         ok = true;
     } while (false);
@@ -693,6 +748,34 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetDefaultColors(
         native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &foreground);
     ghostty_terminal_set(
         native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &cursor);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeTakeEventFlags(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) return 0;
+    const uint32_t events = native->pending_events;
+    native->pending_events = 0;
+    return static_cast<jint>(events);
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeGetTitle(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    return terminalStringData(env, fromHandle(handle), GHOSTTY_TERMINAL_DATA_TITLE);
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeGetPwd(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    return terminalStringData(env, fromHandle(handle), GHOSTTY_TERMINAL_DATA_PWD);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

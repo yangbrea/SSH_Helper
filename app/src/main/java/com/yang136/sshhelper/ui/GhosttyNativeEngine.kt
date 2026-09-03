@@ -22,6 +22,9 @@ import kotlinx.coroutines.withContext
 internal class GhosttyNativeEngine(
     private val onPtyWrite: (ByteArray) -> Unit,
 ) {
+    var onBell: (() -> Unit)? = null
+    var onTitleChange: ((String) -> Unit)? = null
+    var onPwdChange: ((String) -> Unit)? = null
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "GhosttyEngine").apply { isDaemon = true }
     }
@@ -53,6 +56,7 @@ internal class GhosttyNativeEngine(
             if (handle == 0L) return@withContext
             GhosttyNativeBridge.nativeWrite(handle, data)
             drainPtyWrites()
+            drainEvents()
             refreshSnapshot()
         }
     }
@@ -109,6 +113,7 @@ internal class GhosttyNativeEngine(
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativePasteText(handle, text.encodeToByteArray())
             drainPtyWrites()
+            drainEvents()
             refreshSnapshot()
         }
     }
@@ -164,7 +169,25 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    private fun drainEvents() {
+        val flags = GhosttyNativeBridge.nativeTakeEventFlags(handle)
+        if (flags == 0) return
+        if (flags and EVENT_BELL != 0) onBell?.invoke()
+        if (flags and EVENT_TITLE != 0) {
+            val title = GhosttyNativeBridge.nativeGetTitle(handle)?.decodeToString()
+            if (!title.isNullOrEmpty()) onTitleChange?.invoke(title)
+        }
+        if (flags and EVENT_PWD != 0) {
+            val pwd = GhosttyNativeBridge.nativeGetPwd(handle)?.decodeToString()
+            if (!pwd.isNullOrEmpty()) onPwdChange?.invoke(pwd)
+        }
+    }
+
     private companion object {
+        const val EVENT_BELL = 1
+        const val EVENT_TITLE = 1 shl 1
+        const val EVENT_PWD = 1 shl 2
+
         const val INITIAL_BUFFER_BYTES = 1 shl 20
         const val MAX_BUFFER_BYTES = 64 shl 20
     }

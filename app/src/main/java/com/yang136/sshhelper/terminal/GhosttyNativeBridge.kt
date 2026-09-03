@@ -59,6 +59,15 @@ object GhosttyNativeBridge {
     /** Drains bytes libghostty asked to write back to the PTY. */
     external fun nativeDrainPtyWrites(handle: Long): ByteArray?
 
+    /** Returns and clears event flags (bell/title/pwd) since last call. */
+    external fun nativeTakeEventFlags(handle: Long): Int
+
+    /** Returns current OSC title as UTF-8, or null. */
+    external fun nativeGetTitle(handle: Long): ByteArray?
+
+    /** Returns current OSC working directory as UTF-8, or null. */
+    external fun nativeGetPwd(handle: Long): ByteArray?
+
     /**
      * Writes the current render snapshot into [buffer] (a direct
      * little-endian ByteBuffer). Returns the number of dirty rows written, or

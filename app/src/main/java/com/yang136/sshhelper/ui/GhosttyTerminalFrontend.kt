@@ -20,8 +20,17 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     /** Receives copied terminal text; the surface installs a clipboard writer. */
     var copySink: ((String) -> Unit)? = null
 
+    /** Terminal effects from OSC/BEL. */
+    var onBell: (() -> Unit)? = null
+    var onTitleChange: ((String) -> Unit)? = null
+    var onPwdChange: ((String) -> Unit)? = null
+
     private val engine = GhosttyNativeEngine { bytes ->
         onPtyWrite?.invoke(bytes)
+    }.apply {
+        onBell = { this@GhosttyTerminalFrontend.onBell?.invoke() }
+        onTitleChange = { this@GhosttyTerminalFrontend.onTitleChange?.invoke(it) }
+        onPwdChange = { this@GhosttyTerminalFrontend.onPwdChange?.invoke(it) }
     }
     private var started = false
 
