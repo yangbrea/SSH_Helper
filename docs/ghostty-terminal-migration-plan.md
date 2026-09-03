@@ -49,7 +49,7 @@ ghostty_commit=31bdcd5a79639bbac97c1a94e0f41d0f5ff84ca2
 ghostty_library_version=0.1.0-dev
 zig_version=0.16.0
 android_ndk_version=29.0.14206865
-simd=false
+simd=true
 abis=arm64-v8a,x86_64
 ```
 
@@ -126,7 +126,7 @@ git commit -m "<类型>(terminal): <单一目的>"
 ghostty_commit=31bdcd5a79639bbac97c1a94e0f41d0f5ff84ca2
 zig_version=0.16.0
 ndk_version=29.0.14206865
-simd=false
+simd=true
 abis=arm64-v8a,x86_64
 ```
 
@@ -237,7 +237,7 @@ scripts/build-libghostty-android.sh
 2. 校验 NDK 精确版本为 29.0.14206865。
 3. 校验 Ghostty submodule SHA。
 4. 分别构建 `arm64-v8a` 和 `x86_64`。
-5. 使用 `-Doptimize=ReleaseFast -Dsimd=false`。
+5. 使用 `-Doptimize=ReleaseFast -Dsimd=true`。
 6. 将头文件和静态库放到忽略的构建目录。
 7. 输出 SHA-256。
 8. 构建结束后验证目标架构、公开符号和 16 KB 页对齐。
