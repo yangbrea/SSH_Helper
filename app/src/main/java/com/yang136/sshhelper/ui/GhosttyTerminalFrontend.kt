@@ -1,5 +1,7 @@
 package com.yang136.sshhelper.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import com.yang136.sshhelper.ui.theme.TerminalPalette
@@ -72,8 +74,17 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override fun setImeVisible(visible: Boolean) = Unit
 
-    override fun paste(context: Context) = Unit
-    override fun pasteText(text: String) = Unit
+    override fun paste(context: Context) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (!text.isNullOrEmpty()) pasteText(text)
+    }
+
+    override fun pasteText(text: String) {
+        if (text.isEmpty()) return
+        ensureStarted()
+        engine.requestPasteText(text)
+    }
 
     override fun enterSelectionMode() = Unit
     override fun selectAll() = Unit

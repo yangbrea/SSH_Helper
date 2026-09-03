@@ -74,6 +74,16 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestPasteText(text: String) {
+        if (handle == 0L || text.isEmpty()) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativePasteText(handle, text.encodeToByteArray())
+            drainPtyWrites()
+            refreshSnapshot()
+        }
+    }
+
     fun requestSetDefaultColors(backgroundArgb: Int, foregroundArgb: Int, cursorArgb: Int) {
         if (handle == 0L) return
         scope.launch {

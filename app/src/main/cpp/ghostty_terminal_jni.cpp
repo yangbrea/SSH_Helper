@@ -536,7 +536,61 @@ GhosttyColorRgb colorFromArgb(jint argb) {
     };
 }
 
+struct PasteSource {
+    const uint8_t* data;
+    size_t len;
+};
+
+bool pasteTextReader(
+    void* userdata,
+    GhosttyString /* mime */,
+    GhosttyWriter writer) {
+    auto* source = static_cast<PasteSource*>(userdata);
+    if (source == nullptr || source->data == nullptr) return false;
+    return writer.write(writer.userdata, source->data, source->len);
+}
+
 } // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativePasteText(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jbyteArray data) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+    if (data == nullptr) return;
+
+    const jsize len = env->GetArrayLength(data);
+    if (len == 0) return;
+
+    std::vector<uint8_t> buffer(static_cast<size_t>(len));
+    env->GetByteArrayRegion(
+        data, 0, len, reinterpret_cast<jbyte*>(buffer.data()));
+    if (env->ExceptionCheck()) return;
+
+    PasteSource source{buffer.data(), buffer.size()};
+    static constexpr char kTextPlain[] = "text/plain";
+    GhosttyString mime{
+        reinterpret_cast<const uint8_t*>(kTextPlain),
+        sizeof(kTextPlain) - 1,
+    };
+    GhosttyPaste paste = GHOSTTY_INIT_SIZED(GhosttyPaste);
+    paste.location = GHOSTTY_CLIPBOARD_LOCATION_STANDARD;
+    paste.source = GHOSTTY_PASTE_SOURCE_TEXT;
+    paste.mimes = &mime;
+    paste.mimes_len = 1;
+    paste.reader = GhosttyMimeReader{pasteTextReader, &source};
+    paste.allow_unsafe = false;
+
+    bool written = false;
+    ghostty_terminal_paste(native->terminal, &paste, &written);
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetDefaultColors(

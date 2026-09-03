@@ -27,6 +27,9 @@ object GhosttyNativeBridge {
     /** Feeds PTY output bytes through the VT parser. */
     external fun nativeWrite(handle: Long, data: ByteArray)
 
+    /** Pastes text into the terminal according to current bracketed-paste mode. */
+    external fun nativePasteText(handle: Long, data: ByteArray)
+
     /** Resizes the terminal grid and pixel cell size. */
     external fun nativeResize(
         handle: Long,
