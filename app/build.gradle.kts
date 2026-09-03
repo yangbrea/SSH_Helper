@@ -10,6 +10,7 @@ plugins {
 android {
     namespace = "com.yang136.sshhelper"
     compileSdk = 36
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.yang136.sshhelper"
@@ -19,6 +20,23 @@ android {
         versionName = "1.9.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        ndk {
+            // libghostty-vt is currently built for these two ABIs only.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_static"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // Release signing reads credentials from ~/.android/ssh_helper-release.properties

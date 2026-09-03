@@ -18,3 +18,5 @@ build-*.log
 /output/
 /tmp/
 /app/build/ghostty/
+/.zig-cache-global/
+/.zig-cache/

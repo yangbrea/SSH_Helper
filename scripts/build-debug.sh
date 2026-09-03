@@ -15,6 +15,7 @@ show_help() {
   --offline       使用 Gradle 离线模式
   --clean         构建前执行 :app:clean
   --skip-tests    跳过单元测试
+  --skip-native   跳过 libghostty-vt Native 构建（仅当产物已存在时使用）
   -h, --help      显示帮助
 
 也可设置 SSH_HELPER_OFFLINE=1 开启离线模式。
@@ -23,6 +24,7 @@ EOF
 
 run_clean=false
 run_tests=true
+run_native=true
 gradle_options=(--no-daemon)
 
 if [[ "${SSH_HELPER_OFFLINE:-0}" == "1" ]]; then
@@ -39,6 +41,9 @@ while (($# > 0)); do
             ;;
         --skip-tests)
             run_tests=false
+            ;;
+        --skip-native)
+            run_native=false
             ;;
         -h|--help)
             show_help
@@ -64,6 +69,12 @@ gradle_tasks+=(:app:assembleDebug)
 
 cd "$PROJECT_DIR"
 echo "[build] 项目：$PROJECT_DIR"
+if [[ "$run_native" == true ]]; then
+    echo "[build] 构建 libghostty-vt Native 库"
+    "$SCRIPT_DIR/build-libghostty-android.sh"
+else
+    echo "[build] 跳过 libghostty-vt Native 构建（--skip-native）"
+fi
 echo "[build] 任务：${gradle_tasks[*]}"
 ./gradlew "${gradle_tasks[@]}" "${gradle_options[@]}"
 
