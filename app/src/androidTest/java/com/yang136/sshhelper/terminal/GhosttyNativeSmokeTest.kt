@@ -68,24 +68,69 @@ class GhosttyNativeSmokeTest {
         try {
             GhosttyNativeBridge.nativeWrite(handle, "hello\r\n".encodeToByteArray())
 
-            val buffer = ByteBuffer
-                .allocateDirect(1 shl 20)
-                .order(ByteOrder.LITTLE_ENDIAN)
-            val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, buffer)
-            assertTrue("snapshot should encode at least one row", rowCount >= 0)
-
-            buffer.rewind()
-            val version = buffer.int
-            val dirty = buffer.int
-            val cols = buffer.int
-            val rows = buffer.int
-            assertEquals(1, version)
-            assertEquals(80, cols)
-            assertEquals(24, rows)
-            assertTrue("dirty should not be none", dirty != 0)
-            assertTrue("reported row count should match header", rowCount <= rows)
+            val snapshot = renderSnapshot(handle)
+            assertEquals(1, snapshot.version)
+            assertEquals(80, snapshot.cols)
+            assertEquals(24, snapshot.rows)
+            assertTrue(snapshot.isDirty)
+            assertTrue(snapshot.rowsData.isNotEmpty())
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
+    }
+
+    @Test
+    fun writtenHelloAppearsInSnapshot() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "hello\r\n".encodeToByteArray())
+            val text = renderSnapshot(handle).rowsData.joinToString("") { row ->
+                row.cells.joinToString("") { it.text }
+            }
+            assertTrue("snapshot should contain hello, got: $text", text.contains("hello"))
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun ansiColorIsPreservedInSnapshot() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(
+                handle,
+                "\u001b[31mred\u001b[0m".encodeToByteArray(),
+            )
+            val cells = renderSnapshot(handle).rowsData.flatMap { it.cells }
+            val redCell = cells.firstOrNull { it.text == "r" || it.text == "e" || it.text == "d" }
+            assertTrue("expected colored text cell", redCell != null)
+            assertEquals(0xFFFF0000.toInt(), redCell!!.fgArgb)
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun wideCharacterIsMarkedWide() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "中".encodeToByteArray())
+            val cells = renderSnapshot(handle).rowsData.flatMap { it.cells }
+            val wide = cells.firstOrNull { it.text == "中" }
+            assertTrue("expected wide char", wide != null && wide.wide)
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    private fun renderSnapshot(handle: Long): GhosttyRenderSnapshot {
+        val buffer = ByteBuffer
+            .allocateDirect(1 shl 20)
+            .order(ByteOrder.LITTLE_ENDIAN)
+        val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, buffer)
+        assertTrue("snapshot should decode", rowCount >= 0)
+        buffer.clear()
+        return RenderSnapshotDecoder.decode(buffer, buffer.capacity())
+            ?: error("failed to decode snapshot")
     }
 }
