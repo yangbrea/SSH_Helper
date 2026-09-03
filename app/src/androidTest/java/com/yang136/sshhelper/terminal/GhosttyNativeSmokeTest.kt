@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -163,6 +164,38 @@ class GhosttyNativeSmokeTest {
                 row.cells.joinToString("") { it.text }
             }
             assertTrue(text.contains("before-resize"))
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun selectionDragCopiesSelectedRange() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 10)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "abcdefghij".encodeToByteArray())
+            GhosttyNativeBridge.nativeSelectionPress(handle, 2, 0)
+            GhosttyNativeBridge.nativeSelectionDrag(handle, 5, 0)
+            GhosttyNativeBridge.nativeSelectionRelease(handle, 5, 0)
+            val text = GhosttyNativeBridge.nativeCopySelection(handle)?.decodeToString()
+            assertEquals("cdef", text)
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun linkUriAtReturnsOsc8Hyperlink() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 10)
+        try {
+            val uri = "https://example.com"
+            GhosttyNativeBridge.nativeWrite(
+                handle,
+                "\u001b]8;;$uri\u001b\\Ghostty\u001b]8;;\u001b\\".encodeToByteArray(),
+            )
+            val bytes = GhosttyNativeBridge.nativeLinkUriAt(handle, 2, 0)
+            assertNotNull(bytes)
+            assertEquals(uri, bytes?.decodeToString())
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }

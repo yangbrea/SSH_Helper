@@ -38,6 +38,14 @@ struct NativeTerminal {
     GhosttyMouseEvent mouse_event = nullptr;
     GhosttyKeyEncoder key_encoder = nullptr;
     GhosttyKeyEvent key_event = nullptr;
+    GhosttySelectionGesture selection_gesture = nullptr;
+
+    // Last grid size/cell geometry passed by the View. Used by selection
+    // gesture drag events which require display geometry for edge behavior.
+    uint32_t cols = 80;
+    uint32_t rows = 24;
+    uint32_t cell_width_px = 1;
+    uint32_t cell_height_px = 1;
 
     // Bytes libghostty asks us to write back to the PTY (DSR/mode queries).
     std::vector<uint8_t> pending_pty_writes;
@@ -124,6 +132,10 @@ void freeNativeTerminal(NativeTerminal* native) {
     if (native->key_encoder != nullptr) {
         ghostty_key_encoder_free(native->key_encoder);
         native->key_encoder = nullptr;
+    }
+    if (native->selection_gesture != nullptr) {
+        ghostty_selection_gesture_free(native->selection_gesture, native->terminal);
+        native->selection_gesture = nullptr;
     }
     if (native->mouse_event != nullptr) {
         ghostty_mouse_event_free(native->mouse_event);
@@ -449,6 +461,69 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     return true;
 }
 
+bool gridRefAtViewport(NativeTerminal* native, jint col, jint row, GhosttyGridRef* out) {
+    if (native == nullptr || native->terminal == nullptr || out == nullptr) return false;
+    if (col < 0 || row < 0 ||
+        static_cast<uint32_t>(col) >= native->cols ||
+        static_cast<uint32_t>(row) >= native->rows) {
+        return false;
+    }
+    GhosttyPoint point{};
+    point.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+    point.value.coordinate.x = static_cast<uint16_t>(col);
+    point.value.coordinate.y = static_cast<uint32_t>(row);
+    return ghostty_terminal_grid_ref(native->terminal, point, out) == GHOSTTY_SUCCESS;
+}
+
+bool applySelectionEvent(
+    NativeTerminal* native,
+    GhosttySelectionGestureEventType type,
+    jint col,
+    jint row) {
+    if (native == nullptr || native->terminal == nullptr ||
+        native->selection_gesture == nullptr) {
+        return false;
+    }
+
+    GhosttySelectionGestureEvent event = nullptr;
+    if (ghostty_selection_gesture_event_new(nullptr, &event, type) != GHOSTTY_SUCCESS ||
+        event == nullptr) {
+        return false;
+    }
+
+    bool ok = false;
+    GhosttyGridRef ref{};
+    if (gridRefAtViewport(native, col, row, &ref)) {
+        ghostty_selection_gesture_event_set(
+            event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref);
+        if (type == GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG) {
+            GhosttySelectionGestureGeometry geometry{};
+            geometry.columns = native->cols;
+            geometry.cell_width = native->cell_width_px;
+            geometry.padding_left = 0;
+            geometry.screen_height = native->rows * native->cell_height_px;
+            ghostty_selection_gesture_event_set(
+                event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geometry);
+        }
+    } else if (type != GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE) {
+        ghostty_selection_gesture_event_free(event);
+        return false;
+    }
+
+    GhosttySelection selection = GHOSTTY_INIT_SIZED(GhosttySelection);
+    const GhosttyResult result = ghostty_selection_gesture_event(
+        native->selection_gesture, native->terminal, event, &selection);
+    if (result == GHOSTTY_SUCCESS) {
+        ghostty_terminal_set(native->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection);
+        ok = true;
+    } else if (result == GHOSTTY_NO_VALUE) {
+        // Press without a selection yet, or a release event. Not an error.
+        ok = true;
+    }
+    ghostty_selection_gesture_event_free(event);
+    return ok;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -469,6 +544,8 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
                       "NativeTerminal allocation failed");
         return 0;
     }
+    native->cols = static_cast<uint32_t>(cols);
+    native->rows = static_cast<uint32_t>(rows);
 
     bool ok = false;
     do {
@@ -512,6 +589,10 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
             native->key_encoder == nullptr ||
             ghostty_key_event_new(nullptr, &native->key_event) != GHOSTTY_SUCCESS ||
             native->key_event == nullptr) {
+            break;
+        }
+        if (ghostty_selection_gesture_new(nullptr, &native->selection_gesture) != GHOSTTY_SUCCESS ||
+            native->selection_gesture == nullptr) {
             break;
         }
 
@@ -581,6 +662,9 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeReset(
     }
     native->generation += 1;
     native->pending_pty_writes.clear();
+    if (native->selection_gesture != nullptr) {
+        ghostty_selection_gesture_reset(native->selection_gesture, native->terminal);
+    }
     ghostty_terminal_reset(native->terminal);
 }
 
@@ -634,6 +718,10 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResize(
                       "resize dimensions must be positive");
         return;
     }
+    native->cols = static_cast<uint32_t>(cols);
+    native->rows = static_cast<uint32_t>(rows);
+    native->cell_width_px = static_cast<uint32_t>(cell_width_px);
+    native->cell_height_px = static_cast<uint32_t>(cell_height_px);
     ghostty_terminal_resize(
         native->terminal,
         static_cast<uint16_t>(cols),
@@ -717,6 +805,112 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCopySelection(
     }
     ghostty_free(nullptr, buffer, length);
     return out;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionPress(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint col,
+    jint row) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_FALSE;
+    }
+    return applySelectionEvent(
+        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, col, row)
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionDrag(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint col,
+    jint row) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_FALSE;
+    }
+    return applySelectionEvent(
+        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, col, row)
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionRelease(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint col,
+    jint row) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_FALSE;
+    }
+    return applySelectionEvent(
+        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE, col, row)
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionClear(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+    ghostty_terminal_set(native->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, nullptr);
+    if (native->selection_gesture != nullptr) {
+        ghostty_selection_gesture_reset(native->selection_gesture, native->terminal);
+    }
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeLinkUriAt(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint col,
+    jint row) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return nullptr;
+    }
+
+    GhosttyGridRef ref{};
+    if (!gridRefAtViewport(native, col, row, &ref)) return nullptr;
+
+    size_t len = 0;
+    if (ghostty_grid_ref_hyperlink_uri(&ref, nullptr, 0, &len) != GHOSTTY_SUCCESS ||
+        len == 0) {
+        return nullptr;
+    }
+
+    std::vector<uint8_t> bytes(len);
+    size_t written = 0;
+    const GhosttyResult result = ghostty_grid_ref_hyperlink_uri(
+        &ref, bytes.data(), bytes.size(), &written);
+    if (result != GHOSTTY_SUCCESS || written == 0) return nullptr;
+    bytes.resize(written);
+    return toJByteArray(env, bytes);
 }
 
 namespace {

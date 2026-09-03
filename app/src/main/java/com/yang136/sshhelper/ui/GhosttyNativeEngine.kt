@@ -182,6 +182,49 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestSelectionPress(col: Int, row: Int) {
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSelectionPress(handle, col, row)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestSelectionDrag(col: Int, row: Int) {
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSelectionDrag(handle, col, row)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestSelectionRelease(col: Int, row: Int) {
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSelectionRelease(handle, col, row)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestSelectionClear() {
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSelectionClear(handle)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestLinkUriAt(col: Int, row: Int, onResult: (String?) -> Unit) {
+        if (handle == 0L) {
+            onResult(null)
+            return
+        }
+        scope.launch {
+            val bytes = if (handle == 0L) null else GhosttyNativeBridge.nativeLinkUriAt(handle, col, row)
+            onResult(bytes?.decodeToString())
+        }
+    }
+
     fun requestScrollViewport(deltaRows: Int) {
         if (deltaRows == 0) return
         scope.launch {

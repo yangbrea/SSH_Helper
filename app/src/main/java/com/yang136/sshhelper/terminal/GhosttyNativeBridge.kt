@@ -36,6 +36,21 @@ object GhosttyNativeBridge {
     /** Selects all terminal content and installs it as the active selection. */
     external fun nativeSelectAll(handle: Long): Boolean
 
+    /** Starts a selection gesture press at a viewport cell. */
+    external fun nativeSelectionPress(handle: Long, col: Int, row: Int): Boolean
+
+    /** Extends the active selection gesture to a viewport cell. */
+    external fun nativeSelectionDrag(handle: Long, col: Int, row: Int): Boolean
+
+    /** Ends the active selection gesture at a viewport cell (may be -1,-1). */
+    external fun nativeSelectionRelease(handle: Long, col: Int, row: Int): Boolean
+
+    /** Clears the active selection and resets selection gesture state. */
+    external fun nativeSelectionClear(handle: Long)
+
+    /** Returns the hyperlink URI at a viewport cell, or null. */
+    external fun nativeLinkUriAt(handle: Long, col: Int, row: Int): ByteArray?
+
     /** Returns the active selection as plain UTF-8 text, or null. */
     external fun nativeCopySelection(handle: Long): ByteArray?
 
