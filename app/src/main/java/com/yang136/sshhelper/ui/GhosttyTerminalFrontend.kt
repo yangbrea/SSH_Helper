@@ -1,5 +1,6 @@
 package com.yang136.sshhelper.ui
 
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -134,12 +135,31 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         view?.setFontSizeSp(fontSize.toFloat())
     }
 
-    override fun setImeVisible(visible: Boolean) = Unit
+    override fun setImeVisible(visible: Boolean) {
+        if (visible) {
+            view?.focusAndShowKeyboard()
+        } else {
+            view?.hideKeyboard()
+        }
+    }
 
     override fun paste(context: Context) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
-        if (!text.isNullOrEmpty()) pasteText(text)
+        if (text.isNullOrEmpty()) return
+        val hasUnsafeControl = text.any { ch ->
+            ch.code < 0x20 && ch != '\n' && ch != '\r' && ch != '\t'
+        }
+        if (!hasUnsafeControl) {
+            pasteText(text)
+            return
+        }
+        AlertDialog.Builder(context)
+            .setTitle("粘贴不安全内容")
+            .setMessage("剪贴板包含控制字符，粘贴后可能被当成按键序列执行。是否仍然粘贴？")
+            .setPositiveButton("仍然粘贴") { _, _ -> pasteText(text) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     override fun pasteText(text: String) {

@@ -9,6 +9,7 @@
 // the same thread / serialized executor. libghostty-vt creates no threads.
 
 #include <jni.h>
+#include <android/keycodes.h>
 
 #include <cstdint>
 #include <cstring>
@@ -1171,6 +1172,102 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchTotal(
     return searchTotalMatches(native->search);
 }
 
+GhosttyKey ghosttyKeyFromAndroidKeyCode(jint key_code) {
+    switch (key_code) {
+        case AKEYCODE_0: return GHOSTTY_KEY_DIGIT_0;
+        case AKEYCODE_1: return GHOSTTY_KEY_DIGIT_1;
+        case AKEYCODE_2: return GHOSTTY_KEY_DIGIT_2;
+        case AKEYCODE_3: return GHOSTTY_KEY_DIGIT_3;
+        case AKEYCODE_4: return GHOSTTY_KEY_DIGIT_4;
+        case AKEYCODE_5: return GHOSTTY_KEY_DIGIT_5;
+        case AKEYCODE_6: return GHOSTTY_KEY_DIGIT_6;
+        case AKEYCODE_7: return GHOSTTY_KEY_DIGIT_7;
+        case AKEYCODE_8: return GHOSTTY_KEY_DIGIT_8;
+        case AKEYCODE_9: return GHOSTTY_KEY_DIGIT_9;
+        case AKEYCODE_A: return GHOSTTY_KEY_A;
+        case AKEYCODE_B: return GHOSTTY_KEY_B;
+        case AKEYCODE_C: return GHOSTTY_KEY_C;
+        case AKEYCODE_D: return GHOSTTY_KEY_D;
+        case AKEYCODE_E: return GHOSTTY_KEY_E;
+        case AKEYCODE_F: return GHOSTTY_KEY_F;
+        case AKEYCODE_G: return GHOSTTY_KEY_G;
+        case AKEYCODE_H: return GHOSTTY_KEY_H;
+        case AKEYCODE_I: return GHOSTTY_KEY_I;
+        case AKEYCODE_J: return GHOSTTY_KEY_J;
+        case AKEYCODE_K: return GHOSTTY_KEY_K;
+        case AKEYCODE_L: return GHOSTTY_KEY_L;
+        case AKEYCODE_M: return GHOSTTY_KEY_M;
+        case AKEYCODE_N: return GHOSTTY_KEY_N;
+        case AKEYCODE_O: return GHOSTTY_KEY_O;
+        case AKEYCODE_P: return GHOSTTY_KEY_P;
+        case AKEYCODE_Q: return GHOSTTY_KEY_Q;
+        case AKEYCODE_R: return GHOSTTY_KEY_R;
+        case AKEYCODE_S: return GHOSTTY_KEY_S;
+        case AKEYCODE_T: return GHOSTTY_KEY_T;
+        case AKEYCODE_U: return GHOSTTY_KEY_U;
+        case AKEYCODE_V: return GHOSTTY_KEY_V;
+        case AKEYCODE_W: return GHOSTTY_KEY_W;
+        case AKEYCODE_X: return GHOSTTY_KEY_X;
+        case AKEYCODE_Y: return GHOSTTY_KEY_Y;
+        case AKEYCODE_Z: return GHOSTTY_KEY_Z;
+        case AKEYCODE_COMMA: return GHOSTTY_KEY_COMMA;
+        case AKEYCODE_PERIOD: return GHOSTTY_KEY_PERIOD;
+        case AKEYCODE_MINUS: return GHOSTTY_KEY_MINUS;
+        case AKEYCODE_EQUALS: return GHOSTTY_KEY_EQUAL;
+        case AKEYCODE_SEMICOLON: return GHOSTTY_KEY_SEMICOLON;
+        case AKEYCODE_APOSTROPHE: return GHOSTTY_KEY_QUOTE;
+        case AKEYCODE_SLASH: return GHOSTTY_KEY_SLASH;
+        case AKEYCODE_BACKSLASH: return GHOSTTY_KEY_BACKSLASH;
+        case AKEYCODE_LEFT_BRACKET: return GHOSTTY_KEY_BRACKET_LEFT;
+        case AKEYCODE_RIGHT_BRACKET: return GHOSTTY_KEY_BRACKET_RIGHT;
+        case AKEYCODE_GRAVE: return GHOSTTY_KEY_BACKQUOTE;
+        case AKEYCODE_ENTER: return GHOSTTY_KEY_ENTER;
+        case AKEYCODE_TAB: return GHOSTTY_KEY_TAB;
+        case AKEYCODE_SPACE: return GHOSTTY_KEY_SPACE;
+        case AKEYCODE_DEL: return GHOSTTY_KEY_BACKSPACE;
+        case AKEYCODE_FORWARD_DEL: return GHOSTTY_KEY_DELETE;
+        case AKEYCODE_ESCAPE: return GHOSTTY_KEY_ESCAPE;
+        case AKEYCODE_DPAD_UP: return GHOSTTY_KEY_ARROW_UP;
+        case AKEYCODE_DPAD_DOWN: return GHOSTTY_KEY_ARROW_DOWN;
+        case AKEYCODE_DPAD_LEFT: return GHOSTTY_KEY_ARROW_LEFT;
+        case AKEYCODE_DPAD_RIGHT: return GHOSTTY_KEY_ARROW_RIGHT;
+        case AKEYCODE_MOVE_HOME: return GHOSTTY_KEY_HOME;
+        case AKEYCODE_MOVE_END: return GHOSTTY_KEY_END;
+        case AKEYCODE_PAGE_UP: return GHOSTTY_KEY_PAGE_UP;
+        case AKEYCODE_PAGE_DOWN: return GHOSTTY_KEY_PAGE_DOWN;
+        case AKEYCODE_INSERT: return GHOSTTY_KEY_INSERT;
+        case AKEYCODE_F1: return GHOSTTY_KEY_F1;
+        case AKEYCODE_F2: return GHOSTTY_KEY_F2;
+        case AKEYCODE_F3: return GHOSTTY_KEY_F3;
+        case AKEYCODE_F4: return GHOSTTY_KEY_F4;
+        case AKEYCODE_F5: return GHOSTTY_KEY_F5;
+        case AKEYCODE_F6: return GHOSTTY_KEY_F6;
+        case AKEYCODE_F7: return GHOSTTY_KEY_F7;
+        case AKEYCODE_F8: return GHOSTTY_KEY_F8;
+        case AKEYCODE_F9: return GHOSTTY_KEY_F9;
+        case AKEYCODE_F10: return GHOSTTY_KEY_F10;
+        case AKEYCODE_F11: return GHOSTTY_KEY_F11;
+        case AKEYCODE_F12: return GHOSTTY_KEY_F12;
+        case AKEYCODE_NUMPAD_0: return GHOSTTY_KEY_NUMPAD_0;
+        case AKEYCODE_NUMPAD_1: return GHOSTTY_KEY_NUMPAD_1;
+        case AKEYCODE_NUMPAD_2: return GHOSTTY_KEY_NUMPAD_2;
+        case AKEYCODE_NUMPAD_3: return GHOSTTY_KEY_NUMPAD_3;
+        case AKEYCODE_NUMPAD_4: return GHOSTTY_KEY_NUMPAD_4;
+        case AKEYCODE_NUMPAD_5: return GHOSTTY_KEY_NUMPAD_5;
+        case AKEYCODE_NUMPAD_6: return GHOSTTY_KEY_NUMPAD_6;
+        case AKEYCODE_NUMPAD_7: return GHOSTTY_KEY_NUMPAD_7;
+        case AKEYCODE_NUMPAD_8: return GHOSTTY_KEY_NUMPAD_8;
+        case AKEYCODE_NUMPAD_9: return GHOSTTY_KEY_NUMPAD_9;
+        case AKEYCODE_NUMPAD_ADD: return GHOSTTY_KEY_NUMPAD_ADD;
+        case AKEYCODE_NUMPAD_SUBTRACT: return GHOSTTY_KEY_NUMPAD_SUBTRACT;
+        case AKEYCODE_NUMPAD_MULTIPLY: return GHOSTTY_KEY_NUMPAD_MULTIPLY;
+        case AKEYCODE_NUMPAD_DIVIDE: return GHOSTTY_KEY_NUMPAD_DIVIDE;
+        case AKEYCODE_NUMPAD_DOT: return GHOSTTY_KEY_NUMPAD_DECIMAL;
+        case AKEYCODE_NUMPAD_ENTER: return GHOSTTY_KEY_NUMPAD_ENTER;
+        default: return GHOSTTY_KEY_UNIDENTIFIED;
+    }
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeKey(
     JNIEnv* env,
@@ -1194,7 +1291,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeKey(
     ghostty_key_event_set_action(
         native->key_event, static_cast<GhosttyKeyAction>(action));
     ghostty_key_event_set_key(
-        native->key_event, static_cast<GhosttyKey>(key_code));
+        native->key_event, ghosttyKeyFromAndroidKeyCode(key_code));
     ghostty_key_event_set_mods(native->key_event, static_cast<GhosttyMods>(mods));
     ghostty_key_event_set_unshifted_codepoint(
         native->key_event, static_cast<uint32_t>(unshifted_codepoint));

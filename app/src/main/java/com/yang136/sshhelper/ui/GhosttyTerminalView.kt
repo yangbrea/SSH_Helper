@@ -283,18 +283,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
         return object : BaseInputConnection(this, true) {
+            private var composing = false
+
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                composing = text != null
+                return super.setComposingText(text, newCursorPosition)
+            }
+
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                composing = false
                 if (!text.isNullOrEmpty()) sendInput(text.toString())
                 return true
             }
 
+            override fun finishComposingText(): Boolean {
+                composing = false
+                return super.finishComposingText()
+            }
+
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                if (beforeLength > 0) sendInput("\u007f")
+                // 组合输入过程中由 IME 管理的删除不应直接发给远端；
+                // 只有真正编辑已上屏内容时才发送退格。
+                if (!composing && beforeLength > 0) sendInput("\u007f")
                 return true
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN) handleKeyEvent(event)
+                handleKeyEvent(event)
                 return true
             }
         }
@@ -303,13 +318,49 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         handleKeyEvent(event) || super.onKeyDown(keyCode, event)
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean = true
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        handleKeyEvent(event) || super.onKeyUp(keyCode, event)
 
     private fun sendInput(text: String) {
         if (text.isNotEmpty()) onInputBytes?.invoke(text.encodeToByteArray())
     }
 
     private fun handleKeyEvent(event: KeyEvent): Boolean {
+        val currentEngine = engine ?: return fallbackHandleKeyEvent(event)
+        val action = when (event.action) {
+            KeyEvent.ACTION_DOWN -> if (event.repeatCount > 0) KEY_ACTION_REPEAT else KEY_ACTION_PRESS
+            KeyEvent.ACTION_UP -> KEY_ACTION_RELEASE
+            else -> return false
+        }
+        var mods = 0
+        if (event.isShiftPressed) mods = mods or KEY_MOD_SHIFT
+        if (event.isCtrlPressed) mods = mods or KEY_MOD_CTRL
+        if (event.isAltPressed) mods = mods or KEY_MOD_ALT
+        if (event.isMetaPressed) mods = mods or KEY_MOD_SUPER
+        if (event.isCapsLockOn) mods = mods or KEY_MOD_CAPS_LOCK
+
+        val withoutShift = event.metaState and
+            KeyEvent.META_SHIFT_ON.inv() and
+            KeyEvent.META_SHIFT_LEFT_ON.inv() and
+            KeyEvent.META_SHIFT_RIGHT_ON.inv()
+        val unshiftedCodepoint = event.getUnicodeChar(withoutShift)
+        val unicode = event.unicodeChar
+        val utf8 = if (unicode != 0 && !event.isCtrlPressed && !event.isAltPressed) {
+            String(Character.toChars(unicode)).encodeToByteArray()
+        } else {
+            null
+        }
+        currentEngine.requestKeyEvent(
+            action = action,
+            keyCode = event.keyCode,
+            mods = mods,
+            unshiftedCodepoint = unshiftedCodepoint,
+            utf8 = utf8,
+        )
+        return true
+    }
+
+    private fun fallbackHandleKeyEvent(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return false
         when (event.keyCode) {
             KeyEvent.KEYCODE_ENTER -> { sendInput("\r"); return true }
@@ -625,6 +676,14 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val MOUSE_ACTION_RELEASE = 1
         const val MOUSE_ACTION_MOTION = 2
         const val MOUSE_BUTTON_LEFT = 1
+        const val KEY_ACTION_RELEASE = 0
+        const val KEY_ACTION_PRESS = 1
+        const val KEY_ACTION_REPEAT = 2
+        const val KEY_MOD_SHIFT = 1 shl 0
+        const val KEY_MOD_CTRL = 1 shl 1
+        const val KEY_MOD_ALT = 1 shl 2
+        const val KEY_MOD_SUPER = 1 shl 3
+        const val KEY_MOD_CAPS_LOCK = 1 shl 4
     }
 }
 
