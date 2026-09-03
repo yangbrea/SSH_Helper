@@ -10,6 +10,8 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
@@ -31,6 +33,29 @@ import kotlin.math.max
 internal class GhosttyTerminalView(context: Context) : View(context) {
     private var engine: GhosttyNativeEngine? = null
     private var onGridResize: ((cols: Int, rows: Int) -> Unit)? = null
+    private var onScrollLines: ((Int) -> Unit)? = null
+    private var scrollAccum = 0f
+
+    private val scrollDetector = GestureDetector(
+        context,
+        object : GestureDetector.SimpleOnGestureListener() {
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float,
+            ): Boolean {
+                if (cellHeightPx <= 0f) return false
+                scrollAccum += distanceY
+                val delta = (scrollAccum / cellHeightPx).toInt()
+                if (delta != 0) {
+                    scrollAccum -= delta * cellHeightPx
+                    onScrollLines?.invoke(delta)
+                }
+                return true
+            }
+        },
+    )
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
@@ -87,6 +112,17 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     fun setOnGridResize(callback: (cols: Int, rows: Int) -> Unit) {
         onGridResize = callback
+    }
+
+    fun setOnScrollLines(callback: (Int) -> Unit) {
+        onScrollLines = callback
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            scrollAccum = 0f
+        }
+        return scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -326,12 +362,14 @@ internal fun GhosttyTerminalSurface(
                     clipboard.setPrimaryClip(ClipData.newPlainText("SSH terminal", text))
                 }
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
+                setOnScrollLines { delta -> frontend.scrollLines(delta) }
                 frontend.attachView(this)
             }
         },
         update = { view ->
             frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
+            view.setOnScrollLines { delta -> frontend.scrollLines(delta) }
             frontend.attachView(view)
         },
         onRelease = { view ->
