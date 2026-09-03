@@ -33,6 +33,7 @@ struct NativeTerminal {
     GhosttyRenderState render_state = nullptr;
     GhosttyRenderStateRowIterator row_iter = nullptr;
     GhosttyRenderStateRowCells row_cells = nullptr;
+    GhosttySearch search = nullptr;
 
     // Bytes libghostty asks us to write back to the PTY (DSR/mode queries).
     std::vector<uint8_t> pending_pty_writes;
@@ -108,6 +109,10 @@ void freeNativeTerminal(NativeTerminal* native) {
         return;
     }
     native->closed = true;
+    if (native->search != nullptr) {
+        ghostty_search_free(native->search);
+        native->search = nullptr;
+    }
     if (native->row_cells != nullptr) {
         ghostty_render_state_row_cells_free(native->row_cells);
         native->row_cells = nullptr;
@@ -454,6 +459,11 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
             break;
         }
 
+        if (ghostty_search_new(nullptr, &native->search, native->terminal) != GHOSTTY_SUCCESS ||
+            native->search == nullptr) {
+            break;
+        }
+
         ghostty_terminal_set(
             native->terminal, GHOSTTY_TERMINAL_OPT_USERDATA, native);
         ghostty_terminal_set(
@@ -776,6 +786,105 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeGetPwd(
     jobject /* thiz */,
     jlong handle) {
     return terminalStringData(env, fromHandle(handle), GHOSTTY_TERMINAL_DATA_PWD);
+}
+
+namespace {
+
+jint searchTotalMatches(GhosttySearch search) {
+    size_t total = 0;
+    if (ghostty_search_get(search, GHOSTTY_SEARCH_DATA_TOTAL_MATCHES, &total) != GHOSTTY_SUCCESS) {
+        return 0;
+    }
+    return static_cast<jint>(total);
+}
+
+} // namespace
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSet(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jbyteArray query) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return 0;
+    }
+
+    if (query == nullptr) {
+        ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, nullptr);
+        return 0;
+    }
+
+    const jsize len = env->GetArrayLength(query);
+    std::vector<uint8_t> bytes(static_cast<size_t>(len));
+    if (len > 0) {
+        env->GetByteArrayRegion(query, 0, len, reinterpret_cast<jbyte*>(bytes.data()));
+        if (env->ExceptionCheck()) return 0;
+    }
+
+    GhosttyString needle{bytes.data(), bytes.size()};
+    ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, &needle);
+    ghostty_search_run(native->search);
+    return searchTotalMatches(native->search);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSelect(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jboolean backwards) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return -1;
+    }
+
+    const GhosttySearchOption option = backwards
+        ? GHOSTTY_SEARCH_OPT_SELECT_PREV
+        : GHOSTTY_SEARCH_OPT_SELECT_NEXT;
+    if (ghostty_search_set(native->search, option, nullptr) != GHOSTTY_SUCCESS) {
+        return -1;
+    }
+
+    size_t selected = 0;
+    if (ghostty_search_get(
+            native->search, GHOSTTY_SEARCH_DATA_SELECTED_INDEX, &selected) != GHOSTTY_SUCCESS) {
+        return -1;
+    }
+    return static_cast<jint>(selected);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchTotal(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return 0;
+    }
+    return searchTotalMatches(native->search);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchClear(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+    ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, nullptr);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

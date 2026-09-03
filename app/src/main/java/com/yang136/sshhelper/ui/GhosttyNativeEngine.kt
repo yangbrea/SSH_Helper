@@ -78,6 +78,49 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestSearchSet(query: String, onResult: (Int) -> Unit) {
+        if (handle == 0L) {
+            onResult(0)
+            return
+        }
+        scope.launch {
+            if (handle == 0L) {
+                onResult(0)
+                return@launch
+            }
+            val bytes = query.takeIf { it.isNotEmpty() }?.encodeToByteArray()
+            val total = GhosttyNativeBridge.nativeSearchSet(handle, bytes)
+            refreshSnapshot()
+            onResult(total)
+        }
+    }
+
+    fun requestSearchSelect(backwards: Boolean, onResult: (Int, Int) -> Unit) {
+        if (handle == 0L) {
+            onResult(-1, 0)
+            return
+        }
+        scope.launch {
+            if (handle == 0L) {
+                onResult(-1, 0)
+                return@launch
+            }
+            val index = GhosttyNativeBridge.nativeSearchSelect(handle, backwards)
+            val total = GhosttyNativeBridge.nativeSearchTotal(handle)
+            refreshSnapshot()
+            onResult(index, total)
+        }
+    }
+
+    fun requestSearchClear() {
+        if (handle == 0L) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSearchClear(handle)
+            refreshSnapshot()
+        }
+    }
+
     fun requestSelectAll() {
         if (handle == 0L) return
         scope.launch {

@@ -68,6 +68,18 @@ object GhosttyNativeBridge {
     /** Returns current OSC working directory as UTF-8, or null. */
     external fun nativeGetPwd(handle: Long): ByteArray?
 
+    /** Sets search needle and returns total match count. */
+    external fun nativeSearchSet(handle: Long, query: ByteArray?): Int
+
+    /** Selects next/previous search match; returns selected index or -1. */
+    external fun nativeSearchSelect(handle: Long, backwards: Boolean): Int
+
+    /** Returns current total search match count. */
+    external fun nativeSearchTotal(handle: Long): Int
+
+    /** Clears search needle. */
+    external fun nativeSearchClear(handle: Long)
+
     /**
      * Writes the current render snapshot into [buffer] (a direct
      * little-endian ByteBuffer). Returns the number of dirty rows written, or

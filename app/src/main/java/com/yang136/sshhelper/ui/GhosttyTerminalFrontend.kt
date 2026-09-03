@@ -25,6 +25,8 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     var onTitleChange: ((String) -> Unit)? = null
     var onPwdChange: ((String) -> Unit)? = null
 
+    private var lastSearchQuery: String? = null
+
     private val engine = GhosttyNativeEngine { bytes ->
         onPtyWrite?.invoke(bytes)
     }.apply {
@@ -124,8 +126,32 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override fun clearSelection() = Unit
 
-    override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) = Unit
-    override fun clearSearch() = Unit
+    override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) {
+        ensureStarted()
+        if (query.isEmpty()) {
+            lastSearchQuery = null
+            engine.requestSearchClear()
+            onSearchResults?.invoke(-1, 0)
+            return
+        }
+        if (lastSearchQuery != query) {
+            lastSearchQuery = query
+            engine.requestSearchSet(query) { total ->
+                onSearchResults?.invoke(if (total > 0) 0 else -1, total)
+            }
+        } else {
+            engine.requestSearchSelect(backwards) { index, total ->
+                onSearchResults?.invoke(index, total)
+            }
+        }
+    }
+
+    override fun clearSearch() {
+        lastSearchQuery = null
+        ensureStarted()
+        engine.requestSearchClear()
+        onSearchResults?.invoke(-1, 0)
+    }
 
     override fun armCtrl() = Unit
     override fun focusAndShowKeyboard() = Unit
