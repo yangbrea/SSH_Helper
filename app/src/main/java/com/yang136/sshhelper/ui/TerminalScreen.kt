@@ -314,8 +314,9 @@ fun TerminalScreen(
                     onSurfaceCreated = { surfaceRevision.intValue += 1 },
                     modifier = modifier,
                 )
-                is GhosttyTerminalFrontend -> GhosttyTerminalPlaceholder(
-                    background = terminalBackground,
+                is GhosttyTerminalFrontend -> GhosttyTerminalSurface(
+                    frontend = controller,
+                    onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
                     modifier = modifier,
                 )
             }
@@ -1711,25 +1712,6 @@ private class TerminalBridge(
             controller.markReady()
             resizeCallback(columns, rows)
         }
-    }
-}
-
-@Composable
-private fun GhosttyTerminalPlaceholder(
-    background: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(background),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Ghostty 终端后端尚未实现\n（等待 Step 4/5/6 接入原生渲染与输入）",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-        )
     }
 }
 
