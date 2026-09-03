@@ -87,6 +87,7 @@ interface SessionManager {
     suspend fun newSftpClient(id: SessionId): SftpClient
     suspend fun forwardSession(id: SessionId): PortForwardCapableSession?
     fun enableFeature(id: SessionId, feature: SessionFeature)
+    fun rename(id: SessionId, displayName: String)
     fun respondToHostKey(id: SessionId, accept: Boolean)
     suspend fun forgetChangedHostKey(id: SessionId)
 }
@@ -432,6 +433,15 @@ class DefaultSessionManager(
                 runtime.ssh.state.value is ConnectionState.Connected && !runtime.userDisconnected
             ) {
                 runtime.scope.launch { reconnect(runtime.id) }
+            }
+        }
+    }
+
+    override fun rename(id: SessionId, displayName: String) {
+        runtime(id)?.let { runtime ->
+            val trimmed = displayName.trim()
+            if (trimmed.isNotEmpty()) {
+                update(runtime) { it.copy(displayName = trimmed) }
             }
         }
     }

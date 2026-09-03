@@ -100,6 +100,7 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
         container.aiAgentManager.analyzePartial(id, suggestionId)
     fun clearAi(id: SessionId) = container.aiAgentManager.clear(id)
     fun enableFeature(id: SessionId, feature: SessionFeature) = manager.enableFeature(id, feature)
+    fun rename(id: SessionId, displayName: String) = manager.rename(id, displayName)
     fun connect(id: SessionId, credential: Credential, remember: Boolean) = viewModelScope.launch { manager.connect(id, credential, remember) }
     fun send(id: SessionId, bytes: ByteArray) = viewModelScope.launch { manager.write(id, bytes) }
     private val resizeJobs = mutableMapOf<SessionId, Job>()

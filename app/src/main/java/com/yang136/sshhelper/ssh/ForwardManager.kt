@@ -52,6 +52,12 @@ interface ForwardManager {
 
     /** 当前有活动转发（Running/Starting/Reconnecting）所绑定的会话 ID 集合。 */
     fun activeForwardSessionIds(): Set<SessionId>
+
+    /** 指定会话当前承载的活动转发规则数量（用于关闭会话前的风险提示）。 */
+    fun activeForwardCount(sessionId: SessionId): Int
+
+    /** 所有会话当前承载的活动转发规则数量映射。 */
+    fun activeForwardCounts(): Map<SessionId, Int>
 }
 
 /**
@@ -498,10 +504,21 @@ class DefaultForwardManager(
 
     /** 当前有活动转发（Running/Starting/Reconnecting）所绑定的会话 ID 集合。 */
     override fun activeForwardSessionIds(): Set<SessionId> =
-        mutableStates.value.entries
-            .filter { (ruleId, state) -> state.isActive() }
-            .mapNotNull { (ruleId, _) -> bindings[ruleId] }
-            .toSet()
+        activeForwardCounts().keys
+
+    override fun activeForwardCount(sessionId: SessionId): Int =
+        activeForwardCounts()[sessionId] ?: 0
+
+    override fun activeForwardCounts(): Map<SessionId, Int> {
+        val counts = mutableMapOf<SessionId, Int>()
+        for ((ruleId, state) in mutableStates.value) {
+            if (state.isActive()) {
+                val sessionId = bindings[ruleId] ?: continue
+                counts[sessionId] = (counts[sessionId] ?: 0) + 1
+            }
+        }
+        return counts
+    }
 
     private fun ensureForegroundServiceStarted() {
         if (serviceWanted.compareAndSet(false, true)) {
