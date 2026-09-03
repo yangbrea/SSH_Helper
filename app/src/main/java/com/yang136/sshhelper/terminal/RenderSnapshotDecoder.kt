@@ -14,6 +14,8 @@ internal const val CELL_FLAG_ITALIC = 1 shl 1
 internal const val CELL_FLAG_FAINT = 1 shl 2
 internal const val CELL_FLAG_INVERSE = 1 shl 3
 internal const val CELL_FLAG_UNDERLINE = 1 shl 4
+internal const val CELL_FLAG_UNDERLINE_STYLE_SHIFT = 10
+internal const val CELL_FLAG_UNDERLINE_STYLE_MASK = 0x7 shl CELL_FLAG_UNDERLINE_STYLE_SHIFT
 internal const val CELL_FLAG_STRIKETHROUGH = 1 shl 5
 internal const val CELL_FLAG_OVERLINE = 1 shl 6
 internal const val CELL_FLAG_INVISIBLE = 1 shl 7
@@ -31,6 +33,8 @@ internal data class GhosttyRenderCell(
     val faint: Boolean get() = flags and CELL_FLAG_FAINT != 0
     val inverse: Boolean get() = flags and CELL_FLAG_INVERSE != 0
     val underline: Boolean get() = flags and CELL_FLAG_UNDERLINE != 0
+    val underlineStyle: Int
+        get() = (flags and CELL_FLAG_UNDERLINE_STYLE_MASK) shr CELL_FLAG_UNDERLINE_STYLE_SHIFT
     val strikethrough: Boolean get() = flags and CELL_FLAG_STRIKETHROUGH != 0
     val overline: Boolean get() = flags and CELL_FLAG_OVERLINE != 0
     val invisible: Boolean get() = flags and CELL_FLAG_INVISIBLE != 0

@@ -126,6 +126,8 @@ constexpr uint16_t kCellFlagItalic = 1 << 1;
 constexpr uint16_t kCellFlagFaint = 1 << 2;
 constexpr uint16_t kCellFlagInverse = 1 << 3;
 constexpr uint16_t kCellFlagUnderline = 1 << 4;
+constexpr uint16_t kCellFlagUnderlineStyleShift = 10;
+constexpr uint16_t kCellFlagUnderlineStyleMask = 0x7 << kCellFlagUnderlineStyleShift;
 constexpr uint16_t kCellFlagStrikethrough = 1 << 5;
 constexpr uint16_t kCellFlagOverline = 1 << 6;
 constexpr uint16_t kCellFlagInvisible = 1 << 7;
@@ -293,7 +295,13 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
             if (style.italic) flags |= kCellFlagItalic;
             if (style.faint) flags |= kCellFlagFaint;
             if (style.inverse) flags |= kCellFlagInverse;
-            if (style.underline != 0) flags |= kCellFlagUnderline;
+            if (style.underline != 0) {
+                flags |= kCellFlagUnderline;
+                const uint16_t encoded_style =
+                    static_cast<uint16_t>(style.underline) << kCellFlagUnderlineStyleShift;
+                flags = static_cast<uint16_t>(
+                    (flags & ~kCellFlagUnderlineStyleMask) | encoded_style);
+            }
             if (style.strikethrough) flags |= kCellFlagStrikethrough;
             if (style.overline) flags |= kCellFlagOverline;
             if (style.invisible) flags |= kCellFlagInvisible;

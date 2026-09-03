@@ -3,7 +3,9 @@ package com.yang136.sshhelper.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.View
@@ -140,6 +142,59 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         }
     }
 
+    private fun drawCellDecorations(
+        canvas: Canvas,
+        cell: GhosttyRenderCell,
+        left: Float,
+        top: Float,
+        width: Float,
+    ) {
+        val lineColor = textPaint.color
+        textPaint.color = lineColor
+        textPaint.strokeWidth = max(1f, resources.displayMetrics.density * 0.75f)
+        textPaint.style = Paint.Style.STROKE
+
+        if (cell.overline) {
+            canvas.drawLine(left, top + OVERLINE_OFFSET, left + width, top + OVERLINE_OFFSET, textPaint)
+        }
+
+        val underlineY = top + baselinePx + UNDERLINE_Y_OFFSET
+        when (cell.underlineStyle) {
+            1 -> canvas.drawLine(left, underlineY, left + width, underlineY, textPaint)
+            2 -> {
+                canvas.drawLine(left, underlineY, left + width, underlineY, textPaint)
+                canvas.drawLine(left, underlineY + 2f, left + width, underlineY + 2f, textPaint)
+            }
+            3 -> {
+                val path = Path()
+                val step = max(2f, width / 8f)
+                path.moveTo(left, underlineY)
+                var x = left
+                var up = true
+                while (x < left + width) {
+                    val next = minOf(left + width, x + step)
+                    val midY = if (up) underlineY - 1.5f else underlineY + 1.5f
+                    path.quadTo((x + next) / 2f, midY, next, underlineY)
+                    x = next
+                    up = !up
+                }
+                canvas.drawPath(path, textPaint)
+            }
+            4 -> {
+                textPaint.pathEffect = DashPathEffect(floatArrayOf(1f, 3f), 0f)
+                canvas.drawLine(left, underlineY, left + width, underlineY, textPaint)
+            }
+            5 -> {
+                textPaint.pathEffect = DashPathEffect(floatArrayOf(4f, 3f), 0f)
+                canvas.drawLine(left, underlineY, left + width, underlineY, textPaint)
+            }
+        }
+
+        textPaint.pathEffect = null
+        textPaint.style = Paint.Style.FILL
+        textPaint.strokeWidth = 0f
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -180,18 +235,16 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     textPaint.isFakeBoldText = cell.bold
                     textPaint.textSkewX = if (cell.italic) ITALIC_SKEW_X else 0f
                     textPaint.isStrikeThruText = cell.strikethrough
-                    textPaint.isUnderlineText = cell.underline
+                    textPaint.isUnderlineText = false
                     canvas.drawText(cell.text, x, y + baselinePx, textPaint)
-                    if (cell.overline) {
-                        canvas.drawLine(x, y + OVERLINE_OFFSET, x + cellWidth, y + OVERLINE_OFFSET, textPaint)
-                    }
+                    drawCellDecorations(canvas, cell, x, y, cellWidth)
                 }
                 textPaint.color = foregroundArgb
                 textPaint.alpha = 255
                 textPaint.isFakeBoldText = false
                 textPaint.textSkewX = 0f
                 textPaint.isStrikeThruText = false
-                textPaint.isUnderlineText = false
+                textPaint.pathEffect = null
                 x += cellWidth
             }
         }
@@ -247,6 +300,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val FAINT_ALPHA = 150
         const val ITALIC_SKEW_X = -0.2f
         const val OVERLINE_OFFSET = 1f
+        const val UNDERLINE_Y_OFFSET = 3f
         const val CURSOR_BLINK_INTERVAL_MS = 500L
     }
 }
