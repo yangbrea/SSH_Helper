@@ -348,7 +348,6 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     };
     std::memcpy(out.data() + row_count_offset, row_count_bytes, 4);
 
-    ghostty_render_state_clean(native->render_state);
     return true;
 }
 
@@ -482,7 +481,9 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeWrite(
     env->GetByteArrayRegion(data, 0, len, buffer.data());
     if (env->ExceptionCheck()) return;
 
-    native->pending_pty_writes.clear();
+    // Do NOT clear pending writes here. The Kotlin engine drains them after
+    // every vt_write; clearing first would drop query responses if a previous
+    // drain was not yet performed.
     ghostty_terminal_vt_write(
         native->terminal,
         reinterpret_cast<const uint8_t*>(buffer.data()),
@@ -515,6 +516,44 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResize(
         static_cast<uint16_t>(rows),
         static_cast<uint32_t>(cell_width_px),
         static_cast<uint32_t>(cell_height_px));
+}
+
+namespace {
+
+GhosttyColorRgb colorFromArgb(jint argb) {
+    return GhosttyColorRgb{
+        .r = static_cast<uint8_t>((argb >> 16) & 0xFF),
+        .g = static_cast<uint8_t>((argb >> 8) & 0xFF),
+        .b = static_cast<uint8_t>(argb & 0xFF),
+    };
+}
+
+} // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetDefaultColors(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint background_argb,
+    jint foreground_argb,
+    jint cursor_argb) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+
+    const GhosttyColorRgb background = colorFromArgb(background_argb);
+    const GhosttyColorRgb foreground = colorFromArgb(foreground_argb);
+    const GhosttyColorRgb cursor = colorFromArgb(cursor_argb);
+    ghostty_terminal_set(
+        native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &background);
+    ghostty_terminal_set(
+        native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &foreground);
+    ghostty_terminal_set(
+        native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &cursor);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -560,12 +599,15 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeRenderSnapshot(
     }
 
     if (snapshot.size() > static_cast<size_t>(capacity)) {
+        // Do not clean render state: the caller can retry with a larger
+        // buffer and we must not lose the dirty frame.
         return -1;
     }
     if (!snapshot.empty()) {
         std::memcpy(address, snapshot.data(), snapshot.size());
     }
 
+    ghostty_render_state_clean(native->render_state);
     if (snapshot.size() < 48) return 0;
     int32_t row_count = 0;
     std::memcpy(&row_count, snapshot.data() + 44, sizeof(row_count));

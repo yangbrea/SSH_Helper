@@ -1,23 +1,24 @@
 package com.yang136.sshhelper.ui
 
 import android.content.Context
-import com.yang136.sshhelper.terminal.GhosttyNativeBridge
+import android.graphics.Color
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 
 /**
  * Ghostty-backed terminal frontend.
  *
- * The frontend owns the native managed terminal handle. A Canvas renderer
- * ([GhosttyTerminalView]) may attach to it through [attachView]; before a
- * view is attached, writes/reset still reach the native engine so a later
- * render snapshot contains the current grid.
- *
- * The native library is loaded lazily so JVM unit tests can still verify
- * factory behavior without an Android device.
+ * The frontend owns a [GhosttyNativeEngine] which serializes all native calls
+ * on a dedicated worker. A Canvas renderer ([GhosttyTerminalView]) reads the
+ * latest immutable snapshot produced by that engine.
  */
 internal class GhosttyTerminalFrontend : TerminalFrontend {
-    private var handle: Long = 0L
-    private var closed = false
+    /** Receives bytes the terminal asks to write back to the PTY. */
+    var onPtyWrite: ((ByteArray) -> Unit)? = null
+
+    private val engine = GhosttyNativeEngine { bytes ->
+        onPtyWrite?.invoke(bytes)
+    }
+    private var started = false
 
     internal var view: GhosttyTerminalView? = null
         private set
@@ -29,19 +30,17 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     override var onCtrlArmed: ((Boolean) -> Unit)? = null
     override var onRenderingDelayed: ((Boolean) -> Unit)? = null
 
-    private fun ensureHandle(): Boolean {
-        if (handle != 0L || closed) return handle != 0L
-        handle = runCatching {
-            GhosttyNativeBridge.nativeCreateManaged(cols = DEFAULT_COLS, rows = DEFAULT_ROWS)
-        }.getOrDefault(0L)
-        return handle != 0L
+    private fun ensureStarted() {
+        if (!started) {
+            started = true
+            engine.start(DEFAULT_COLS, DEFAULT_ROWS)
+        }
     }
 
     internal fun attachView(terminalView: GhosttyTerminalView) {
-        if (closed) return
-        if (!ensureHandle()) return
+        ensureStarted()
         view = terminalView
-        terminalView.attach(handle)
+        terminalView.attach(engine)
     }
 
     internal fun detachView(terminalView: GhosttyTerminalView) {
@@ -49,18 +48,24 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     }
 
     override suspend fun write(bytes: ByteArray) {
-        if (!ensureHandle()) return
-        GhosttyNativeBridge.nativeWrite(handle, bytes)
+        ensureStarted()
+        engine.write(bytes)
         view?.invalidate()
     }
 
     override suspend fun reset() {
-        if (!ensureHandle()) return
-        GhosttyNativeBridge.nativeReset(handle)
+        ensureStarted()
+        engine.reset()
         view?.invalidate()
     }
 
     override fun setAppearance(palette: TerminalPalette, fontSize: Int) {
+        ensureStarted()
+        engine.requestSetDefaultColors(
+            backgroundArgb = Color.parseColor(palette.background),
+            foregroundArgb = Color.parseColor(palette.foreground),
+            cursorArgb = Color.parseColor(palette.cursor),
+        )
         view?.setPalette(palette)
         view?.setFontSizeSp(fontSize.toFloat())
     }
@@ -83,13 +88,9 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     override fun hideKeyboard() = Unit
 
     override fun close() {
-        if (closed) return
-        closed = true
+        engine.close()
         view = null
-        if (handle != 0L) {
-            GhosttyNativeBridge.nativeFreeManaged(handle)
-            handle = 0L
-        }
+        started = false
     }
 
     private companion object {

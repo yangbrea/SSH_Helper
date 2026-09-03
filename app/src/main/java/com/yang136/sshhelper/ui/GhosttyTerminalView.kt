@@ -10,13 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import com.yang136.sshhelper.terminal.GhosttyNativeBridge
 import com.yang136.sshhelper.terminal.GhosttyRenderCell
 import com.yang136.sshhelper.terminal.GhosttyRenderSnapshot
-import com.yang136.sshhelper.terminal.RenderSnapshotDecoder
 import com.yang136.sshhelper.ui.theme.TerminalPalette
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -28,7 +24,7 @@ import kotlin.math.max
  * future commits.
  */
 internal class GhosttyTerminalView(context: Context) : View(context) {
-    private var handle: Long = 0L
+    private var engine: GhosttyNativeEngine? = null
     private var onGridResize: ((cols: Int, rows: Int) -> Unit)? = null
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -54,17 +50,13 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     // rows, but drawing every frame must still render the untouched rows.
     private var grid: Array<Array<GhosttyRenderCell?>>? = null
 
-    private var snapshotBuffer = ByteBuffer
-        .allocateDirect(INITIAL_BUFFER_BYTES)
-        .order(ByteOrder.LITTLE_ENDIAN)
-
     init {
         isFocusable = false
         updateMetrics()
     }
 
-    fun attach(nativeHandle: Long) {
-        handle = nativeHandle
+    fun attach(nativeEngine: GhosttyNativeEngine) {
+        engine = nativeEngine
         if (width > 0 && height > 0) {
             resizeGrid()
         }
@@ -91,7 +83,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (handle != 0L) resizeGrid()
+        resizeGrid()
     }
 
     private fun updateMetrics() {
@@ -103,15 +95,15 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     private fun resizeGrid() {
-        if (width <= 0 || height <= 0 || handle == 0L) return
+        val currentEngine = engine ?: return
+        if (width <= 0 || height <= 0) return
         val newCols = max(2, (width / cellWidthPx).toInt())
         val newRows = max(2, (height / cellHeightPx).toInt())
         if (newCols == cols && newRows == rows) return
         cols = newCols
         rows = newRows
         grid = null
-        GhosttyNativeBridge.nativeResize(
-            handle,
+        currentEngine.requestResize(
             cols,
             rows,
             ceil(cellWidthPx.toDouble()).toInt().coerceAtLeast(1),
@@ -146,17 +138,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (handle == 0L) return
 
-        snapshotBuffer.clear()
-        val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, snapshotBuffer)
-        if (rowCount < 0) {
-            // Caller-provided buffer too small; first layer uses a generous size.
+        val snapshot = engine?.latestSnapshot() ?: run {
+            canvas.drawColor(backgroundArgb)
             return
         }
-        snapshotBuffer.clear()
-        val snapshot = RenderSnapshotDecoder.decode(snapshotBuffer, snapshotBuffer.capacity())
-            ?: return
 
         backgroundArgb = snapshot.backgroundArgb
         foregroundArgb = snapshot.foregroundArgb
@@ -170,7 +156,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             val y = rowIndex * cellHeightPx
             var x = 0f
             for (cell in rowCells) {
-                if (cell == null) {
+                if (cell == null || cell.wideTail) {
+                    // The leading wide cell already advanced x by two columns;
+                    // the tail is a spacer and must not advance again.
+                    if (cell != null && cell.wideTail) continue
                     x += cellWidthPx
                     continue
                 }
@@ -245,19 +234,23 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 @Composable
 internal fun GhosttyTerminalSurface(
     frontend: GhosttyTerminalFrontend,
+    onPtyWrite: (ByteArray) -> Unit,
     onResize: (cols: Int, rows: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val currentOnPtyWrite = rememberUpdatedState(onPtyWrite)
     val currentOnResize = rememberUpdatedState(onResize)
     AndroidView(
         modifier = modifier,
         factory = { context ->
             GhosttyTerminalView(context).apply {
+                frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
                 frontend.attachView(this)
             }
         },
         update = { view ->
+            frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
             frontend.attachView(view)
         },

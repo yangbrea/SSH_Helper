@@ -36,6 +36,14 @@ object GhosttyNativeBridge {
         cellHeightPx: Int,
     )
 
+    /** Sets native default colors so render snapshots use the app palette. */
+    external fun nativeSetDefaultColors(
+        handle: Long,
+        backgroundArgb: Int,
+        foregroundArgb: Int,
+        cursorArgb: Int,
+    )
+
     /** Drains bytes libghostty asked to write back to the PTY. */
     external fun nativeDrainPtyWrites(handle: Long): ByteArray?
 

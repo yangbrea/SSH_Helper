@@ -316,6 +316,7 @@ fun TerminalScreen(
                 )
                 is GhosttyTerminalFrontend -> GhosttyTerminalSurface(
                     frontend = controller,
+                    onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
                     onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
                     modifier = modifier,
                 )
