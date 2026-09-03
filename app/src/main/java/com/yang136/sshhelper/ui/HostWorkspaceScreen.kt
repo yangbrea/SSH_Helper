@@ -139,8 +139,8 @@ internal fun HostWorkspacePane(
         }
     }
 
-    fun expand(sessionId: SessionId) {
-        expandedSessionId = sessionId.value
+    fun toggleExpand(sessionId: SessionId) {
+        expandedSessionId = if (expandedSessionId == sessionId.value) null else sessionId.value
     }
 
     fun performCreateSession() {
@@ -163,7 +163,7 @@ internal fun HostWorkspacePane(
         host = host,
         state = state,
         expandedSessionId = expandedSessionId,
-        onExpandSession = { session -> expand(session.id) },
+        onExpandSession = { session -> toggleExpand(session.id) },
         onCreateSession = ::performCreateSession,
         onOpenTerminal = onOpenTerminal,
         onOpenFiles = onOpenFiles,
