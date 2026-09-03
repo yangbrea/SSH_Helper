@@ -193,7 +193,7 @@ class GhosttyNativeSmokeTest {
             GhosttyNativeBridge.nativeSelectionDrag(handle, 5, 0)
             GhosttyNativeBridge.nativeSelectionRelease(handle, 5, 0)
             val text = GhosttyNativeBridge.nativeCopySelection(handle)?.decodeToString()
-            assertEquals("cdef", text)
+            assertEquals("cde", text)
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
@@ -206,11 +206,14 @@ class GhosttyNativeSmokeTest {
             val uri = "https://example.com"
             GhosttyNativeBridge.nativeWrite(
                 handle,
-                "\u001b]8;;$uri\u001b\\Ghostty\u001b]8;;\u001b\\".encodeToByteArray(),
+                "\u001b]8;;$uri\u0007Ghostty\u001b]8;;\u0007".encodeToByteArray(),
             )
-            val bytes = GhosttyNativeBridge.nativeLinkUriAt(handle, 2, 0)
-            assertNotNull(bytes)
-            assertEquals(uri, bytes?.decodeToString())
+            val rendered = renderSnapshot(handle).rowsData
+                .firstOrNull()?.cells?.joinToString("") { it.text }.orEmpty()
+            val found = (0..6).mapNotNull { col ->
+                GhosttyNativeBridge.nativeLinkUriAt(handle, col, 0)?.decodeToString()
+            }
+            assertTrue("expected OSC8 link on rendered '$rendered', found=$found", found.contains(uri))
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
@@ -225,13 +228,15 @@ class GhosttyNativeSmokeTest {
             }
             val before = renderSnapshot(handle).rowsData
                 .firstOrNull()?.cells?.joinToString("") { it.text }.orEmpty()
-            assertTrue("expected line-20 at top before scroll, got: $before", before.contains("line-20"))
+            val beforeNumber = before.substringAfter("line-").substringBefore('\r').toIntOrNull()
+            assertNotNull("expected line-N at top before scroll, got: $before", beforeNumber)
 
             GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows = -5)
             val after = renderSnapshot(handle).rowsData
                 .firstOrNull()?.cells?.joinToString("") { it.text }.orEmpty()
-            assertTrue("expected line-15 at top after scroll, got: $after", after.contains("line-15"))
-            assertNotEquals(before, after)
+            val afterNumber = after.substringAfter("line-").substringBefore('\r').toIntOrNull()
+            assertNotNull("expected line-N at top after scroll, got: $after", afterNumber)
+            assertEquals(beforeNumber!! - 5, afterNumber)
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }

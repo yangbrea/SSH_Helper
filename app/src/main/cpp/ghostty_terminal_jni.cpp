@@ -953,7 +953,11 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeLinkUriAt(
     if (!gridRefAtViewport(native, col, row, &ref)) return nullptr;
 
     size_t len = 0;
-    if (ghostty_grid_ref_hyperlink_uri(&ref, nullptr, 0, &len) != GHOSTTY_SUCCESS ||
+    const GhosttyResult query_result =
+        ghostty_grid_ref_hyperlink_uri(&ref, nullptr, 0, &len);
+    // A non-empty hyperlink reports OUT_OF_SPACE with the required length when
+    // queried without an output buffer; treat that as a hit.
+    if ((query_result != GHOSTTY_SUCCESS && query_result != GHOSTTY_OUT_OF_SPACE) ||
         len == 0) {
         return nullptr;
     }
