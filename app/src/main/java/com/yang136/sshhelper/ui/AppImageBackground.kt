@@ -23,10 +23,10 @@ val LocalImageBackgroundActive = staticCompositionLocalOf { false }
 
 internal enum class StructuralSurfaceRole { CONTENT, NAVIGATION }
 
-internal const val PRESET_CONTENT_SURFACE_ALPHA = 0.88f
-internal const val PRESET_NAVIGATION_SURFACE_ALPHA = 0.92f
-internal const val IMAGE_CONTENT_SURFACE_ALPHA = 0.86f
-internal const val IMAGE_NAVIGATION_SURFACE_ALPHA = 0.90f
+internal const val PRESET_CONTENT_SURFACE_ALPHA = 0.80f
+internal const val PRESET_NAVIGATION_SURFACE_ALPHA = 0.86f
+internal const val IMAGE_CONTENT_SURFACE_ALPHA = 0.78f
+internal const val IMAGE_NAVIGATION_SURFACE_ALPHA = 0.84f
 
 internal fun structuralSurfaceAlpha(imageBackgroundActive: Boolean, role: StructuralSurfaceRole): Float =
     when (role) {

@@ -28,7 +28,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.yang136.sshhelper.data.CommandSnippet
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.ui.design.SshCenteredList
+import com.yang136.sshhelper.ui.design.SshTopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,8 +61,8 @@ fun SnippetsScreen(
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
         topBar = {
-            TopAppBar(
-                title = { Text("快捷命令") },
+            SshTopAppBar(
+                title = "快捷命令",
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = { IconButton(onClick = { adding = true }) { Icon(Icons.Default.Add, "添加命令") } },
             )
