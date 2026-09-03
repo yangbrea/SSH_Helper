@@ -38,4 +38,11 @@ object GhosttyNativeBridge {
 
     /** Drains bytes libghostty asked to write back to the PTY. */
     external fun nativeDrainPtyWrites(handle: Long): ByteArray?
+
+    /**
+     * Writes the current render snapshot into [buffer] (a direct
+     * little-endian ByteBuffer). Returns the number of dirty rows written, or
+     * -1 when [buffer] is too small.
+     */
+    external fun nativeRenderSnapshot(handle: Long, buffer: java.nio.ByteBuffer): Int
 }

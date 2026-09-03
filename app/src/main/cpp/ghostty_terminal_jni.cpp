@@ -93,6 +93,265 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
     return out;
 }
 
+// Snapshot binary format v1 (little-endian).
+//
+// Header (13 * int32):
+//   [0]  version = 1
+//   [1]  dirty_kind (0 none, 1 partial, 2 full)
+//   [2]  cols
+//   [3]  rows
+//   [4]  default bg ARGB
+//   [5]  default fg ARGB
+//   [6]  cursor x or -1
+//   [7]  cursor y or -1
+//   [8]  cursor style (0 bar, 1 block, 2 underline, 3 hollow)
+//   [9]  cursor visible (0/1)
+//   [10] cursor blinking (0/1)
+//   [11] row count
+//   [12] generation (low 32 bits)
+//
+// Row record:
+//   int32 row_index
+//   int32 cell_count
+//   repeated cell:
+//     int32 fg ARGB
+//     int32 bg ARGB
+//     uint16 flags
+//     uint16 text_len
+//     uint8  text[text_len]
+
+constexpr uint16_t kSnapshotVersion = 1;
+constexpr uint16_t kCellFlagBold = 1 << 0;
+constexpr uint16_t kCellFlagItalic = 1 << 1;
+constexpr uint16_t kCellFlagFaint = 1 << 2;
+constexpr uint16_t kCellFlagInverse = 1 << 3;
+constexpr uint16_t kCellFlagUnderline = 1 << 4;
+constexpr uint16_t kCellFlagStrikethrough = 1 << 5;
+constexpr uint16_t kCellFlagOverline = 1 << 6;
+constexpr uint16_t kCellFlagInvisible = 1 << 7;
+constexpr uint16_t kCellFlagWide = 1 << 8;
+constexpr uint16_t kCellFlagWideTail = 1 << 9;
+
+inline void putI32(std::vector<uint8_t>& out, int32_t value) {
+    const uint8_t bytes[4] = {
+        static_cast<uint8_t>(value & 0xFF),
+        static_cast<uint8_t>((value >> 8) & 0xFF),
+        static_cast<uint8_t>((value >> 16) & 0xFF),
+        static_cast<uint8_t>((value >> 24) & 0xFF),
+    };
+    out.insert(out.end(), bytes, bytes + 4);
+}
+
+inline void putU16(std::vector<uint8_t>& out, uint16_t value) {
+    const uint8_t bytes[2] = {
+        static_cast<uint8_t>(value & 0xFF),
+        static_cast<uint8_t>((value >> 8) & 0xFF),
+    };
+    out.insert(out.end(), bytes, bytes + 2);
+}
+
+inline void putBytes(std::vector<uint8_t>& out, const uint8_t* data, size_t len) {
+    out.insert(out.end(), data, data + len);
+}
+
+inline int32_t argb(GhosttyColorRgb color) {
+    return static_cast<int32_t>(
+        0xFF000000u |
+        (static_cast<uint32_t>(color.r) << 16) |
+        (static_cast<uint32_t>(color.g) << 8) |
+        color.b);
+}
+
+// Populate a vector with the terminal's current render snapshot. Returns
+// false if a Ghostty API call failed unexpectedly. The output vector starts
+// empty on every call.
+bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
+    out.clear();
+
+    GhosttyResult result = ghostty_render_state_update(
+        native->render_state, native->terminal);
+    if (result != GHOSTTY_SUCCESS) return false;
+
+    GhosttyRenderStateDirty dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+    uint16_t cols = 0;
+    uint16_t rows = 0;
+    GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
+    GhosttyRenderStateCursor cursor = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
+
+    if (ghostty_render_state_get(
+            native->render_state, GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty) != GHOSTTY_SUCCESS ||
+        ghostty_render_state_get(
+            native->render_state, GHOSTTY_RENDER_STATE_DATA_COLS, &cols) != GHOSTTY_SUCCESS ||
+        ghostty_render_state_get(
+            native->render_state, GHOSTTY_RENDER_STATE_DATA_ROWS, &rows) != GHOSTTY_SUCCESS ||
+        ghostty_render_state_get(
+            native->render_state, GHOSTTY_RENDER_STATE_DATA_COLORS, &colors) != GHOSTTY_SUCCESS ||
+        ghostty_render_state_get(
+            native->render_state, GHOSTTY_RENDER_STATE_DATA_CURSOR, &cursor) != GHOSTTY_SUCCESS) {
+        return false;
+    }
+
+    if (dirty == GHOSTTY_RENDER_STATE_DIRTY_FALSE) {
+        putI32(out, kSnapshotVersion);
+        putI32(out, static_cast<int32_t>(GHOSTTY_RENDER_STATE_DIRTY_FALSE));
+        putI32(out, cols);
+        putI32(out, rows);
+        putI32(out, argb(colors.background));
+        putI32(out, argb(colors.foreground));
+        putI32(out, -1);
+        putI32(out, -1);
+        putI32(out, 0);
+        putI32(out, 0);
+        putI32(out, 0);
+        putI32(out, 0);
+        putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+        return true;
+    }
+
+    // Header placeholder; row count patched after iteration.
+    putI32(out, kSnapshotVersion);
+    putI32(out, static_cast<int32_t>(dirty));
+    putI32(out, cols);
+    putI32(out, rows);
+    putI32(out, argb(colors.background));
+    putI32(out, argb(colors.foreground));
+    putI32(
+        out,
+        (cursor.viewport_has_value && cursor.visible)
+            ? static_cast<int32_t>(cursor.viewport_x)
+            : -1);
+    putI32(
+        out,
+        (cursor.viewport_has_value && cursor.visible)
+            ? static_cast<int32_t>(cursor.viewport_y)
+            : -1);
+    putI32(out, static_cast<int32_t>(cursor.visual_style));
+    putI32(out, cursor.visible ? 1 : 0);
+    putI32(out, cursor.blinking ? 1 : 0);
+    const size_t row_count_offset = out.size();
+    putI32(out, 0); // row count placeholder
+    putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+
+    if (ghostty_render_state_get(
+            native->render_state,
+            GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
+            native->row_iter) != GHOSTTY_SUCCESS) {
+        return false;
+    }
+
+    int32_t row_count = 0;
+    uint16_t row_y = 0;
+    while (ghostty_render_state_row_iterator_next_dirty(native->row_iter, &row_y)) {
+        GhosttyCellsView raw_view{};
+        if (ghostty_render_state_row_get(
+                native->row_iter,
+                GHOSTTY_RENDER_STATE_ROW_DATA_CELLS_RAW,
+                &raw_view) != GHOSTTY_SUCCESS ||
+            raw_view.ptr == nullptr) {
+            return false;
+        }
+        if (ghostty_render_state_row_get(
+                native->row_iter,
+                GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
+                native->row_cells) != GHOSTTY_SUCCESS) {
+            return false;
+        }
+
+        const uint16_t cell_count = raw_view.len > cols ? cols : static_cast<uint16_t>(raw_view.len);
+        putI32(out, row_y);
+        putI32(out, cell_count);
+
+        for (uint16_t x = 0; x < cell_count; ++x) {
+            GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
+            GhosttyColorRgb fg = colors.foreground;
+            GhosttyColorRgb bg = colors.background;
+
+            if (ghostty_render_state_row_cells_select(native->row_cells, x) != GHOSTTY_SUCCESS) {
+                return false;
+            }
+            if (ghostty_render_state_row_cells_get(
+                    native->row_cells,
+                    GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE,
+                    &style) != GHOSTTY_SUCCESS) {
+                return false;
+            }
+            if (ghostty_render_state_row_cells_get(
+                    native->row_cells,
+                    GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR,
+                    &fg) != GHOSTTY_SUCCESS) {
+                fg = colors.foreground;
+            }
+            if (ghostty_render_state_row_cells_get(
+                    native->row_cells,
+                    GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
+                    &bg) != GHOSTTY_SUCCESS) {
+                bg = colors.background;
+            }
+
+            uint16_t flags = 0;
+            if (style.bold) flags |= kCellFlagBold;
+            if (style.italic) flags |= kCellFlagItalic;
+            if (style.faint) flags |= kCellFlagFaint;
+            if (style.inverse) flags |= kCellFlagInverse;
+            if (style.underline != 0) flags |= kCellFlagUnderline;
+            if (style.strikethrough) flags |= kCellFlagStrikethrough;
+            if (style.overline) flags |= kCellFlagOverline;
+            if (style.invisible) flags |= kCellFlagInvisible;
+
+            GhosttyCellWide wide = GHOSTTY_CELL_WIDE_NARROW;
+            if (ghostty_cell_get(
+                    raw_view.ptr[x], GHOSTTY_CELL_DATA_WIDE, &wide) == GHOSTTY_SUCCESS) {
+                if (wide == GHOSTTY_CELL_WIDE_WIDE) flags |= kCellFlagWide;
+                if (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL) flags |= kCellFlagWideTail;
+            }
+
+            // Query UTF-8 grapheme length, then read the cell text.
+            GhosttyBuffer length_query{};
+            GhosttyResult text_result = ghostty_render_state_row_cells_get(
+                native->row_cells,
+                GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
+                &length_query);
+            if (text_result != GHOSTTY_SUCCESS && text_result != GHOSTTY_OUT_OF_SPACE) {
+                return false;
+            }
+            std::vector<uint8_t> cell_text(length_query.len);
+            GhosttyBuffer text_out{
+                cell_text.empty() ? nullptr : cell_text.data(),
+                cell_text.size(),
+                0,
+            };
+            if (!cell_text.empty()) {
+                if (ghostty_render_state_row_cells_get(
+                        native->row_cells,
+                        GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
+                        &text_out) != GHOSTTY_SUCCESS) {
+                    return false;
+                }
+            }
+
+            putI32(out, argb(fg));
+            putI32(out, argb(bg));
+            putU16(out, flags);
+            putU16(out, static_cast<uint16_t>(text_out.len));
+            putBytes(out, text_out.ptr, text_out.len);
+        }
+
+        row_count += 1;
+    }
+
+    // Patch row count.
+    const uint8_t row_count_bytes[4] = {
+        static_cast<uint8_t>(row_count & 0xFF),
+        static_cast<uint8_t>((row_count >> 8) & 0xFF),
+        static_cast<uint8_t>((row_count >> 16) & 0xFF),
+        static_cast<uint8_t>((row_count >> 24) & 0xFF),
+    };
+    std::memcpy(out.data() + row_count_offset, row_count_bytes, 4);
+
+    ghostty_render_state_clean(native->render_state);
+    return true;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -270,4 +529,45 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeDrainPtyWrites(
     jbyteArray out = toJByteArray(env, native->pending_pty_writes);
     native->pending_pty_writes.clear();
     return out;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeRenderSnapshot(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jobject buffer) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return -1;
+    }
+
+    auto* address = static_cast<uint8_t*>(env->GetDirectBufferAddress(buffer));
+    const jlong capacity = env->GetDirectBufferCapacity(buffer);
+    if (address == nullptr || capacity <= 0) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalArgumentException"),
+                      "render snapshot requires a direct ByteBuffer");
+        return -1;
+    }
+
+    std::vector<uint8_t> snapshot;
+    if (!buildRenderSnapshot(native, snapshot)) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "failed to build ghostty render snapshot");
+        return -1;
+    }
+
+    if (snapshot.size() > static_cast<size_t>(capacity)) {
+        return -1;
+    }
+    if (!snapshot.empty()) {
+        std::memcpy(address, snapshot.data(), snapshot.size());
+    }
+
+    if (snapshot.size() < 48) return 0;
+    int32_t row_count = 0;
+    std::memcpy(&row_count, snapshot.data() + 44, sizeof(row_count));
+    return row_count;
 }

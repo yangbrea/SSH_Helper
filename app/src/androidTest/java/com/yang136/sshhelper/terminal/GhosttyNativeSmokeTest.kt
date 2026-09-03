@@ -1,6 +1,8 @@
 package com.yang136.sshhelper.terminal
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -55,6 +57,33 @@ class GhosttyNativeSmokeTest {
                 cellHeightPx = 16,
             )
             GhosttyNativeBridge.nativeReset(handle)
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun renderSnapshotProducesDecodableBatch() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "hello\r\n".encodeToByteArray())
+
+            val buffer = ByteBuffer
+                .allocateDirect(1 shl 20)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, buffer)
+            assertTrue("snapshot should encode at least one row", rowCount >= 0)
+
+            buffer.rewind()
+            val version = buffer.int
+            val dirty = buffer.int
+            val cols = buffer.int
+            val rows = buffer.int
+            assertEquals(1, version)
+            assertEquals(80, cols)
+            assertEquals(24, rows)
+            assertTrue("dirty should not be none", dirty != 0)
+            assertTrue("reported row count should match header", rowCount <= rows)
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
