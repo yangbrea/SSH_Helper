@@ -827,7 +827,11 @@ private fun LandscapeTerminalRail(
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
-    Surface(Modifier.width(56.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+    Surface(
+        Modifier.width(56.dp).fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surface, StructuralSurfaceRole.NAVIGATION),
+        tonalElevation = 3.dp,
+    ) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
             Column(
@@ -933,7 +937,10 @@ private fun LandscapeContextPanel(
     } else {
         Modifier.widthIn(min = 248.dp, max = maxWidth)
     }
-    Surface(surfaceModifier.fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
+    Surface(
+        surfaceModifier.fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -994,7 +1001,11 @@ private fun LandscapeSessionsPanel(
         items(sessions, key = { it.id.value }) { session ->
             Surface(
                 onClick = { onSelect(session.id) },
-                color = if (session.id == activeId) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                color = if (session.id == activeId) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    structuralSurfaceColor(MaterialTheme.colorScheme.surface)
+                },
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1081,7 +1092,11 @@ private fun LandscapeSnippetsPanel(
         item { TextButton(onClick = onManage, modifier = Modifier.fillMaxWidth()) { Text("管理快捷命令") } }
         if (snippets.isEmpty()) item { Text("当前主机没有可用命令", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(snippets, key = CommandSnippet::id) { snippet ->
-            Surface(onClick = { onSelect(snippet) }, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+            Surface(
+                onClick = { onSelect(snippet) },
+                shape = MaterialTheme.shapes.medium,
+                color = structuralSurfaceColor(MaterialTheme.colorScheme.surface),
+            ) {
                 Column(Modifier.fillMaxWidth().padding(10.dp)) {
                     Text(snippet.title, style = MaterialTheme.typography.titleSmall)
                     Text(snippet.command, maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
@@ -1114,7 +1129,11 @@ private fun LandscapeExtraKeys(
     onShowKeyboard: () -> Unit,
     onArmCtrl: () -> Unit,
 ) {
-    Surface(Modifier.width(160.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+    Surface(
+        Modifier.width(160.dp).fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+        tonalElevation = 2.dp,
+    ) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1265,7 +1284,13 @@ private fun SnippetSheet(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(snippets, key = CommandSnippet::id) { snippet ->
-                    androidx.compose.material3.Card(onClick = { onSelect(snippet) }, modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.Card(
+                        onClick = { onSelect(snippet) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        ),
+                    ) {
                         Column(Modifier.padding(14.dp)) {
                             Text(snippet.title, style = MaterialTheme.typography.titleSmall)
                             Text("${snippet.groupName}${if (snippet.executeImmediately) " · 确认后执行" else " · 填入终端"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)

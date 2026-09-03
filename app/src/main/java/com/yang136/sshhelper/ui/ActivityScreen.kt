@@ -197,12 +197,14 @@ private fun ActivityRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            colors = CardDefaults.cardColors(
+                containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+            ),
         ) {
             ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
         }
     } else {
-        Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
             ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
         }
     }

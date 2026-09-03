@@ -61,7 +61,9 @@ fun NetworkToolsScreen(
             items(tools, key = NetworkTool::title) { tool ->
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable(onClick = tool.onClick),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    colors = CardDefaults.cardColors(
+                        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                    ),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(tool.icon, null, tint = MaterialTheme.colorScheme.primary)

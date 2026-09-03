@@ -59,7 +59,10 @@ fun AppShellScreen(
                 if (!detailVisible || adaptive.usePersistentNavigationRail) {
                     NavigationRail(
                         modifier = Modifier.fillMaxHeight(),
-                        containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer, .9f),
+                        containerColor = structuralSurfaceColor(
+                            MaterialTheme.colorScheme.surfaceContainer,
+                            StructuralSurfaceRole.NAVIGATION,
+                        ),
                         contentColor = imageAwareContentColor(),
                     ) {
                         AppDestination.entries.forEach { destination ->
@@ -82,7 +85,10 @@ fun AppShellScreen(
                 contentColor = imageAwareContentColor(),
                 bottomBar = {
                     if (!detailVisible) NavigationBar(
-                        containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer, .9f),
+                        containerColor = structuralSurfaceColor(
+                            MaterialTheme.colorScheme.surfaceContainer,
+                            StructuralSurfaceRole.NAVIGATION,
+                        ),
                         contentColor = imageAwareContentColor(),
                     ) {
                         AppDestination.entries.forEach { destination ->

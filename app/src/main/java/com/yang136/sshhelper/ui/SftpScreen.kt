@@ -271,7 +271,11 @@ fun SftpScreen(
             if (!desktopWorkspace) {
                 val active = transfers.filter { it.status.isActive() }
                 if (active.isNotEmpty()) {
-                    Surface(tonalElevation = 3.dp, shadowElevation = 5.dp) {
+                    Surface(
+                        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        tonalElevation = 3.dp,
+                        shadowElevation = 5.dp,
+                    ) {
                         Column(Modifier.fillMaxWidth().clickable { showTransfers = true }.padding(horizontal = 16.dp, vertical = 10.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text("传输状态", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
@@ -628,7 +632,7 @@ private fun CompactBrowseBar(
         IconButton(onClick = onLeading, enabled = leadingEnabled) { Icon(leadingIcon, leadingDescription) }
         Surface(
             modifier = Modifier.weight(1f).height(40.dp).clickable(onClick = onPath),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant),
             shape = MaterialTheme.shapes.medium,
         ) {
             Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {

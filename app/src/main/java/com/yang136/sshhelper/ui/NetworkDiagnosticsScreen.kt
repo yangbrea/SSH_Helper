@@ -93,7 +93,7 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
                 SshSectionHeader("当前网络", summary = state.networks.size.toString())
             }
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Box {
                             OutlinedButton(
@@ -123,7 +123,7 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
 
             item { SshSectionHeader("诊断目标") }
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(state.targetLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         state.routeSummary?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -172,7 +172,7 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
                 item { SshSectionHeader("测试过程", summary = "${state.completedSamples}/$NETWORK_DIAGNOSTIC_SAMPLE_COUNT") }
                 item {
                     state.dnsDurationMillis?.let { duration ->
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                        Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("DNS · ${formatMillis(duration)}", fontWeight = FontWeight.Medium)
                                 Text(state.resolvedAddresses.joinToString(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -186,7 +186,7 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
             state.report?.let { report ->
                 item { SshSectionHeader("汇总") }
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SummaryLine("TCP 延迟", listOfNotNull(
                                 report.minimumMillis?.let { "最小 ${formatMillis(it)}" },
@@ -203,7 +203,7 @@ fun NetworkDiagnosticsScreen(hostId: Long, onBack: () -> Unit) {
             state.conclusion?.let { conclusion ->
                 item { SshSectionHeader("诊断结论") }
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SshStatusBadge(conclusion.title, conclusion.kind.toTone())
                             Text(conclusion.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -239,7 +239,7 @@ private fun NetworkSnapshotContent(snapshot: NetworkSnapshot) {
 
 @Composable
 private fun DiagnosticSampleCard(sample: DiagnosticSample) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+    Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("第 ${sample.index} 次", Modifier.weight(1f), fontWeight = FontWeight.Medium)
             when (sample) {

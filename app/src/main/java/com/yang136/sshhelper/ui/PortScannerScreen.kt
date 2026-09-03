@@ -323,7 +323,9 @@ private fun PortResultCard(
     var expanded by remember(result.port) { mutableStateOf(false) }
     Card(
         modifier = Modifier.clickable { expanded = !expanded },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+        ),
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

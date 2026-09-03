@@ -411,7 +411,9 @@ private fun SettingsHome(
         state.categories.forEach { category ->
             item(category.destination.id) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    colors = CardDefaults.cardColors(
+                        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                    ),
                     border = if (selected == category.destination) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                 ) {
                     PreferenceAction(category.destination.icon, category.destination.title, category.summary, { onDestination(category.destination) })
@@ -492,7 +494,7 @@ private fun AppearanceSettings(
                     Card(
                         onClick = { onPreset(preview.preset) },
                         colors = CardDefaults.cardColors(
-                            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
                             contentColor = imageAwareContentColor(),
                         ),
                         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
@@ -548,7 +550,7 @@ private fun ImageThemeControls(
     val light = settings.imageThemeVariant == ImageThemeVariant.BRIGHT
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Card(colors = CardDefaults.cardColors(
-            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh),
+            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentColor = imageAwareContentColor(),
         )) {
             Box(Modifier.fillMaxWidth().height(190.dp)) {
@@ -617,6 +619,9 @@ private fun ImageThemeControls(
                     Card(
                         onClick = { onVariant(variant) },
                         modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        ),
                         border = if (settings.imageThemeVariant == variant) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
                         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1059,7 +1064,7 @@ private fun AboutSettings(modifier: Modifier) {
             Icons.Default.Terminal to ("终端与会话" to "多会话、快捷命令、搜索和 AI 助手"),
             Icons.Default.Storage to ("文件与传输" to "SFTP、系统文件访问和安全写回"),
             Icons.Default.Security to ("连接与安全" to "保险库、主机指纹、跳板机与代理"),
-        ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
+        ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
         item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("xterm.js · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
     }
 }

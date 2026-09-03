@@ -85,7 +85,12 @@ fun SnippetsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(snippets, key = CommandSnippet::id) { snippet ->
-                    androidx.compose.material3.Card(Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.Card(
+                        Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        ),
+                    ) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(snippet.title, style = MaterialTheme.typography.titleSmall)
