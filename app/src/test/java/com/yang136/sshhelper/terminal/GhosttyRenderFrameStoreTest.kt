@@ -104,6 +104,33 @@ class GhosttyRenderFrameStoreTest {
         assertEquals("new", store.textAt(1))
     }
 
+    @Test
+    fun staleGenerationCannotOverwriteResetFrame() {
+        val store = GhosttyRenderFrameStore()
+        store.apply(snapshot(SNAPSHOT_DIRTY_FULL, rows = 2, textByRow = mapOf(0 to "old"), generation = 1))
+        store.apply(snapshot(SNAPSHOT_DIRTY_FULL, rows = 2, textByRow = mapOf(0 to "new"), generation = 2))
+
+        val stale = store.apply(
+            snapshot(SNAPSHOT_DIRTY_FULL, rows = 2, textByRow = mapOf(0 to "late-old"), generation = 1),
+        )
+
+        assertNull(stale)
+        assertEquals("new", store.textAt(0))
+    }
+
+    @Test
+    fun newGenerationMustStartWithFullFrame() {
+        val store = GhosttyRenderFrameStore()
+        store.apply(snapshot(SNAPSHOT_DIRTY_FULL, rows = 2, textByRow = mapOf(0 to "old"), generation = 1))
+
+        val partial = store.apply(
+            snapshot(SNAPSHOT_DIRTY_PARTIAL, rows = 2, textByRow = mapOf(0 to "unsafe"), generation = 2),
+        )
+
+        assertNull(partial)
+        assertEquals("old", store.textAt(0))
+    }
+
     private fun GhosttyRenderFrameStore.textAt(row: Int): String =
         currentFrame()?.rows?.get(row)?.filterNotNull()?.joinToString("") { it.text }.orEmpty()
 
@@ -112,6 +139,7 @@ class GhosttyRenderFrameStoreTest {
         cols: Int = 12,
         rows: Int,
         textByRow: Map<Int, String> = emptyMap(),
+        generation: Int = 1,
     ): GhosttyRenderSnapshot = GhosttyRenderSnapshot(
         version = SNAPSHOT_VERSION,
         dirtyKind = dirty,
@@ -125,7 +153,7 @@ class GhosttyRenderFrameStoreTest {
         cursorStyle = 1,
         cursorVisible = true,
         cursorBlinking = false,
-        generation = 1,
+        generation = generation,
         rowsData = textByRow.map { (row, text) ->
             GhosttyRenderRow(
                 rowIndex = row,

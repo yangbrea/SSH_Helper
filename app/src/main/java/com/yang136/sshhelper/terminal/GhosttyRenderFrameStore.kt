@@ -34,6 +34,17 @@ internal class GhosttyRenderFrameStore {
 
         val previousSnapshot = snapshot
         val previousRows = rows
+        if (previousSnapshot != null && update.generation < previousSnapshot.generation) {
+            return null
+        }
+        if (previousSnapshot != null &&
+            update.generation > previousSnapshot.generation &&
+            !update.isFullDirty
+        ) {
+            // A reset generation must begin with a complete frame. Never merge
+            // a late/partial frame into a screen owned by another session.
+            return null
+        }
         val dimensionsChanged = previousSnapshot != null &&
             (previousSnapshot.cols != update.cols || previousSnapshot.rows != update.rows)
 

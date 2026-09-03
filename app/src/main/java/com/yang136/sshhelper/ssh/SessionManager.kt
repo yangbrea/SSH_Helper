@@ -14,7 +14,6 @@ import com.yang136.sshhelper.security.VaultLockedException
 import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.settings.SettingsRepository
 import com.yang136.sshhelper.sftp.SftpClient
-import java.io.ByteArrayOutputStream
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -734,7 +733,7 @@ class DefaultSessionManager(
         val mutableOutput = MutableSharedFlow<TerminalOutputEvent>(replay = 128, extraBufferCapacity = 64)
         val output = mutableOutput.asSharedFlow()
         private val outputMutex = Mutex()
-        private val scrollback = ByteArrayOutputStream()
+        private val scrollback = TerminalReplayBuffer(MAX_SCROLLBACK)
         private var outputSequence = 0L
         var routeCredentials: RouteCredentials? = null
         var pendingJumpCredential: Credential? = null
@@ -753,17 +752,12 @@ class DefaultSessionManager(
         }
 
         fun append(bytes: ByteArray): TerminalOutputEvent.Chunk = synchronized(scrollback) {
-            if (scrollback.size() + bytes.size > MAX_SCROLLBACK) {
-                val retained = scrollback.toByteArray().takeLast(MAX_SCROLLBACK / 2).toByteArray()
-                scrollback.reset()
-                scrollback.write(retained)
-            }
-            scrollback.write(bytes)
+            scrollback.append(bytes)
             TerminalOutputEvent.Chunk(++outputSequence, bytes)
         }
 
         fun snapshot(): TerminalOutputEvent.Snapshot = synchronized(scrollback) {
-            TerminalOutputEvent.Snapshot(outputSequence, scrollback.toByteArray())
+            TerminalOutputEvent.Snapshot(outputSequence, scrollback.snapshot())
         }
     }
 
