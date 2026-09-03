@@ -36,6 +36,8 @@ struct NativeTerminal {
     GhosttySearch search = nullptr;
     GhosttyMouseEncoder mouse_encoder = nullptr;
     GhosttyMouseEvent mouse_event = nullptr;
+    GhosttyKeyEncoder key_encoder = nullptr;
+    GhosttyKeyEvent key_event = nullptr;
 
     // Bytes libghostty asks us to write back to the PTY (DSR/mode queries).
     std::vector<uint8_t> pending_pty_writes;
@@ -114,6 +116,14 @@ void freeNativeTerminal(NativeTerminal* native) {
     if (native->search != nullptr) {
         ghostty_search_free(native->search);
         native->search = nullptr;
+    }
+    if (native->key_event != nullptr) {
+        ghostty_key_event_free(native->key_event);
+        native->key_event = nullptr;
+    }
+    if (native->key_encoder != nullptr) {
+        ghostty_key_encoder_free(native->key_encoder);
+        native->key_encoder = nullptr;
     }
     if (native->mouse_event != nullptr) {
         ghostty_mouse_event_free(native->mouse_event);
@@ -477,6 +487,12 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
             native->mouse_encoder == nullptr ||
             ghostty_mouse_event_new(nullptr, &native->mouse_event) != GHOSTTY_SUCCESS ||
             native->mouse_event == nullptr) {
+            break;
+        }
+        if (ghostty_key_encoder_new(nullptr, &native->key_encoder) != GHOSTTY_SUCCESS ||
+            native->key_encoder == nullptr ||
+            ghostty_key_event_new(nullptr, &native->key_event) != GHOSTTY_SUCCESS ||
+            native->key_event == nullptr) {
             break;
         }
 
@@ -887,6 +903,72 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchTotal(
         return 0;
     }
     return searchTotalMatches(native->search);
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeKey(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint action,
+    jint key_code,
+    jint mods,
+    jint unshifted_codepoint,
+    jbyteArray utf8) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed ||
+        native->key_encoder == nullptr || native->key_event == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return nullptr;
+    }
+
+    ghostty_key_encoder_setopt_from_terminal(native->key_encoder, native->terminal);
+
+    ghostty_key_event_set_action(
+        native->key_event, static_cast<GhosttyKeyAction>(action));
+    ghostty_key_event_set_key(
+        native->key_event, static_cast<GhosttyKey>(key_code));
+    ghostty_key_event_set_mods(native->key_event, static_cast<GhosttyMods>(mods));
+    ghostty_key_event_set_unshifted_codepoint(
+        native->key_event, static_cast<uint32_t>(unshifted_codepoint));
+    ghostty_key_event_set_composing(native->key_event, false);
+
+    if (utf8 != nullptr) {
+        const jsize len = env->GetArrayLength(utf8);
+        std::vector<char> text(static_cast<size_t>(len));
+        if (len > 0) {
+            env->GetByteArrayRegion(utf8, 0, len, reinterpret_cast<jbyte*>(text.data()));
+            if (env->ExceptionCheck()) return nullptr;
+        }
+        ghostty_key_event_set_utf8(native->key_event, text.data(), text.size());
+    } else {
+        ghostty_key_event_set_utf8(native->key_event, nullptr, 0);
+    }
+
+    size_t required = 0;
+    GhosttyResult result = ghostty_key_encoder_encode(
+        native->key_encoder, native->key_event, nullptr, 0, &required);
+    if (result != GHOSTTY_OUT_OF_SPACE && result != GHOSTTY_SUCCESS) {
+        return nullptr;
+    }
+    if (required == 0) return nullptr;
+
+    std::vector<uint8_t> bytes(required);
+    size_t written = 0;
+    result = ghostty_key_encoder_encode(
+        native->key_encoder, native->key_event,
+        reinterpret_cast<char*>(bytes.data()), bytes.size(), &written);
+    if (result != GHOSTTY_SUCCESS) return nullptr;
+    bytes.resize(written);
+
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (out != nullptr && !bytes.empty()) {
+        env->SetByteArrayRegion(
+            out, 0, static_cast<jsize>(bytes.size()),
+            reinterpret_cast<const jbyte*>(bytes.data()));
+    }
+    return out;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

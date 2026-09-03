@@ -112,6 +112,23 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestKeyEvent(
+        action: Int,
+        keyCode: Int,
+        mods: Int,
+        unshiftedCodepoint: Int,
+        utf8: ByteArray?,
+    ) {
+        if (handle == 0L) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            val bytes = GhosttyNativeBridge.nativeEncodeKey(
+                handle, action, keyCode, mods, unshiftedCodepoint, utf8,
+            )
+            if (bytes != null && bytes.isNotEmpty()) onPtyWrite(bytes)
+        }
+    }
+
     fun requestMouseEvent(
         action: Int,
         button: Int,
