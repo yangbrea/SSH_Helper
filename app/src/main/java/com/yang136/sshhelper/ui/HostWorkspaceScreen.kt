@@ -163,7 +163,7 @@ internal fun HostWorkspacePane(
         host = host,
         state = state,
         expandedSessionId = expandedSessionId,
-        onExpandSession = { session -> toggleExpand(session.id) },
+        onExpandSession = { id -> toggleExpand(id) },
         onCreateSession = ::performCreateSession,
         onOpenTerminal = onOpenTerminal,
         onOpenFiles = onOpenFiles,
