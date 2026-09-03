@@ -191,7 +191,7 @@ fun TerminalScreen(
     val initialId = initialSessionId?.let(::SessionId)
     var activeId by rememberSaveable(hostId, stateSaver = NullableSessionIdSaver) { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
-    val controller = remember { TerminalController() }
+    val controller = remember { createTerminalFrontend(settings.terminalBackend) }
     val surfaceRevision = remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -1394,7 +1394,7 @@ internal fun CredentialDialog(
     )
 }
 
-private class TerminalController {
+internal class XtermTerminalFrontend : TerminalFrontend {
     private sealed interface RenderCommand {
         val generation: Long
         data class Reset(override val generation: Long) : RenderCommand
@@ -1412,12 +1412,12 @@ private class TerminalController {
     private var queuedBytes = 0
     private var currentAcknowledgement: Triple<Long, Long, CompletableDeferred<Unit>>? = null
     private var deferredCommand: RenderCommand? = null
-    var onSelectionStateChanged: ((Boolean, Boolean) -> Unit)? = null
-    var onCopied: ((Int) -> Unit)? = null
-    var onSearchResults: ((Int, Int) -> Unit)? = null
-    var onOpenLink: ((String) -> Unit)? = null
-    var onCtrlArmed: ((Boolean) -> Unit)? = null
-    var onRenderingDelayed: ((Boolean) -> Unit)? = null
+    override var onSelectionStateChanged: ((Boolean, Boolean) -> Unit)? = null
+    override var onCopied: ((Int) -> Unit)? = null
+    override var onSearchResults: ((Int, Int) -> Unit)? = null
+    override var onOpenLink: ((String) -> Unit)? = null
+    override var onCtrlArmed: ((Boolean) -> Unit)? = null
+    override var onRenderingDelayed: ((Boolean) -> Unit)? = null
 
     init {
         scope.launch { renderLoop() }
@@ -1439,7 +1439,7 @@ private class TerminalController {
         applyAppearance()
     }
 
-    fun close() {
+    override fun close() {
         currentAcknowledgement?.third?.complete(Unit)
         currentAcknowledgement = null
         webView = null
@@ -1447,7 +1447,7 @@ private class TerminalController {
         scope.cancel()
     }
 
-    suspend fun write(bytes: ByteArray) {
+    override suspend fun write(bytes: ByteArray) {
         val currentGeneration = generation
         splitTerminalOutput(bytes).forEach { chunk ->
             queuedBytes += chunk.size
@@ -1461,33 +1461,33 @@ private class TerminalController {
         }
     }
 
-    suspend fun reset() {
+    override suspend fun reset() {
         generation += 1
         renderCommands.send(RenderCommand.Reset(generation))
     }
 
-    fun paste(context: Context) {
+    override fun paste(context: Context) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
         writeInput(text, webView)
     }
 
-    fun pasteText(text: String) = writeInput(text, webView)
+    override fun pasteText(text: String) = writeInput(text, webView)
 
-    fun setAppearance(palette: TerminalPalette, fontSize: Int) {
+    override fun setAppearance(palette: TerminalPalette, fontSize: Int) {
         appearance = palette to fontSize
         applyAppearance()
     }
 
-    fun enterSelectionMode() = evaluate("window.sshTerminal.enterSelectionMode()")
-    fun selectAll() = evaluate("window.sshTerminal.selectAll()")
-    fun copySelection() = evaluate("window.sshTerminal.copySelection()")
-    fun clearSelection() = evaluate("window.sshTerminal.clearSelection()")
-    fun search(query: String, backwards: Boolean, caseSensitive: Boolean) =
+    override fun enterSelectionMode() = evaluate("window.sshTerminal.enterSelectionMode()")
+    override fun selectAll() = evaluate("window.sshTerminal.selectAll()")
+    override fun copySelection() = evaluate("window.sshTerminal.copySelection()")
+    override fun clearSelection() = evaluate("window.sshTerminal.clearSelection()")
+    override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) =
         evaluate("window.sshTerminal.search(${JSONObject.quote(query)},$backwards,$caseSensitive)")
-    fun clearSearch() = evaluate("window.sshTerminal.clearSearch()")
-    fun setImeVisible(visible: Boolean) = evaluate("window.sshTerminal.setImeVisible($visible)")
-    fun armCtrl() {
+    override fun clearSearch() = evaluate("window.sshTerminal.clearSearch()")
+    override fun setImeVisible(visible: Boolean) = evaluate("window.sshTerminal.setImeVisible($visible)")
+    override fun armCtrl() {
         evaluate("window.sshTerminal.armCtrl()")
         focusAndShowKeyboard()
     }
@@ -1511,7 +1511,7 @@ private class TerminalController {
         }
     }
 
-    fun focusAndShowKeyboard() {
+    override fun focusAndShowKeyboard() {
         val view = webView ?: return
         view.requestFocus(View.FOCUS_DOWN)
         view.evaluateJavascript("window.sshTerminal && window.sshTerminal.focusForIme()", null)
@@ -1524,7 +1524,7 @@ private class TerminalController {
         }, 80)
     }
 
-    fun hideKeyboard() {
+    override fun hideKeyboard() {
         val view = webView ?: return
         setImeVisible(false)
         view.clearFocus()
@@ -1655,7 +1655,7 @@ private class TerminalController {
 
 private class TerminalBridge(
     private val view: WebView,
-    private val controller: TerminalController,
+    private val controller: XtermTerminalFrontend,
     private val inputCallback: (ByteArray) -> Unit,
     private val resizeCallback: (Int, Int) -> Unit,
 ) {
@@ -1706,7 +1706,7 @@ private class TerminalBridge(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun TerminalWebView(
-    controller: TerminalController,
+    controller: TerminalFrontend,
     initialBackground: String,
     onInput: (ByteArray) -> Unit,
     onResize: (Int, Int) -> Unit,
@@ -1718,6 +1718,8 @@ private fun TerminalWebView(
     val inputState = rememberUpdatedState(onInput)
     val resizeState = rememberUpdatedState(onResize)
     val surfaceCreatedState = rememberUpdatedState(onSurfaceCreated)
+    val xtermController = controller as? XtermTerminalFrontend
+        ?: error("TerminalWebView only supports XtermTerminalFrontend")
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -1742,11 +1744,11 @@ private fun TerminalWebView(
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         request.url.host != "appassets.androidplatform.net"
                 }
-                controller.attach(this)
+                xtermController.attach(this)
                 addJavascriptInterface(
                     TerminalBridge(
                         this,
-                        controller,
+                        xtermController,
                         { inputState.value(it) },
                         { columns, rows -> resizeState.value(columns, rows) },
                     ),
@@ -1756,7 +1758,7 @@ private fun TerminalWebView(
                 loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
             }
         },
-        update = { controller.attach(it) },
+        update = { xtermController.attach(it) },
     )
 }
 

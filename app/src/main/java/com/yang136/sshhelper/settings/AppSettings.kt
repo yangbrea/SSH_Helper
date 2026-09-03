@@ -25,6 +25,11 @@ enum class ThemeSource { PRESET, IMAGE }
 fun parseThemeSource(storedValue: String?): ThemeSource =
     enumValueOrDefault(storedValue, ThemeSource.PRESET)
 
+enum class TerminalBackend { XTERM, GHOSTTY }
+
+fun parseTerminalBackend(storedValue: String?): TerminalBackend =
+    enumValueOrDefault(storedValue, TerminalBackend.XTERM)
+
 enum class ImageThemeVariant(val label: String) {
     IMMERSIVE("沉浸"),
     SOFT("柔和"),
@@ -52,6 +57,8 @@ data class AppSettings(
     val imageThemeVariant: ImageThemeVariant = ImageThemeVariant.IMMERSIVE,
     val imageOverlayStrength: Float = DEFAULT_IMAGE_OVERLAY_STRENGTH,
     val terminalFontSize: Int = DEFAULT_TERMINAL_FONT_SIZE,
+    /** Terminal backend used by the development/gray rollout switch. */
+    val terminalBackend: TerminalBackend = TerminalBackend.XTERM,
     val extraKeys: List<ExtraKeyId> = DEFAULT_EXTRA_KEYS,
     val aiBaseUrl: String = "https://api.deepseek.com/v1",
     val aiApiKey: String = "",
@@ -83,6 +90,7 @@ interface SettingsRepository {
     suspend fun setImageThemeVariant(variant: ImageThemeVariant)
     suspend fun setImageOverlayStrength(strength: Float)
     suspend fun setTerminalFontSize(size: Int)
+    suspend fun setTerminalBackend(backend: TerminalBackend)
     suspend fun setExtraKeys(keys: List<ExtraKeyId>)
     suspend fun setAiBaseUrl(url: String)
     suspend fun setAiApiKey(key: String)
@@ -112,6 +120,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 terminalFontSize = sanitizeTerminalFontSize(
                     preferences[TERMINAL_FONT_SIZE] ?: DEFAULT_TERMINAL_FONT_SIZE,
                 ),
+                terminalBackend = parseTerminalBackend(preferences[TERMINAL_BACKEND]),
                 extraKeys = decodeExtraKeys(preferences[EXTRA_KEYS]),
                 aiBaseUrl = preferences[AI_BASE_URL] ?: "https://api.deepseek.com/v1",
                 aiApiKey = preferences[AI_API_KEY].orEmpty(),
@@ -145,6 +154,10 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
 
     override suspend fun setTerminalFontSize(size: Int) {
         dataStore.edit { it[TERMINAL_FONT_SIZE] = sanitizeTerminalFontSize(size) }
+    }
+
+    override suspend fun setTerminalBackend(backend: TerminalBackend) {
+        dataStore.edit { it[TERMINAL_BACKEND] = backend.name }
     }
 
     override suspend fun setExtraKeys(keys: List<ExtraKeyId>) {
@@ -188,6 +201,7 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val IMAGE_THEME_VARIANT = stringPreferencesKey("image_theme_variant")
         val IMAGE_OVERLAY_STRENGTH = floatPreferencesKey("image_overlay_strength")
         val TERMINAL_FONT_SIZE = intPreferencesKey("terminal_font_size")
+        val TERMINAL_BACKEND = stringPreferencesKey("terminal_backend")
         val EXTRA_KEYS = stringPreferencesKey("extra_keys")
         val AI_BASE_URL = stringPreferencesKey("ai_base_url")
         val AI_API_KEY = stringPreferencesKey("ai_api_key")
