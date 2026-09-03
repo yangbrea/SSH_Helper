@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
@@ -49,6 +50,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     // Grid cache for partial redraws: native snapshots may only contain dirty
     // rows, but drawing every frame must still render the untouched rows.
     private var grid: Array<Array<GhosttyRenderCell?>>? = null
+
+    private var cursorBlinkOn = true
+    private var lastCursorBlinkToggle = 0L
 
     init {
         isFocusable = false
@@ -192,7 +196,22 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             }
         }
 
-        if (snapshot.cursorVisible && snapshot.cursorX >= 0 && snapshot.cursorY >= 0) {
+        if (snapshot.cursorBlinking) {
+            val now = SystemClock.uptimeMillis()
+            if (now - lastCursorBlinkToggle >= CURSOR_BLINK_INTERVAL_MS) {
+                cursorBlinkOn = !cursorBlinkOn
+                lastCursorBlinkToggle = now
+                postInvalidateOnAnimation()
+            }
+        } else {
+            cursorBlinkOn = true
+        }
+
+        if (cursorBlinkOn &&
+            snapshot.cursorVisible &&
+            snapshot.cursorX >= 0 &&
+            snapshot.cursorY >= 0
+        ) {
             val cursorLeft = snapshot.cursorX * cellWidthPx
             val cursorTop = snapshot.cursorY * cellHeightPx
             cursorPaint.color = Color.WHITE
@@ -228,6 +247,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val FAINT_ALPHA = 150
         const val ITALIC_SKEW_X = -0.2f
         const val OVERLINE_OFFSET = 1f
+        const val CURSOR_BLINK_INTERVAL_MS = 500L
     }
 }
 
