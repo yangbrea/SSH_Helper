@@ -13,3 +13,8 @@ app/build/
 local.properties
 terminal-web/node_modules/
 build-*.log
+
+# Ghostty migration generated directories
+/output/
+/tmp/
+/app/build/ghostty/
