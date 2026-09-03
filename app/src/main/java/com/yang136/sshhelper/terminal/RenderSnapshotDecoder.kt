@@ -7,7 +7,11 @@ import java.nio.charset.StandardCharsets
 /**
  * Cell style flags produced by nativeRenderSnapshot.
  */
-internal const val SNAPSHOT_VERSION = 1
+internal const val SNAPSHOT_VERSION = 2
+
+internal const val SNAPSHOT_DIRTY_NONE = 0
+internal const val SNAPSHOT_DIRTY_PARTIAL = 1
+internal const val SNAPSHOT_DIRTY_FULL = 2
 
 internal const val CELL_FLAG_BOLD = 1 shl 0
 internal const val CELL_FLAG_ITALIC = 1 shl 1
@@ -54,6 +58,7 @@ internal data class GhosttyRenderSnapshot(
     val rows: Int,
     val backgroundArgb: Int,
     val foregroundArgb: Int,
+    val cursorArgb: Int,
     val cursorX: Int,
     val cursorY: Int,
     val cursorStyle: Int,
@@ -62,7 +67,8 @@ internal data class GhosttyRenderSnapshot(
     val generation: Int,
     val rowsData: List<GhosttyRenderRow>,
 ) {
-    val isDirty: Boolean get() = dirtyKind != 0
+    val isDirty: Boolean get() = dirtyKind != SNAPSHOT_DIRTY_NONE
+    val isFullDirty: Boolean get() = dirtyKind == SNAPSHOT_DIRTY_FULL
 }
 
 /**
@@ -70,7 +76,7 @@ internal data class GhosttyRenderSnapshot(
  * [GhosttyNativeBridge.nativeRenderSnapshot].
  */
 internal object RenderSnapshotDecoder {
-    private const val HEADER_INTS = 13
+    private const val HEADER_INTS = 14
 
     fun decode(buffer: ByteBuffer, byteCount: Int): GhosttyRenderSnapshot? {
         if (byteCount < HEADER_INTS * Int.SIZE_BYTES) return null
@@ -94,6 +100,7 @@ internal object RenderSnapshotDecoder {
             val cursorBlinking = buffer.int != 0
             val rowCount = buffer.int
             val generation = buffer.int
+            val cursorArgb = buffer.int
 
             if (version != SNAPSHOT_VERSION) return null
             if (rowCount < 0) return null
@@ -133,6 +140,7 @@ internal object RenderSnapshotDecoder {
                 rows = rows,
                 backgroundArgb = backgroundArgb,
                 foregroundArgb = foregroundArgb,
+                cursorArgb = cursorArgb,
                 cursorX = cursorX,
                 cursorY = cursorY,
                 cursorStyle = cursorStyle,

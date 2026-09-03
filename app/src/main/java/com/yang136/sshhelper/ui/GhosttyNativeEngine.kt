@@ -7,7 +7,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
@@ -16,8 +16,8 @@ import kotlinx.coroutines.withContext
 /**
  * Owns all native Ghostty calls on a dedicated single-thread executor.
  *
- * The View never calls JNI directly: it reads the latest immutable
- * [GhosttyRenderSnapshot] produced by this engine.
+ * The View never calls JNI directly. Decoded [GhosttyRenderSnapshot] deltas
+ * are published to the frontend, which merges them on the main thread.
  */
 internal class GhosttyNativeEngine(
     private val onPtyWrite: (ByteArray) -> Unit,
@@ -25,6 +25,8 @@ internal class GhosttyNativeEngine(
     var onBell: (() -> Unit)? = null
     var onTitleChange: ((String) -> Unit)? = null
     var onPwdChange: ((String) -> Unit)? = null
+    @Volatile
+    var onSnapshotReady: ((GhosttyRenderSnapshot) -> Unit)? = null
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "GhosttyEngine").apply { isDaemon = true }
     }
@@ -35,7 +37,8 @@ internal class GhosttyNativeEngine(
     private var handle: Long = 0L
 
     @Volatile
-    private var latestSnapshot: GhosttyRenderSnapshot? = null
+    private var pendingResize: ResizeRequest? = null
+    private var resizeJob: Job? = null
 
     private var buffer = ByteBuffer
         .allocateDirect(INITIAL_BUFFER_BYTES)
@@ -45,13 +48,17 @@ internal class GhosttyNativeEngine(
         scope.launch {
             if (handle == 0L) {
                 handle = GhosttyNativeBridge.nativeCreateManaged(cols, rows)
+                pendingResize?.let { resize ->
+                    pendingResize = null
+                    applyResize(resize)
+                }
                 refreshSnapshot()
             }
         }
     }
 
     suspend fun write(data: ByteArray) {
-        if (data.isEmpty() || handle == 0L) return
+        if (data.isEmpty()) return
         withContext(dispatcher) {
             if (handle == 0L) return@withContext
             GhosttyNativeBridge.nativeWrite(handle, data)
@@ -70,10 +77,13 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestResize(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) {
-        if (handle == 0L) return
-        scope.launch {
+        pendingResize = ResizeRequest(cols, rows, cellWidthPx, cellHeightPx)
+        resizeJob?.cancel()
+        resizeJob = scope.launch {
             if (handle == 0L) return@launch
-            GhosttyNativeBridge.nativeResize(handle, cols, rows, cellWidthPx, cellHeightPx)
+            val resize = pendingResize ?: return@launch
+            pendingResize = null
+            applyResize(resize)
             refreshSnapshot()
         }
     }
@@ -119,7 +129,6 @@ internal class GhosttyNativeEngine(
         unshiftedCodepoint: Int,
         utf8: ByteArray?,
     ) {
-        if (handle == 0L) return
         scope.launch {
             if (handle == 0L) return@launch
             val bytes = GhosttyNativeBridge.nativeEncodeKey(
@@ -137,7 +146,6 @@ internal class GhosttyNativeEngine(
         y: Float,
         anyButtonPressed: Boolean,
     ) {
-        if (handle == 0L) return
         scope.launch {
             if (handle == 0L) return@launch
             val bytes = GhosttyNativeBridge.nativeEncodeMouse(
@@ -148,7 +156,6 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestSearchClear() {
-        if (handle == 0L) return
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeSearchClear(handle)
@@ -157,7 +164,6 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestSelectAll() {
-        if (handle == 0L) return
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeSelectAll(handle)
@@ -177,7 +183,7 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestScrollViewport(deltaRows: Int) {
-        if (handle == 0L || deltaRows == 0) return
+        if (deltaRows == 0) return
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows)
@@ -186,7 +192,7 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestPasteText(text: String) {
-        if (handle == 0L || text.isEmpty()) return
+        if (text.isEmpty()) return
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativePasteText(handle, text.encodeToByteArray())
@@ -197,7 +203,6 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestSetDefaultColors(backgroundArgb: Int, foregroundArgb: Int, cursorArgb: Int) {
-        if (handle == 0L) return
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeSetDefaultColors(
@@ -210,15 +215,12 @@ internal class GhosttyNativeEngine(
         }
     }
 
-    fun latestSnapshot(): GhosttyRenderSnapshot? = latestSnapshot
-
     fun close() {
         scope.launch {
             if (handle != 0L) {
                 GhosttyNativeBridge.nativeFreeManaged(handle)
                 handle = 0L
             }
-            latestSnapshot = null
             executor.shutdown()
         }
     }
@@ -236,7 +238,8 @@ internal class GhosttyNativeEngine(
             val rowCount = GhosttyNativeBridge.nativeRenderSnapshot(handle, buffer)
             if (rowCount >= 0) {
                 buffer.clear()
-                latestSnapshot = RenderSnapshotDecoder.decode(buffer, buffer.capacity())
+                val snapshot = RenderSnapshotDecoder.decode(buffer, buffer.capacity()) ?: return
+                onSnapshotReady?.invoke(snapshot)
                 return
             }
             // Native does not clean dirty state on -1, so retry with a larger
@@ -245,6 +248,16 @@ internal class GhosttyNativeEngine(
             val nextCapacity = buffer.capacity() * 2
             buffer = ByteBuffer.allocateDirect(nextCapacity).order(ByteOrder.LITTLE_ENDIAN)
         }
+    }
+
+    private fun applyResize(resize: ResizeRequest) {
+        GhosttyNativeBridge.nativeResize(
+            handle,
+            resize.cols,
+            resize.rows,
+            resize.cellWidthPx,
+            resize.cellHeightPx,
+        )
     }
 
     private fun drainEvents() {
@@ -269,4 +282,11 @@ internal class GhosttyNativeEngine(
         const val INITIAL_BUFFER_BYTES = 1 shl 20
         const val MAX_BUFFER_BYTES = 64 shl 20
     }
+
+    private data class ResizeRequest(
+        val cols: Int,
+        val rows: Int,
+        val cellWidthPx: Int,
+        val cellHeightPx: Int,
+    )
 }

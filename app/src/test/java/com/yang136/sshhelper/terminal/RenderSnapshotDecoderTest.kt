@@ -32,6 +32,7 @@ class RenderSnapshotDecoderTest {
             0,
             0,
             7, // generation
+            0xFF00FF00.toInt(), // cursor
         )
 
         val snapshot = RenderSnapshotDecoder.decode(buffer, buffer.capacity())
@@ -41,6 +42,7 @@ class RenderSnapshotDecoderTest {
         assertEquals(24, snapshot.rows)
         assertFalse(snapshot.isDirty)
         assertEquals(7, snapshot.generation)
+        assertEquals(0xFF00FF00.toInt(), snapshot.cursorArgb)
         assertTrue(snapshot.rowsData.isEmpty())
     }
 
@@ -64,6 +66,7 @@ class RenderSnapshotDecoderTest {
             0,
             1, // row count
             1, // generation
+            0xFFFFFF00.toInt(), // cursor
         )
         val body = ByteBuffer.allocate(1024).order(ByteOrder.LITTLE_ENDIAN)
         header.forEach(body::putInt)

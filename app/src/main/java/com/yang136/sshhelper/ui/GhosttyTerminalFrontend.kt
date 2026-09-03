@@ -4,11 +4,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
+import com.yang136.sshhelper.terminal.GhosttyRenderFrameStore
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 
@@ -17,7 +19,7 @@ import kotlinx.coroutines.TimeoutCancellationException
  *
  * The frontend owns a [GhosttyNativeEngine] which serializes all native calls
  * on a dedicated worker. A Canvas renderer ([GhosttyTerminalView]) reads the
- * latest immutable snapshot produced by that engine.
+ * a main-thread frame store populated by snapshots from that engine.
  */
 internal class GhosttyTerminalFrontend : TerminalFrontend {
     /** Receives bytes the terminal asks to write back to the PTY. */
@@ -33,7 +35,9 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     private var lastSearchQuery: String? = null
     private var ctrlArmed = false
-    private val frontendScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val frontendJob = SupervisorJob()
+    private val frontendScope = CoroutineScope(frontendJob + Dispatchers.Main.immediate)
+    private val renderFrames = GhosttyRenderFrameStore()
 
     private val engine = GhosttyNativeEngine { bytes ->
         onPtyWrite?.invoke(bytes)
@@ -41,9 +45,16 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         onBell = { this@GhosttyTerminalFrontend.onBell?.invoke() }
         onTitleChange = { this@GhosttyTerminalFrontend.onTitleChange?.invoke(it) }
         onPwdChange = { this@GhosttyTerminalFrontend.onPwdChange?.invoke(it) }
+        onSnapshotReady = { snapshot ->
+            frontendScope.launch {
+                val change = renderFrames.apply(snapshot) ?: return@launch
+                this@GhosttyTerminalFrontend.view?.renderFrameChanged(snapshot, change)
+            }
+        }
     }
     private var started = false
 
+    @Volatile
     internal var view: GhosttyTerminalView? = null
         private set
 
@@ -62,9 +73,9 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     }
 
     internal fun attachView(terminalView: GhosttyTerminalView) {
-        ensureStarted()
         view = terminalView
-        terminalView.attach(engine)
+        terminalView.attach(engine, renderFrames)
+        ensureStarted()
     }
 
     internal fun detachView(terminalView: GhosttyTerminalView) {
@@ -91,7 +102,6 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     internal fun scrollLines(delta: Int) {
         ensureStarted()
         engine.requestScrollViewport(delta)
-        view?.invalidate()
     }
 
     override suspend fun write(bytes: ByteArray) {
@@ -105,7 +115,6 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
             writeJob.await()
             onRenderingDelayed?.invoke(false)
         }
-        view?.invalidate()
     }
 
     override suspend fun reset() {
@@ -144,7 +153,6 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     override fun selectAll() {
         ensureStarted()
         engine.requestSelectAll()
-        view?.invalidate()
     }
 
     override fun copySelection() {
@@ -203,7 +211,10 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     }
 
     override fun close() {
+        engine.onSnapshotReady = null
+        frontendJob.cancel()
         engine.close()
+        renderFrames.clear()
         view = null
         started = false
     }

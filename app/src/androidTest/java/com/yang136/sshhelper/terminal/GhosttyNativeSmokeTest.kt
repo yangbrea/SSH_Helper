@@ -69,7 +69,7 @@ class GhosttyNativeSmokeTest {
             GhosttyNativeBridge.nativeWrite(handle, "hello\r\n".encodeToByteArray())
 
             val snapshot = renderSnapshot(handle)
-            assertEquals(1, snapshot.version)
+            assertEquals(SNAPSHOT_VERSION, snapshot.version)
             assertEquals(80, snapshot.cols)
             assertEquals(24, snapshot.rows)
             assertTrue(snapshot.isDirty)

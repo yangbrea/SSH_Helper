@@ -9,7 +9,6 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
-import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -23,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.yang136.sshhelper.terminal.GhosttyRenderCell
+import com.yang136.sshhelper.terminal.GhosttyRenderFrameStore
 import com.yang136.sshhelper.terminal.GhosttyRenderSnapshot
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import kotlin.math.ceil
@@ -79,15 +79,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var baselinePx = 0f
     private var cols = 0
     private var rows = 0
+    private var reportedCellWidthPx = 0
+    private var reportedCellHeightPx = 0
     private var backgroundArgb = Color.BLACK
     private var foregroundArgb = Color.WHITE
 
-    // Grid cache for partial redraws: native snapshots may only contain dirty
-    // rows, but drawing every frame must still render the untouched rows.
-    private var grid: Array<Array<GhosttyRenderCell?>>? = null
+    // Native snapshots are dirty-row deltas. The store retains a complete
+    // frame across View resizes until the matching full native frame arrives.
+    private var frameStore: GhosttyRenderFrameStore? = null
 
     private var cursorBlinkOn = true
-    private var lastCursorBlinkToggle = 0L
+    private var cursorBlinking = false
+    private val cursorBlinkRunnable = object : Runnable {
+        override fun run() {
+            if (!cursorBlinking) return
+            cursorBlinkOn = !cursorBlinkOn
+            postInvalidateOnAnimation()
+            postDelayed(this, CURSOR_BLINK_INTERVAL_MS)
+        }
+    }
 
     init {
         isFocusable = true
@@ -95,8 +105,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         updateMetrics()
     }
 
-    fun attach(nativeEngine: GhosttyNativeEngine) {
+    fun attach(nativeEngine: GhosttyNativeEngine, renderFrames: GhosttyRenderFrameStore) {
         engine = nativeEngine
+        frameStore = renderFrames
+        renderFrames.currentFrame()?.snapshot?.let { updateCursorBlink(it.cursorBlinking) }
         if (width > 0 && height > 0) {
             resizeGrid()
         }
@@ -211,6 +223,17 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         resizeGrid()
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        frameStore?.currentFrame()?.snapshot?.let { updateCursorBlink(it.cursorBlinking) }
+    }
+
+    override fun onDetachedFromWindow() {
+        cursorBlinking = false
+        removeCallbacks(cursorBlinkRunnable)
+        super.onDetachedFromWindow()
+    }
+
     private fun updateMetrics() {
         val fontMetrics = textPaint.fontMetrics
         val measuredHeight = fontMetrics.descent - fontMetrics.ascent
@@ -224,40 +247,50 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         if (width <= 0 || height <= 0) return
         val newCols = max(2, (width / cellWidthPx).toInt())
         val newRows = max(2, (height / cellHeightPx).toInt())
-        if (newCols == cols && newRows == rows) return
+        val newCellWidthPx = ceil(cellWidthPx.toDouble()).toInt().coerceAtLeast(1)
+        val newCellHeightPx = ceil(cellHeightPx.toDouble()).toInt().coerceAtLeast(1)
+        if (newCols == cols &&
+            newRows == rows &&
+            newCellWidthPx == reportedCellWidthPx &&
+            newCellHeightPx == reportedCellHeightPx
+        ) {
+            return
+        }
         cols = newCols
         rows = newRows
-        grid = null
+        reportedCellWidthPx = newCellWidthPx
+        reportedCellHeightPx = newCellHeightPx
+        frameStore?.expectSize(cols, rows)
         currentEngine.requestResize(
             cols,
             rows,
-            ceil(cellWidthPx.toDouble()).toInt().coerceAtLeast(1),
-            ceil(cellHeightPx.toDouble()).toInt().coerceAtLeast(1),
+            reportedCellWidthPx,
+            reportedCellHeightPx,
         )
         onGridResize?.invoke(cols, rows)
     }
 
-    private fun ensureGrid(snapshot: GhosttyRenderSnapshot) {
-        val current = grid
-        if (current != null &&
-            current.size == snapshot.rows &&
-            (snapshot.rows == 0 || current[0].size == snapshot.cols)
-        ) {
+    fun renderFrameChanged(
+        snapshot: GhosttyRenderSnapshot,
+        change: GhosttyRenderFrameStore.Change,
+    ) {
+        updateCursorBlink(snapshot.cursorBlinking)
+        if (change.fullRedraw || height <= 0 || width <= 0) {
+            invalidate()
             return
         }
-        grid = Array(snapshot.rows) {
-            arrayOfNulls<GhosttyRenderCell>(snapshot.cols)
-        }
+        val top = (change.firstDirtyRow * cellHeightPx).toInt().coerceAtLeast(0)
+        val bottom = ceil((change.lastDirtyRow + 1) * cellHeightPx).toInt().coerceAtMost(height)
+        postInvalidateOnAnimation(0, top, width, bottom)
     }
 
-    private fun updateGrid(snapshot: GhosttyRenderSnapshot) {
-        ensureGrid(snapshot)
-        val target = grid ?: return
-        for (row in snapshot.rowsData) {
-            if (row.rowIndex !in target.indices) continue
-            target[row.rowIndex] = Array(snapshot.cols) { column ->
-                row.cells.getOrNull(column)
-            }
+    private fun updateCursorBlink(enabled: Boolean) {
+        if (enabled == cursorBlinking) return
+        cursorBlinking = enabled
+        removeCallbacks(cursorBlinkRunnable)
+        cursorBlinkOn = true
+        if (enabled && isAttachedToWindow) {
+            postDelayed(cursorBlinkRunnable, CURSOR_BLINK_INTERVAL_MS)
         }
     }
 
@@ -317,20 +350,20 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val snapshot = engine?.latestSnapshot() ?: run {
+        val frame = frameStore?.currentFrame() ?: run {
             canvas.drawColor(backgroundArgb)
             return
         }
+        val snapshot = frame.snapshot
 
         backgroundArgb = snapshot.backgroundArgb
         foregroundArgb = snapshot.foregroundArgb
-        updateGrid(snapshot)
 
         canvas.drawColor(backgroundArgb)
 
-        val target = grid ?: return
+        val target = frame.rows
         for (rowIndex in target.indices) {
-            val rowCells = target[rowIndex] ?: continue
+            val rowCells = target[rowIndex]
             val y = rowIndex * cellHeightPx
             var x = 0f
             for (cell in rowCells) {
@@ -368,17 +401,6 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             }
         }
 
-        if (snapshot.cursorBlinking) {
-            val now = SystemClock.uptimeMillis()
-            if (now - lastCursorBlinkToggle >= CURSOR_BLINK_INTERVAL_MS) {
-                cursorBlinkOn = !cursorBlinkOn
-                lastCursorBlinkToggle = now
-                postInvalidateOnAnimation()
-            }
-        } else {
-            cursorBlinkOn = true
-        }
-
         if (cursorBlinkOn &&
             snapshot.cursorVisible &&
             snapshot.cursorX >= 0 &&
@@ -386,7 +408,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         ) {
             val cursorLeft = snapshot.cursorX * cellWidthPx
             val cursorTop = snapshot.cursorY * cellHeightPx
-            cursorPaint.color = Color.WHITE
+            cursorPaint.color = snapshot.cursorArgb
             when (snapshot.cursorStyle) {
                 0 -> canvas.drawRect(
                     cursorLeft,

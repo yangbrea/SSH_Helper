@@ -164,10 +164,10 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
     return out;
 }
 
-// Snapshot binary format v1 (little-endian).
+// Snapshot binary format v2 (little-endian).
 //
-// Header (13 * int32):
-//   [0]  version = 1
+// Header (14 * int32):
+//   [0]  version = 2
 //   [1]  dirty_kind (0 none, 1 partial, 2 full)
 //   [2]  cols
 //   [3]  rows
@@ -180,6 +180,7 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
 //   [10] cursor blinking (0/1)
 //   [11] row count
 //   [12] generation (low 32 bits)
+//   [13] effective cursor color ARGB
 //
 // Row record:
 //   int32 row_index
@@ -191,7 +192,7 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
 //     uint16 text_len
 //     uint8  text[text_len]
 
-constexpr uint16_t kSnapshotVersion = 1;
+constexpr uint16_t kSnapshotVersion = 2;
 constexpr uint16_t kCellFlagBold = 1 << 0;
 constexpr uint16_t kCellFlagItalic = 1 << 1;
 constexpr uint16_t kCellFlagFaint = 1 << 2;
@@ -264,6 +265,14 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
         return false;
     }
 
+    GhosttyColorRgb cursor_color = colors.cursor_has_value ? colors.cursor : colors.foreground;
+    if (ghostty_terminal_get(
+            native->terminal,
+            GHOSTTY_TERMINAL_DATA_COLOR_CURSOR,
+            &cursor_color) != GHOSTTY_SUCCESS) {
+        cursor_color = colors.cursor_has_value ? colors.cursor : colors.foreground;
+    }
+
     if (dirty == GHOSTTY_RENDER_STATE_DIRTY_FALSE) {
         putI32(out, kSnapshotVersion);
         putI32(out, static_cast<int32_t>(GHOSTTY_RENDER_STATE_DIRTY_FALSE));
@@ -271,13 +280,22 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
         putI32(out, rows);
         putI32(out, argb(colors.background));
         putI32(out, argb(colors.foreground));
-        putI32(out, -1);
-        putI32(out, -1);
-        putI32(out, 0);
-        putI32(out, 0);
-        putI32(out, 0);
+        putI32(
+            out,
+            (cursor.viewport_has_value && cursor.visible)
+                ? static_cast<int32_t>(cursor.viewport_x)
+                : -1);
+        putI32(
+            out,
+            (cursor.viewport_has_value && cursor.visible)
+                ? static_cast<int32_t>(cursor.viewport_y)
+                : -1);
+        putI32(out, static_cast<int32_t>(cursor.visual_style));
+        putI32(out, cursor.visible ? 1 : 0);
+        putI32(out, cursor.blinking ? 1 : 0);
         putI32(out, 0);
         putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+        putI32(out, argb(cursor_color));
         return true;
     }
 
@@ -304,6 +322,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     const size_t row_count_offset = out.size();
     putI32(out, 0); // row count placeholder
     putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+    putI32(out, argb(cursor_color));
 
     if (ghostty_render_state_get(
             native->render_state,
