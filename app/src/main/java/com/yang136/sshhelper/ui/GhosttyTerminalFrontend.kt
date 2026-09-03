@@ -49,6 +49,12 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         if (view === terminalView) view = null
     }
 
+    internal fun scrollLines(delta: Int) {
+        ensureStarted()
+        engine.requestScrollViewport(delta)
+        view?.invalidate()
+    }
+
     override suspend fun write(bytes: ByteArray) {
         ensureStarted()
         engine.write(bytes)

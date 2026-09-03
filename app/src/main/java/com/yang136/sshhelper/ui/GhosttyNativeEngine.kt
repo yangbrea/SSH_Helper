@@ -74,6 +74,15 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestScrollViewport(deltaRows: Int) {
+        if (handle == 0L || deltaRows == 0) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows)
+            refreshSnapshot()
+        }
+    }
+
     fun requestPasteText(text: String) {
         if (handle == 0L || text.isEmpty()) return
         scope.launch {

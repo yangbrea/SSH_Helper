@@ -30,6 +30,9 @@ object GhosttyNativeBridge {
     /** Pastes text into the terminal according to current bracketed-paste mode. */
     external fun nativePasteText(handle: Long, data: ByteArray)
 
+    /** Scrolls the viewport by a signed row delta (negative scrolls up). */
+    external fun nativeScrollViewport(handle: Long, deltaRows: Int)
+
     /** Resizes the terminal grid and pixel cell size. */
     external fun nativeResize(
         handle: Long,

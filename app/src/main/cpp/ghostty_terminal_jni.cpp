@@ -526,6 +526,24 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResize(
         static_cast<uint32_t>(cell_height_px));
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeScrollViewport(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint delta_rows) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+    GhosttyTerminalScrollViewport behavior{};
+    behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA;
+    behavior.value.delta = delta_rows;
+    ghostty_terminal_scroll_viewport(native->terminal, behavior);
+}
+
 namespace {
 
 GhosttyColorRgb colorFromArgb(jint argb) {
