@@ -120,7 +120,6 @@ fun HostsScreen(
                     onAdd = onAdd,
                     onSessionClick = onOpenSession,
                     onAskCloseSession = { closingSession = it },
-                    onDeleteSessionNow = onCloseSession,
                     onHostMenu = { hostMenu = it },
                     hostMenu = hostMenu,
                     onForwards = onForwards,
@@ -198,7 +197,6 @@ fun HostsScreen(
                 onAdd = if (adaptive.isLargeScreen) onAdd else null,
                 onSessionClick = onOpenSession,
                 onAskCloseSession = { closingSession = it },
-                onDeleteSessionNow = onCloseSession,
                 onHostMenu = { hostMenu = it },
                 hostMenu = hostMenu,
                 onForwards = onForwards,
@@ -230,9 +228,27 @@ fun HostsScreen(
     if (confirmExit) AlertDialog(onDismissRequest = { confirmExit = false }, title = { Text("退出 SSH Helper？") },
         text = { Text(if (sessions.isEmpty()) "确认退出应用吗？" else "退出将断开 ${sessions.size} 个活动 SSH 会话。") },
         confirmButton = { TextButton(onClick = onExit) { Text("退出") } }, dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("取消") } })
-    closingSession?.let { session -> AlertDialog(onDismissRequest = { closingSession = null }, title = { Text("关闭会话？") },
-        text = { Text("将断开并关闭“${session.displayName}”。") }, confirmButton = { TextButton(onClick = { onCloseSession(session.id); closingSession = null }) { Text("断开并关闭") } },
-        dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } }) }
+    closingSession?.let { session ->
+        val activeForwardCount = app.container.forwardManager.activeForwardCount(session.id)
+        AlertDialog(
+            onDismissRequest = { closingSession = null },
+            title = { Text("关闭会话？") },
+            text = {
+                if (activeForwardCount > 0) {
+                    Text("“${session.displayName}”正承载 $activeForwardCount 条转发，关闭也会停止这些转发。确认关闭并断开该会话？")
+                } else {
+                    Text("将断开并关闭“${session.displayName}”。")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCloseSession(session.id)
+                    closingSession = null
+                }) { Text(if (activeForwardCount > 0) "关闭并停止转发" else "断开并关闭", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
+        )
+    }
 }
 
 /** 主机列表内容：搜索、活动会话与主机卡片；横屏下自动限宽居中。 */
@@ -251,7 +267,6 @@ private fun HostsList(
     onAdd: (() -> Unit)?,
     onSessionClick: (SessionId) -> Unit,
     onAskCloseSession: (ManagedSessionState) -> Unit,
-    onDeleteSessionNow: (SessionId) -> Unit,
     onHostMenu: (Long?) -> Unit,
     hostMenu: Long?,
     onForwards: (Long) -> Unit,
@@ -313,7 +328,7 @@ private fun HostsList(
                             SshStatusBadge(presentation.first, presentation.second)
                             if (deleteArmedSessionId == session.id) {
                                 TextButton(onClick = {
-                                    onDeleteSessionNow(session.id)
+                                    onAskCloseSession(session)
                                     onDeleteArmedSession(null)
                                 }) {
                                     Text("删除", color = MaterialTheme.colorScheme.error)

@@ -74,6 +74,7 @@ fun ActivityScreen(
     val state = buildActivityUiState(sessions, transfers, rules, forwardStates, writebacks.size)
     val hostNames = hosts.associate { it.id to it.name }
     var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
+    var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
     BackHandler(onBack = onBack)
 
     Scaffold(
@@ -121,7 +122,7 @@ fun ActivityScreen(
                         onLongClick = { deleteArmedSessionId = session.id },
                         deleteArmed = deleteArmedSessionId == session.id,
                         onDelete = {
-                            onCloseSession(session.id)
+                            closingSession = session
                             deleteArmedSessionId = null
                         },
                     )
@@ -156,6 +157,27 @@ fun ActivityScreen(
         }
     }
 
+    closingSession?.let { session ->
+        val activeForwardCount = app.container.forwardManager.activeForwardCount(session.id)
+        AlertDialog(
+            onDismissRequest = { closingSession = null },
+            title = { Text("关闭会话？") },
+            text = {
+                if (activeForwardCount > 0) {
+                    Text("“${session.displayName}”正承载 $activeForwardCount 条转发，关闭也会停止这些转发。确认关闭并断开该会话？")
+                } else {
+                    Text("将断开并关闭“${session.displayName}”。")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCloseSession(session.id)
+                    closingSession = null
+                }) { Text(if (activeForwardCount > 0) "关闭并停止转发" else "断开并关闭", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
