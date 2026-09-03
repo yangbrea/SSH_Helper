@@ -74,6 +74,7 @@ let ctrlArmed = false;
 let keepCursorVisibleForIme = false;
 let keyboardFocusAllowed = false;
 let suppressSyntheticMouseUntil = 0;
+let suppressTerminalFocusUntil = 0;
 /** 本次触摸手势结束时是否请求了键盘：合成 mousedown 不得再 blur 掉刚聚焦的文本框。 */
 let lastTouchRequestedKeyboard = false;
 let outputGeneration = 0;
@@ -168,10 +169,20 @@ function clearLongPress() {
   longPressTimer = 0;
 }
 
+function releaseTerminalFocusForScroll() {
+  if (touchState?.focusReleased) return;
+  if (touchState) touchState.focusReleased = true;
+  keyboardFocusAllowed = false;
+  keepCursorVisibleForIme = false;
+  lastTouchRequestedKeyboard = false;
+  suppressTerminalFocusUntil = performance.now() + 900;
+  terminal.blur();
+  window.AndroidTerminal?.onHideKeyboard();
+}
+
 function handleTouchStart(event) {
   if (event.touches.length !== 1) return;
   event.preventDefault();
-  keyboardFocusAllowed = false;
   lastTouchRequestedKeyboard = false;
   suppressSyntheticMouseUntil = performance.now() + 700;
   // 注意：这里不能 blur。一旦 blur，Android 软键盘会随之关闭，随后 onRequestKeyboard
@@ -186,6 +197,7 @@ function handleTouchStart(event) {
     startedAt: performance.now(),
     moved: false,
     maxDistance: 0,
+    focusReleased: false,
     point
   };
   if (selectionMode) {
@@ -207,6 +219,7 @@ function handleTouchMove(event) {
   if (distance > moveThreshold) {
     touchState.moved = true;
     clearLongPress();
+    releaseTerminalFocusForScroll();
   }
   if (selecting) {
     updateSelection(pointFromTouch(touch));
@@ -239,6 +252,10 @@ function handleTouchEnd(event) {
     touchState.maxDistance = Math.max(touchState.maxDistance, finalDistance);
     if (finalDistance > moveThreshold) touchState.moved = true;
   }
+  if (touchState.moved) {
+    releaseTerminalFocusForScroll();
+    suppressTerminalFocusUntil = performance.now() + 900;
+  }
   const elapsed = performance.now() - touchState.startedAt;
   if (selecting) {
     selecting = false;
@@ -267,6 +284,7 @@ terminal.element?.addEventListener('touchstart', handleTouchStart, { passive: fa
 terminal.element?.addEventListener('touchmove', handleTouchMove, { passive: false });
 terminal.element?.addEventListener('touchend', handleTouchEnd, { passive: false });
 terminal.element?.addEventListener('touchcancel', () => {
+  if (touchState?.moved) releaseTerminalFocusForScroll();
   clearLongPress();
   selecting = false;
   touchState = null;
@@ -289,7 +307,7 @@ terminal.element?.addEventListener('mousedown', event => {
 }, true);
 
 terminal.textarea?.addEventListener('focus', () => {
-  if (!keyboardFocusAllowed) {
+  if (!keyboardFocusAllowed || performance.now() < suppressTerminalFocusUntil) {
     terminal.blur();
     window.AndroidTerminal?.onHideKeyboard();
   }

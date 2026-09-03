@@ -14,10 +14,12 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.widget.OverScroller
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -42,7 +44,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var onSelectionClear: (() -> Unit)? = null
     private var onCellTap: ((Int, Int) -> Unit)? = null
     private var scrollAccum = 0f
-    private var flingVelocityY = 0f
+    private val flingScroller = OverScroller(context)
+    private val maximumFlingVelocity = ViewConfiguration.get(context).scaledMaximumFlingVelocity
+    private val minimumFlingVelocity = ViewConfiguration.get(context).scaledMinimumFlingVelocity
+    private var flingLastY = 0
+    private var flingPixelRemainder = 0f
     private var pointerDown = false
     private var selectionActive = false
     private var selectionModeArmed = false
@@ -52,7 +58,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         context,
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
-                flingVelocityY = 0f
+                flingScroller.forceFinished(true)
+                removeCallbacks(flingRunnable)
+                flingPixelRemainder = 0f
                 scrollAccum = 0f
                 pointerDown = true
                 if (selectionModeArmed) {
@@ -94,10 +102,20 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 velocityY: Float,
             ): Boolean {
                 if (selectionActive || cellHeightPx <= 0f) return false
-                // GestureDetector distanceY and velocityY use opposite signs.
-                // Native viewport deltas define up as negative, so invert the
-                // velocity to continue in the same direction as the drag.
-                flingVelocityY = -velocityY
+                if (abs(velocityY) < minimumFlingVelocity) return false
+                flingLastY = 0
+                flingPixelRemainder = 0f
+                flingScroller.fling(
+                    0,
+                    0,
+                    0,
+                    velocityY.toInt().coerceIn(-maximumFlingVelocity, maximumFlingVelocity),
+                    0,
+                    0,
+                    -FLING_POSITION_LIMIT,
+                    FLING_POSITION_LIMIT,
+                )
+                removeCallbacks(flingRunnable)
                 postOnAnimation(flingRunnable)
                 return true
             }
@@ -119,14 +137,19 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     private val flingRunnable = object : Runnable {
         override fun run() {
-            if (cellHeightPx <= 0f || abs(flingVelocityY) < FLING_STOP_VELOCITY_PX) {
-                flingVelocityY = 0f
-                return
+            if (cellHeightPx <= 0f || !flingScroller.computeScrollOffset()) return
+            val movementY = flingScroller.currY - flingLastY
+            flingLastY = flingScroller.currY
+            // Finger/down velocity is positive, while Ghostty viewport-up is
+            // negative. Integrate actual per-frame pixel movement rather than
+            // treating the pixels/second velocity as a per-frame distance.
+            flingPixelRemainder -= movementY
+            val deltaRows = (flingPixelRemainder / cellHeightPx).toInt()
+            if (deltaRows != 0) {
+                flingPixelRemainder -= deltaRows * cellHeightPx
+                onScrollLines?.invoke(deltaRows)
             }
-            val delta = (flingVelocityY / cellHeightPx).toInt()
-            if (delta != 0) onScrollLines?.invoke(delta)
-            flingVelocityY *= FLING_DECELERATION
-            postOnAnimation(this)
+            if (!flingScroller.isFinished) postOnAnimation(this)
         }
     }
 
@@ -446,6 +469,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         cursorBlinking = false
+        flingScroller.forceFinished(true)
         removeCallbacks(cursorBlinkRunnable)
         removeCallbacks(flingRunnable)
         super.onDetachedFromWindow()
@@ -790,8 +814,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val OVERLINE_OFFSET = 1f
         const val UNDERLINE_Y_OFFSET = 3f
         const val CURSOR_BLINK_INTERVAL_MS = 500L
-        const val FLING_STOP_VELOCITY_PX = 40f
-        const val FLING_DECELERATION = 0.92f
+        const val FLING_POSITION_LIMIT = 1_000_000
         const val SELECTION_BG_ARGB = 0xFF155E75.toInt()
         const val MOUSE_ACTION_PRESS = 0
         const val MOUSE_ACTION_RELEASE = 1

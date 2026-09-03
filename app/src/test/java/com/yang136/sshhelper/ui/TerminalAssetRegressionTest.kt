@@ -63,11 +63,12 @@ class TerminalAssetRegressionTest {
         val touchEnd = source.substringAfter("function handleTouchEnd", "").substringBefore("terminal.element?.addEventListener('touchstart'", "")
         val imeVisible = source.substringAfter("setImeVisible(visible) {", "").substringBefore("  },", "")
 
-        assertFalse("滚动终端不应主动关闭 Android IME", touchMove.contains("onHideKeyboard"))
+        assertTrue("拖动终端必须释放输入焦点", touchMove.contains("releaseTerminalFocusForScroll"))
         assertTrue("有效点击应请求 Android 软键盘", touchEnd.contains("if (point)"))
         assertTrue("点击终端应请求 Android 软键盘", touchEnd.contains("onRequestKeyboard"))
         assertTrue("只有已授权的终端焦点才可响应 IME 可见", imeVisible.contains("keyboardFocusAllowed && !selectionMode"))
         assertFalse("IME 可见通知不得授予终端焦点", imeVisible.contains("keyboardFocusAllowed = true"))
         assertTrue("终端失焦后必须释放 IME 所有权", source.contains("addEventListener('blur'"))
+        assertTrue("拖动松手后必须暂时拒绝合成焦点", source.contains("suppressTerminalFocusUntil"))
     }
 }
