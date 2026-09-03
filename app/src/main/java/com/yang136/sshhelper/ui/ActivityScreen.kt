@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
@@ -110,7 +111,9 @@ fun ActivityScreen(
                 item { SshSectionHeader("活动会话", summary = "${state.sessions.size}") }
                 items(state.sessions, key = { it.id.value }) { session ->
                     ActivityRow(
-                        icon = if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal,
+                        icon = if (SessionFeature.SFTP in session.features) Icons.Default.Folder
+                        else if (session.features == setOf(SessionFeature.PORT_FORWARD)) Icons.Default.Public
+                        else Icons.Default.Terminal,
                         title = session.displayName,
                         summary = "${session.profile.name} · ${session.connection.presentation().first}",
                         badge = session.connection.presentation(),

@@ -172,38 +172,26 @@ class MainActivity : FragmentActivity() {
                                 onDiagnostics = { hostId -> navController.navigate(networkDiagnosticsRoute(hostId)) },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
-                                onConnect = { host ->
-                                    sessionsViewModel.create(host, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${host.id}/${id.value}")
-                                        true
-                                    } ?: false
-                                },
+                                onQuickNewSession = { host -> navController.navigate("host/${host.id}?createSession=1") },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
-                                onTerminal = { profile ->
-                                    sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${profile.id}/${id.value}")
-                                        true
-                                    } ?: false
+                                onNewSession = { profile -> sessionsViewModel.create(profile, SessionFeature.SHELL) },
+                                onOpenTerminal = { id ->
+                                    sessions.firstOrNull { it.id == id }?.let { session ->
+                                        navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                    }
                                 },
-                                onFiles = { profile ->
-                                    sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
-                                        navController.navigate("files/${id.value}")
-                                        true
-                                    } ?: false
-                                },
-                                onNewSession = { profile ->
-                                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${profile.id}/${id.value}")
-                                        true
-                                    } ?: false
-                                },
+                                onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                onRenameSession = sessionsViewModel::rename,
                                 sessions = sessions,
                                 onOpenSession = { id ->
                                     sessions.firstOrNull { it.id == id }?.let { session ->
-                                        if (SessionFeature.SFTP in session.features) {
-                                            navController.navigate("files/${id.value}")
-                                        } else {
-                                            navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        when {
+                                            session.features == setOf(SessionFeature.PORT_FORWARD) ->
+                                                navController.navigate("forwards/${session.profile.id}")
+                                            SessionFeature.SFTP in session.features ->
+                                                navController.navigate("files/${id.value}")
+                                            else ->
+                                                navController.navigate("terminal/${session.profile.id}/${id.value}")
                                         }
                                     }
                                 },
@@ -226,8 +214,14 @@ class MainActivity : FragmentActivity() {
                                     sessions = sessions,
                                     onOpenSession = { id ->
                                         sessions.firstOrNull { it.id == id }?.let { session ->
-                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
-                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                            when {
+                                                session.features == setOf(SessionFeature.PORT_FORWARD) ->
+                                                    navController.navigate("forwards/${session.profile.id}")
+                                                SessionFeature.SFTP in session.features ->
+                                                    navController.navigate("files/${id.value}")
+                                                else ->
+                                                    navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                            }
                                         }
                                     },
                                     onCloseSession = sessionsViewModel::close,
@@ -423,41 +417,30 @@ class MainActivity : FragmentActivity() {
                             DiagnosticLogScreen(onBack = navController::popBackStack)
                         }
                         composable(
-                            route = "host/{hostId}",
-                            arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
+                            route = "host/{hostId}?createSession={createSession}",
+                            arguments = listOf(
+                                navArgument("hostId") { type = NavType.LongType },
+                                navArgument("createSession") { type = NavType.BoolType; defaultValue = false },
+                            ),
                         ) { entry ->
                             val hostId = entry.arguments?.getLong("hostId") ?: 0L
+                            val createSession = entry.arguments?.getBoolean("createSession") ?: false
                             hosts.firstOrNull { it.id == hostId }?.let { host ->
                                 HostWorkspaceScreen(
                                     host = host,
                                     sessions = sessions,
-                                    onTerminal = { profile ->
-                                        sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
-                                            navController.navigate("terminal/${profile.id}/${id.value}")
-                                            true
-                                        } ?: false
+                                    createSession = createSession,
+                                    onNewSession = { profile -> sessionsViewModel.create(profile, SessionFeature.SHELL) },
+                                    onOpenTerminal = { id ->
+                                        sessions.firstOrNull { it.id == id }?.let { session ->
+                                            navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        }
                                     },
-                                    onFiles = { profile ->
-                                        sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
-                                            navController.navigate("files/${id.value}")
-                                            true
-                                        } ?: false
-                                    },
-                                    onNewSession = { profile ->
-                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
-                                            navController.navigate("terminal/${profile.id}/${id.value}")
-                                            true
-                                        } ?: false
-                                    },
+                                    onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                    onRenameSession = sessionsViewModel::rename,
                                     onForwards = { navController.navigate("forwards/$it") },
                                     onDiagnostics = { navController.navigate(networkDiagnosticsRoute(it)) },
                                     onEdit = { navController.navigate("edit/${it.id}") },
-                                    onOpenSession = { id ->
-                                        sessions.firstOrNull { it.id == id }?.let { session ->
-                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
-                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
-                                        }
-                                    },
                                     onCloseSession = sessionsViewModel::close,
                                     onBack = navController::popBackStack,
                                 )
