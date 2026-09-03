@@ -235,7 +235,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     if (ghostty_render_state_get(
             native->render_state,
             GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
-            native->row_iter) != GHOSTTY_SUCCESS) {
+            &native->row_iter) != GHOSTTY_SUCCESS) {
         return false;
     }
 
@@ -253,7 +253,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
         if (ghostty_render_state_row_get(
                 native->row_iter,
                 GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
-                native->row_cells) != GHOSTTY_SUCCESS) {
+                &native->row_cells) != GHOSTTY_SUCCESS) {
             return false;
         }
 
