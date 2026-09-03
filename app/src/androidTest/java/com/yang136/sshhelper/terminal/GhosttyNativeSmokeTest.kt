@@ -126,6 +126,64 @@ class GhosttyNativeSmokeTest {
         }
     }
 
+    @Test
+    fun alternateScreenShowsSecondaryContent() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "\u001b[?1049h".encodeToByteArray())
+            GhosttyNativeBridge.nativeWrite(handle, "alternate-content".encodeToByteArray())
+            val text = renderSnapshot(handle).rowsData.joinToString("") { row ->
+                row.cells.joinToString("") { it.text }
+            }
+            assertTrue(
+                "alternate screen content should be visible, got: $text",
+                text.contains("alternate-content"),
+            )
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun resizeUpdatesGridAndKeepsWorking() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 24)
+        try {
+            GhosttyNativeBridge.nativeWrite(handle, "before-resize\r\n".encodeToByteArray())
+            GhosttyNativeBridge.nativeResize(
+                handle,
+                cols = 40,
+                rows = 10,
+                cellWidthPx = 8,
+                cellHeightPx = 16,
+            )
+            val snapshot = renderSnapshot(handle)
+            assertEquals(40, snapshot.cols)
+            assertEquals(10, snapshot.rows)
+            val text = snapshot.rowsData.joinToString("") { row ->
+                row.cells.joinToString("") { it.text }
+            }
+            assertTrue(text.contains("before-resize"))
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun scrollViewportDoesNotCrash() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 10)
+        try {
+            repeat(30) { index ->
+                GhosttyNativeBridge.nativeWrite(handle, "line-$index\r\n".encodeToByteArray())
+            }
+            GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows = -5)
+            val snapshot = renderSnapshot(handle)
+            assertTrue(snapshot.cols > 0)
+            assertTrue(snapshot.rows > 0)
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
     private fun renderSnapshot(handle: Long): GhosttyRenderSnapshot {
         val buffer = ByteBuffer
             .allocateDirect(1 shl 20)
