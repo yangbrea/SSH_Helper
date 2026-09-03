@@ -138,6 +138,7 @@ import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ExtraKeyId
+import com.yang136.sshhelper.settings.effectiveTerminalBackgroundOpacity
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
@@ -307,6 +308,18 @@ fun TerminalScreen(
 
     val hasHwKeyboard = hasHardwareKeyboard()
     val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))
+    val terminalBackgroundOpacity = effectiveTerminalBackgroundOpacity(
+        backend = settings.terminalBackend,
+        transparencyEnabled = settings.terminalTransparencyEnabled,
+        configuredOpacity = settings.terminalBackgroundOpacity,
+    )
+    val transparentGhosttyBackground =
+        controller is GhosttyTerminalFrontend && terminalBackgroundOpacity < 1f
+    val terminalContainerBackground = if (transparentGhosttyBackground) {
+        androidx.compose.ui.graphics.Color.Transparent
+    } else {
+        terminalBackground
+    }
     val currentSessionState = rememberUpdatedState(current)
     // WebView keeps its JavaScript terminal state inside the View, so moving the same
     // instance between portrait and landscape is intentional. AndroidView-backed Ghostty
@@ -328,11 +341,12 @@ fun TerminalScreen(
         }
         is GhosttyTerminalFrontend -> { modifier ->
             GhosttyTerminalSurface(
-                    frontend = controller,
-                    onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
-                    onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                    modifier = modifier,
-                )
+                frontend = controller,
+                backgroundOpacity = terminalBackgroundOpacity,
+                onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
+                onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+                modifier = modifier,
+            )
         }
         else -> { _: Modifier -> error("Unsupported terminal frontend: ${controller::class.simpleName}") }
     }
@@ -358,7 +372,7 @@ fun TerminalScreen(
     }
 
     TerminalSystemBarsEffect(isLandscape)
-    Box(Modifier.fillMaxSize().background(terminalBackground)) {
+    Box(Modifier.fillMaxSize().background(terminalContainerBackground)) {
         if (useSideRail) {
             LandscapeTerminalLayout(
                 hostSessions = hostSessions,
@@ -376,7 +390,7 @@ fun TerminalScreen(
                 ctrlArmed = ctrlArmed,
                 renderingDelayed = renderingDelayed,
                 showMoreMenu = showMoreMenu,
-                terminalBackground = terminalBackground,
+                terminalBackground = terminalContainerBackground,
                 statusBarHidden = isLandscape,
                 expandedWindow = adaptive.useTwoPane,
                 onBack = onBack,
@@ -415,12 +429,16 @@ fun TerminalScreen(
                 onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                 onFont = { showFontDialog = true },
                 onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
-                terminal = { modifier -> TerminalViewport(current, terminalBackground, modifier, terminalSurface) },
+                terminal = { modifier -> TerminalViewport(current, terminalContainerBackground, modifier, terminalSurface) },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
+                containerColor = if (transparentGhosttyBackground) {
+                    imageAwareScaffoldColor()
+                } else {
+                    MaterialTheme.colorScheme.background
+                },
                 topBar = {
                     Column {
                         SshTopAppBar(
@@ -457,12 +475,12 @@ fun TerminalScreen(
                                     )
                                 }
                             },
-                            allowImageBackground = false,
                         )
                         if (hostSessions.isNotEmpty()) {
                             PrimaryScrollableTabRow(
                                 selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0),
                                 edgePadding = 4.dp,
+                                containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
                             ) {
                                 hostSessions.forEach { session ->
                                     Tab(
@@ -484,9 +502,9 @@ fun TerminalScreen(
             ) { padding ->
                 Column(
                     Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                        .background(terminalBackground),
+                        .background(terminalContainerBackground),
                 ) {
-                    TerminalViewport(current, terminalBackground, Modifier.weight(1f).fillMaxWidth(), terminalSurface)
+                    TerminalViewport(current, terminalContainerBackground, Modifier.weight(1f).fillMaxWidth(), terminalSurface)
                     current?.let { session ->
                         when (layoutState.panel) {
                             TerminalPanel.SEARCH -> TerminalSearchBar(
@@ -1246,7 +1264,7 @@ private fun TerminalSearchBar(
     onClose: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1340,7 +1358,7 @@ private fun SelectionKeys(
     onCancel: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1399,7 +1417,8 @@ private fun ExtraKeys(
     onArmCtrl: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { key ->

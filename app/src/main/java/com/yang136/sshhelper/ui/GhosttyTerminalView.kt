@@ -32,6 +32,13 @@ import com.yang136.sshhelper.ui.theme.TerminalPalette
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.roundToInt
+
+internal fun applyOpacityToArgb(argb: Int, opacity: Float): Int {
+    val safeOpacity = if (opacity.isFinite()) opacity.coerceIn(0f, 1f) else 1f
+    val alpha = (safeOpacity * 255f).roundToInt()
+    return (argb and 0x00FFFFFF) or (alpha shl 24)
+}
 
 /** Canvas renderer and native input surface for the Ghostty backend. */
 internal class GhosttyTerminalView(context: Context) : View(context) {
@@ -174,6 +181,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var reportedCellHeightPx = 0
     private var backgroundArgb = Color.BLACK
     private var foregroundArgb = Color.WHITE
+    private var backgroundOpacity = 1f
 
     // Native snapshots are dirty-row deltas. The store retains a complete
     // frame across View resizes until the matching full native frame arrives.
@@ -210,6 +218,13 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     fun setPalette(palette: TerminalPalette) {
         backgroundArgb = Color.parseColor(palette.background)
         foregroundArgb = Color.parseColor(palette.foreground)
+        invalidate()
+    }
+
+    fun setBackgroundOpacity(opacity: Float) {
+        val normalized = if (opacity.isFinite()) opacity.coerceIn(0f, 1f) else 1f
+        if (backgroundOpacity == normalized) return
+        backgroundOpacity = normalized
         invalidate()
     }
 
@@ -695,7 +710,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         super.onDraw(canvas)
 
         val frame = frameStore?.currentFrame() ?: run {
-            canvas.drawColor(backgroundArgb)
+            canvas.drawColor(applyOpacityToArgb(backgroundArgb, backgroundOpacity))
             return
         }
         val snapshot = frame.snapshot
@@ -703,7 +718,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         backgroundArgb = snapshot.backgroundArgb
         foregroundArgb = snapshot.foregroundArgb
 
-        canvas.drawColor(backgroundArgb)
+        canvas.drawColor(applyOpacityToArgb(backgroundArgb, backgroundOpacity))
 
         val target = frame.rows
         for (rowIndex in target.indices) {
@@ -850,6 +865,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 @Composable
 internal fun GhosttyTerminalSurface(
     frontend: GhosttyTerminalFrontend,
+    backgroundOpacity: Float,
     onPtyWrite: (ByteArray) -> Unit,
     onResize: (cols: Int, rows: Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -860,6 +876,7 @@ internal fun GhosttyTerminalSurface(
         modifier = modifier,
         factory = { context ->
             GhosttyTerminalView(context).apply {
+                setBackgroundOpacity(backgroundOpacity)
                 frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
                 frontend.copySink = { text ->
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -879,6 +896,7 @@ internal fun GhosttyTerminalSurface(
             }
         },
         update = { view ->
+            view.setBackgroundOpacity(backgroundOpacity)
             frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
             view.setOnScrollLines { delta -> frontend.scrollLines(delta) }

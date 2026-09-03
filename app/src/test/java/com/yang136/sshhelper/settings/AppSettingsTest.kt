@@ -28,6 +28,13 @@ class AppSettingsTest {
     }
 
     @Test
+    fun terminalBackgroundOpacityOnlyAffectsEnabledGhosttyBackend() {
+        assertEquals(1f, effectiveTerminalBackgroundOpacity(TerminalBackend.GHOSTTY, false, 0.7f))
+        assertEquals(0.7f, effectiveTerminalBackgroundOpacity(TerminalBackend.GHOSTTY, true, 0.7f))
+        assertEquals(1f, effectiveTerminalBackgroundOpacity(TerminalBackend.XTERM, true, 0.7f))
+    }
+
+    @Test
     fun fontSize_isClampedToSupportedRange() {
         assertEquals(10, sanitizeTerminalFontSize(1))
         assertEquals(18, sanitizeTerminalFontSize(18))

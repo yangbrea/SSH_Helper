@@ -23,6 +23,16 @@ internal fun coerceTerminalBackgroundOpacity(value: Float): Float =
     if (value.isFinite()) value.coerceIn(MIN_TERMINAL_BACKGROUND_OPACITY, MAX_TERMINAL_BACKGROUND_OPACITY)
     else DEFAULT_TERMINAL_BACKGROUND_OPACITY
 
+internal fun effectiveTerminalBackgroundOpacity(
+    backend: TerminalBackend,
+    transparencyEnabled: Boolean,
+    configuredOpacity: Float,
+): Float = if (backend == TerminalBackend.GHOSTTY && transparencyEnabled) {
+    coerceTerminalBackgroundOpacity(configuredOpacity)
+} else {
+    1f
+}
+
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 enum class ThemePreset { OCEAN, EMERALD, AMBER, VIOLET }
