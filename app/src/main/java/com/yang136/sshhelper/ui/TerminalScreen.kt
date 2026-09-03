@@ -191,7 +191,9 @@ fun TerminalScreen(
     val initialId = initialSessionId?.let(::SessionId)
     var activeId by rememberSaveable(hostId, stateSaver = NullableSessionIdSaver) { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
-    val controller = remember { createTerminalFrontend(settings.terminalBackend) }
+    val controller = remember(settings.terminalBackend) {
+        createTerminalFrontend(settings.terminalBackend)
+    }
     val surfaceRevision = remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -300,14 +302,20 @@ fun TerminalScreen(
     val currentSessionState = rememberUpdatedState(current)
     val terminalSurface = remember(controller) {
         movableContentOf<Modifier> { modifier ->
-            TerminalWebView(
-                controller = controller,
-                initialBackground = terminalPalette.background,
-                onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
-                onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                onSurfaceCreated = { surfaceRevision.intValue += 1 },
-                modifier = modifier,
-            )
+            when (controller) {
+                is XtermTerminalFrontend -> TerminalWebView(
+                    controller = controller,
+                    initialBackground = terminalPalette.background,
+                    onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
+                    onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+                    onSurfaceCreated = { surfaceRevision.intValue += 1 },
+                    modifier = modifier,
+                )
+                is GhosttyTerminalFrontend -> GhosttyTerminalPlaceholder(
+                    background = terminalBackground,
+                    modifier = modifier,
+                )
+            }
         }
     }
 
@@ -1700,6 +1708,25 @@ private class TerminalBridge(
             controller.markReady()
             resizeCallback(columns, rows)
         }
+    }
+}
+
+@Composable
+private fun GhosttyTerminalPlaceholder(
+    background: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "Ghostty 终端后端尚未实现\n（等待 Step 4/5/6 接入原生渲染与输入）",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

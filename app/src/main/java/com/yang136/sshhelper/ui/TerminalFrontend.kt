@@ -42,15 +42,14 @@ internal interface TerminalFrontend {
 }
 
 /**
- * Placeholder factory for the development/gray rollout switch.
+ * Factory for the development/gray rollout switch.
  *
- * The Ghostty native canvas renderer is not implemented until later steps, so
- * GHOSTTY currently falls back to the Xterm backend to keep the app usable.
- * Once GhosttyTerminalFrontend is production-ready, replace the fallback with
- * the real Ghostty implementation.
+ * XTERM returns the production WebView/xterm frontend. GHOSTTY returns the
+ * Step 3 placeholder; [TerminalScreen] renders an explicit "not implemented"
+ * surface until the native renderer lands in later steps.
  */
 internal fun createTerminalFrontend(backend: TerminalBackend): TerminalFrontend =
     when (backend) {
         TerminalBackend.XTERM -> XtermTerminalFrontend()
-        TerminalBackend.GHOSTTY -> XtermTerminalFrontend()
+        TerminalBackend.GHOSTTY -> GhosttyTerminalFrontend()
     }
