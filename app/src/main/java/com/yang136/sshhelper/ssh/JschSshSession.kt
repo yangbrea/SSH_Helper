@@ -400,9 +400,12 @@ class JschSshSession(
         @Volatile private var output: OutputStream? = null
 
         override fun connect(socketFactory: SocketFactory?, host: String?, port: Int, timeout: Int) {
-            tunnel.connect(timeout.coerceAtLeast(SSH_CONNECT_TIMEOUT_MS))
+            // JSch 要求在 channel.connect() 之前获取输入流，否则远端握手刚开始发来的
+            // 字节（如 SSH banner）可能因接收管道尚未建立而丢失，表现为直连 TCP 成功但
+            // SSH 协商一直不开始，最终被 sshd 以 “Timeout before authentication” 断开。
             input = tunnel.inputStream
             output = tunnel.outputStream
+            tunnel.connect(timeout.coerceAtLeast(SSH_CONNECT_TIMEOUT_MS))
         }
 
         override fun getInputStream(): InputStream = input ?: error("jump tunnel not connected")

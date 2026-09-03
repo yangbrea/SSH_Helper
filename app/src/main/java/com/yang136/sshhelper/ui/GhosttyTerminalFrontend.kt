@@ -186,19 +186,25 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     internal fun selectionPress(col: Int, row: Int) {
         ensureStarted()
-        onSelectionStateChanged?.invoke(true, false)
+        // 长按/拖动过程中不能切布局：横屏会插入 Selection 面板导致终端尺寸变化，
+        // 进而中断进行中的触摸事件。等 release 后确认有选区再通知 UI。
         engine.requestSelectionPress(col, row)
     }
 
     internal fun selectionDrag(col: Int, row: Int) {
         ensureStarted()
         engine.requestSelectionDrag(col, row)
-        onSelectionStateChanged?.invoke(true, true)
     }
 
     internal fun selectionRelease(col: Int, row: Int) {
         ensureStarted()
         engine.requestSelectionRelease(col, row)
+        engine.requestCopySelection { bytes ->
+            frontendScope.launch {
+                val hasSelection = bytes != null && bytes.isNotEmpty()
+                onSelectionStateChanged?.invoke(hasSelection, hasSelection)
+            }
+        }
     }
 
     internal fun cellTap(col: Int, row: Int) {

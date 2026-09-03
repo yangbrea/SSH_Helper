@@ -536,6 +536,16 @@ bool applySelectionEvent(
     if (gridRefAtViewport(native, col, row, &ref)) {
         ghostty_selection_gesture_event_set(
             event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref);
+        if (type == GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS) {
+            // 移动端长按选择按“词”起步：按下立即高亮当前词，拖动按词扩展，
+            // 避免 CELL 模式要等第一次拖动才产生任何可见选区。
+            GhosttySelectionGestureBehaviors behaviors{};
+            behaviors.single_click = GHOSTTY_SELECTION_GESTURE_BEHAVIOR_WORD;
+            behaviors.double_click = GHOSTTY_SELECTION_GESTURE_BEHAVIOR_WORD;
+            behaviors.triple_click = GHOSTTY_SELECTION_GESTURE_BEHAVIOR_LINE;
+            ghostty_selection_gesture_event_set(
+                event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_BEHAVIORS, &behaviors);
+        }
         if (type == GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG) {
             GhosttySelectionGestureGeometry geometry{};
             geometry.columns = native->cols;

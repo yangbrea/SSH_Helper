@@ -103,6 +103,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -307,10 +308,15 @@ fun TerminalScreen(
     val hasHwKeyboard = hasHardwareKeyboard()
     val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))
     val currentSessionState = rememberUpdatedState(current)
-    val terminalSurface = remember(controller) {
-        movableContentOf<Modifier> { modifier ->
-            when (controller) {
-                is XtermTerminalFrontend -> TerminalWebView(
+    // WebView keeps its JavaScript terminal state inside the View, so moving the same
+    // instance between portrait and landscape is intentional. AndroidView-backed Ghostty
+    // must instead be recreated under the destination layout constraints: moving that View
+    // can retain its old full-screen layer and cover the landscape rail. Ghostty's frontend
+    // owns the native state and render snapshot, therefore replacing only its View is safe.
+    val terminalSurface: @Composable (Modifier) -> Unit = when (controller) {
+        is XtermTerminalFrontend -> remember(controller) {
+            movableContentOf<Modifier> { modifier ->
+                TerminalWebView(
                     controller = controller,
                     initialBackground = terminalPalette.background,
                     onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
@@ -318,14 +324,17 @@ fun TerminalScreen(
                     onSurfaceCreated = { surfaceRevision.intValue += 1 },
                     modifier = modifier,
                 )
-                is GhosttyTerminalFrontend -> GhosttyTerminalSurface(
+            }
+        }
+        is GhosttyTerminalFrontend -> { modifier ->
+            GhosttyTerminalSurface(
                     frontend = controller,
                     onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
                     onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
                     modifier = modifier,
                 )
-            }
         }
+        else -> { _: Modifier -> error("Unsupported terminal frontend: ${controller::class.simpleName}") }
     }
 
     fun togglePanel(panel: TerminalPanel) {
@@ -660,7 +669,9 @@ private fun TerminalViewport(
     modifier: Modifier,
     terminal: @Composable (Modifier) -> Unit,
 ) {
-    Box(modifier.background(background)) {
+    // Android interop children must never draw outside the terminal cell and obscure
+    // landscape Compose siblings such as the navigation/shortcut rail.
+    Box(modifier.clipToBounds().background(background)) {
         terminal(Modifier.fillMaxSize())
         if (current == null) {
             Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
@@ -916,7 +927,13 @@ private fun LandscapeContextPanel(
     onCancelSelection: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp,
 ) {
-    Surface(Modifier.widthIn(min = 248.dp, max = maxWidth).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
+    // 文本选择只有两三个操作，不需要和会话/搜索/快捷命令一样宽的侧栏。
+    val surfaceModifier = if (panel == TerminalPanel.SELECTION) {
+        Modifier.width(168.dp)
+    } else {
+        Modifier.widthIn(min = 248.dp, max = maxWidth)
+    }
+    Surface(surfaceModifier.fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(

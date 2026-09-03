@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -80,9 +81,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 distanceY: Float,
             ): Boolean {
                 if (selectionActive) {
-                    cellAt(e2.x, e2.y)?.let { (col, row) ->
-                        onSelectionDrag?.invoke(col, row)
-                    }
+                    // 扩选由 onTouchEvent 的 ACTION_MOVE 统一处理；长按后
+                    // GestureDetector 不保证继续回调 onScroll。
                     return true
                 }
                 if (cellHeightPx <= 0f) return false
@@ -124,6 +124,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 if (!pointerDown || selectionActive) return
                 val cell = cellAt(e.x, e.y) ?: return
                 selectionActive = true
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 onSelectionPress?.invoke(cell.first, cell.second)
             }
 
@@ -275,6 +276,15 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (dispatchMouseEvent(event)) return true
         if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
+
+        // 长按进入选择后，扩选由这里直接处理；不依赖 GestureDetector 的 onScroll。
+        if (event.actionMasked == MotionEvent.ACTION_MOVE && selectionActive) {
+            cellAt(event.x, event.y)?.let { (col, row) ->
+                onSelectionDrag?.invoke(col, row)
+            }
+            return true
+        }
+
         val handled = scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
