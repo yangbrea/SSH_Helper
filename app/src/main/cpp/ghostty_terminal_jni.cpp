@@ -544,6 +544,65 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeScrollViewport(
     ghostty_terminal_scroll_viewport(native->terminal, behavior);
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectAll(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_FALSE;
+    }
+
+    GhosttySelection selection = GHOSTTY_INIT_SIZED(GhosttySelection);
+    if (ghostty_terminal_select_all(native->terminal, &selection) != GHOSTTY_SUCCESS) {
+        return JNI_FALSE;
+    }
+    return ghostty_terminal_set(
+        native->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCopySelection(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return nullptr;
+    }
+
+    GhosttyTerminalSelectionFormatOptions options =
+        GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
+    options.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
+    options.trim = true;
+    options.selection = nullptr;
+
+    uint8_t* buffer = nullptr;
+    size_t length = 0;
+    const GhosttyResult result = ghostty_terminal_selection_format_alloc(
+        native->terminal, nullptr, options, &buffer, &length);
+    if (result != GHOSTTY_SUCCESS || buffer == nullptr || length == 0) {
+        if (buffer != nullptr) ghostty_free(nullptr, buffer, length);
+        return nullptr;
+    }
+
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(length));
+    if (out != nullptr) {
+        env->SetByteArrayRegion(
+            out, 0, static_cast<jsize>(length),
+            reinterpret_cast<const jbyte*>(buffer));
+    }
+    ghostty_free(nullptr, buffer, length);
+    return out;
+}
+
 namespace {
 
 GhosttyColorRgb colorFromArgb(jint argb) {

@@ -33,6 +33,12 @@ object GhosttyNativeBridge {
     /** Scrolls the viewport by a signed row delta (negative scrolls up). */
     external fun nativeScrollViewport(handle: Long, deltaRows: Int)
 
+    /** Selects all terminal content and installs it as the active selection. */
+    external fun nativeSelectAll(handle: Long): Boolean
+
+    /** Returns the active selection as plain UTF-8 text, or null. */
+    external fun nativeCopySelection(handle: Long): ByteArray?
+
     /** Resizes the terminal grid and pixel cell size. */
     external fun nativeResize(
         handle: Long,
