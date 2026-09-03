@@ -11,8 +11,12 @@ import android.graphics.Path
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -34,6 +38,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var engine: GhosttyNativeEngine? = null
     private var onGridResize: ((cols: Int, rows: Int) -> Unit)? = null
     private var onScrollLines: ((Int) -> Unit)? = null
+    private var onInputBytes: ((ByteArray) -> Unit)? = null
     private var scrollAccum = 0f
 
     private val scrollDetector = GestureDetector(
@@ -84,7 +89,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var lastCursorBlinkToggle = 0L
 
     init {
-        isFocusable = false
+        isFocusable = true
+        isFocusableInTouchMode = true
         updateMetrics()
     }
 
@@ -118,11 +124,73 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         onScrollLines = callback
     }
 
+    fun setOnInputBytes(callback: (ByteArray) -> Unit) {
+        onInputBytes = callback
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             scrollAccum = 0f
+            requestFocus()
         }
         return scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
+    }
+
+    override fun onCheckIsTextEditor(): Boolean = true
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
+        return object : BaseInputConnection(this, true) {
+            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if (!text.isNullOrEmpty()) sendInput(text.toString())
+                return true
+            }
+
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                if (beforeLength > 0) sendInput("\u007f")
+                return true
+            }
+
+            override fun sendKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN) handleKeyEvent(event)
+                return true
+            }
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        handleKeyEvent(event) || super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean = true
+
+    private fun sendInput(text: String) {
+        if (text.isNotEmpty()) onInputBytes?.invoke(text.encodeToByteArray())
+    }
+
+    private fun handleKeyEvent(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_ENTER -> { sendInput("\r"); return true }
+            KeyEvent.KEYCODE_DEL -> { sendInput("\u007f"); return true }
+            KeyEvent.KEYCODE_TAB -> { sendInput("\t"); return true }
+            KeyEvent.KEYCODE_ESCAPE -> { sendInput("\u001b"); return true }
+            KeyEvent.KEYCODE_DPAD_UP -> { sendInput("\u001b[A"); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN -> { sendInput("\u001b[B"); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { sendInput("\u001b[C"); return true }
+            KeyEvent.KEYCODE_DPAD_LEFT -> { sendInput("\u001b[D"); return true }
+        }
+        val unicode = event.unicodeChar
+        if (unicode != 0) {
+            if (event.isCtrlPressed) {
+                val code = unicode and 0x1f
+                sendInput(code.toChar().toString())
+            } else if (!event.isAltPressed && !event.isMetaPressed) {
+                sendInput(String(Character.toChars(unicode)))
+            }
+            return true
+        }
+        return false
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -363,6 +431,7 @@ internal fun GhosttyTerminalSurface(
                 }
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
                 setOnScrollLines { delta -> frontend.scrollLines(delta) }
+                setOnInputBytes { bytes -> currentOnPtyWrite.value(bytes) }
                 frontend.attachView(this)
             }
         },
@@ -370,6 +439,7 @@ internal fun GhosttyTerminalSurface(
             frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
             view.setOnScrollLines { delta -> frontend.scrollLines(delta) }
+            view.setOnInputBytes { bytes -> currentOnPtyWrite.value(bytes) }
             frontend.attachView(view)
         },
         onRelease = { view ->
