@@ -77,6 +77,17 @@ object GhosttyNativeBridge {
     /** Returns current total search match count. */
     external fun nativeSearchTotal(handle: Long): Int
 
+    /** Encodes a normalized mouse event to terminal bytes, or null. */
+    external fun nativeEncodeMouse(
+        handle: Long,
+        action: Int,
+        button: Int,
+        mods: Int,
+        x: Float,
+        y: Float,
+        anyButtonPressed: Boolean,
+    ): ByteArray?
+
     /** Clears search needle. */
     external fun nativeSearchClear(handle: Long)
 

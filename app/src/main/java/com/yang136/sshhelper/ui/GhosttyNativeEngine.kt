@@ -112,6 +112,24 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestMouseEvent(
+        action: Int,
+        button: Int,
+        mods: Int,
+        x: Float,
+        y: Float,
+        anyButtonPressed: Boolean,
+    ) {
+        if (handle == 0L) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            val bytes = GhosttyNativeBridge.nativeEncodeMouse(
+                handle, action, button, mods, x, y, anyButtonPressed,
+            )
+            if (bytes != null && bytes.isNotEmpty()) onPtyWrite(bytes)
+        }
+    }
+
     fun requestSearchClear() {
         if (handle == 0L) return
         scope.launch {

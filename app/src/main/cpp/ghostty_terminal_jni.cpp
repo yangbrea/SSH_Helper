@@ -34,6 +34,8 @@ struct NativeTerminal {
     GhosttyRenderStateRowIterator row_iter = nullptr;
     GhosttyRenderStateRowCells row_cells = nullptr;
     GhosttySearch search = nullptr;
+    GhosttyMouseEncoder mouse_encoder = nullptr;
+    GhosttyMouseEvent mouse_event = nullptr;
 
     // Bytes libghostty asks us to write back to the PTY (DSR/mode queries).
     std::vector<uint8_t> pending_pty_writes;
@@ -112,6 +114,14 @@ void freeNativeTerminal(NativeTerminal* native) {
     if (native->search != nullptr) {
         ghostty_search_free(native->search);
         native->search = nullptr;
+    }
+    if (native->mouse_event != nullptr) {
+        ghostty_mouse_event_free(native->mouse_event);
+        native->mouse_event = nullptr;
+    }
+    if (native->mouse_encoder != nullptr) {
+        ghostty_mouse_encoder_free(native->mouse_encoder);
+        native->mouse_encoder = nullptr;
     }
     if (native->row_cells != nullptr) {
         ghostty_render_state_row_cells_free(native->row_cells);
@@ -461,6 +471,12 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
 
         if (ghostty_search_new(nullptr, &native->search, native->terminal) != GHOSTTY_SUCCESS ||
             native->search == nullptr) {
+            break;
+        }
+        if (ghostty_mouse_encoder_new(nullptr, &native->mouse_encoder) != GHOSTTY_SUCCESS ||
+            native->mouse_encoder == nullptr ||
+            ghostty_mouse_event_new(nullptr, &native->mouse_event) != GHOSTTY_SUCCESS ||
+            native->mouse_event == nullptr) {
             break;
         }
 
@@ -871,6 +887,71 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchTotal(
         return 0;
     }
     return searchTotalMatches(native->search);
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeMouse(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint action,
+    jint button,
+    jint mods,
+    jfloat x,
+    jfloat y,
+    jboolean any_button_pressed) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed ||
+        native->mouse_encoder == nullptr || native->mouse_event == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return nullptr;
+    }
+
+    ghostty_mouse_encoder_setopt_from_terminal(
+        native->mouse_encoder, native->terminal);
+
+    ghostty_mouse_event_set_action(
+        native->mouse_event, static_cast<GhosttyMouseAction>(action));
+    if (button == 0) {
+        ghostty_mouse_event_clear_button(native->mouse_event);
+    } else {
+        ghostty_mouse_event_set_button(
+            native->mouse_event, static_cast<GhosttyMouseButton>(button));
+    }
+    ghostty_mouse_event_set_mods(
+        native->mouse_event, static_cast<GhosttyMods>(mods));
+    ghostty_mouse_event_set_position(
+        native->mouse_event, GhosttyMousePosition{x, y});
+
+    const GhosttyMouseEncoderOption pressed_opt =
+        GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED;
+    ghostty_mouse_encoder_setopt(
+        native->mouse_encoder, pressed_opt, &any_button_pressed);
+
+    size_t required = 0;
+    GhosttyResult result = ghostty_mouse_encoder_encode(
+        native->mouse_encoder, native->mouse_event, nullptr, 0, &required);
+    if (result != GHOSTTY_OUT_OF_SPACE && result != GHOSTTY_SUCCESS) {
+        return nullptr;
+    }
+    if (required == 0) return nullptr;
+
+    std::vector<uint8_t> bytes(required);
+    size_t written = 0;
+    result = ghostty_mouse_encoder_encode(
+        native->mouse_encoder, native->mouse_event,
+        reinterpret_cast<char*>(bytes.data()), bytes.size(), &written);
+    if (result != GHOSTTY_SUCCESS) return nullptr;
+    bytes.resize(written);
+
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (out != nullptr && !bytes.empty()) {
+        env->SetByteArrayRegion(
+            out, 0, static_cast<jsize>(bytes.size()),
+            reinterpret_cast<const jbyte*>(bytes.data()));
+    }
+    return out;
 }
 
 extern "C" JNIEXPORT void JNICALL
