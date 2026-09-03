@@ -106,6 +106,7 @@ import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_EXTRA_KEYS
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ExtraKeyId
+import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ThemeMode
@@ -217,6 +218,7 @@ fun SettingsScreen(
     onDeleteImageTheme: (String) -> Unit,
     onClearImageThemeError: () -> Unit,
     onFontSizeChange: (Int) -> Unit,
+    onTerminalBackendChange: (TerminalBackend) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
     onAiBaseUrlChange: (String) -> Unit,
     onAiApiKeyChange: (String) -> Unit,
@@ -288,7 +290,13 @@ fun SettingsScreen(
                 onClearError = onClearImageThemeError,
                 modifier = contentModifier,
             )
-            SettingsDestination.TERMINAL -> TerminalSettings(settings, onFontSizeChange, onExtraKeysChange, contentModifier)
+            SettingsDestination.TERMINAL -> TerminalSettings(
+                settings = settings,
+                onFontSize = onFontSizeChange,
+                onBackend = onTerminalBackendChange,
+                onKeys = onExtraKeysChange,
+                modifier = contentModifier,
+            )
             SettingsDestination.AI -> AiSettings(settings, aiBaseUrl, { aiBaseUrl = it }, aiApiKey, { aiApiKey = it }, aiModel, { aiModel = it }, onAiSendContextChange, onAiShowBubbleChange, contentModifier)
             SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, contentModifier)
             SettingsDestination.SECURITY -> SecuritySettings(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, { confirmVaultReset = true }, contentModifier)
@@ -645,8 +653,41 @@ private fun ImageThemeControls(
 }
 
 @Composable
-private fun TerminalSettings(settings: AppSettings, onFontSize: (Int) -> Unit, onKeys: (List<ExtraKeyId>) -> Unit, modifier: Modifier) {
+private fun TerminalSettings(
+    settings: AppSettings,
+    onFontSize: (Int) -> Unit,
+    onBackend: (TerminalBackend) -> Unit,
+    onKeys: (List<ExtraKeyId>) -> Unit,
+    modifier: Modifier,
+) {
     SettingsPage(modifier) {
+        item {
+            SshSectionHeader("终端引擎", summary = "实验性")
+        }
+        item {
+            PreferenceGroup {
+                TerminalBackend.entries.forEach { backend ->
+                    val label = when (backend) {
+                        TerminalBackend.XTERM -> "xterm.js（稳定）"
+                        TerminalBackend.GHOSTTY -> "Ghostty（实验）"
+                    }
+                    PreferenceAction(
+                        icon = Icons.Default.Terminal,
+                        title = label,
+                        summary = when (backend) {
+                            TerminalBackend.XTERM -> "当前 WebView 后端"
+                            TerminalBackend.GHOSTTY -> "原生 Canvas 后端"
+                        },
+                        onClick = { onBackend(backend) },
+                        trailing = if (settings.terminalBackend == backend) {
+                            { Text("✓") }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+        }
         item { SshSectionHeader("终端字体", summary = "${settings.terminalFontSize} px") }
         item {
             PreferenceGroup {
