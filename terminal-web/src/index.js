@@ -252,11 +252,9 @@ function handleTouchEnd(event) {
       touchState = null;
       return;
     }
-    // 只有点击当前光标单元格才进入输入状态；滚动区、历史输出和空白处保持纯浏览。
-    const buffer = terminal.buffer.active;
-    const cursorAbsoluteRow = buffer.baseY + buffer.cursorY;
-    const cursorColumn = buffer.cursorX;
-    if (point && point.absoluteRow === cursorAbsoluteRow && point.column === cursorColumn) {
+    // A deliberate tap anywhere in the visible terminal requests input. Drag
+    // gestures were already filtered above and therefore remain pure browsing.
+    if (point) {
       // 同步置位让随后的合成 mousedown 跳过 blur，避免刚呼出的 IME 被立刻关闭。
       lastTouchRequestedKeyboard = true;
       window.AndroidTerminal?.onRequestKeyboard();
@@ -295,6 +293,11 @@ terminal.textarea?.addEventListener('focus', () => {
     terminal.blur();
     window.AndroidTerminal?.onHideKeyboard();
   }
+}, true);
+terminal.textarea?.addEventListener('blur', () => {
+  // Another field now owns the IME. ResizeObserver must not focus xterm again.
+  keyboardFocusAllowed = false;
+  keepCursorVisibleForIme = false;
 }, true);
 
 terminal.onData(data => {
@@ -362,9 +365,17 @@ window.sshTerminal = {
     requestAnimationFrame(fitAndNotify);
   },
   setImeVisible(visible) {
-    keepCursorVisibleForIme = !!visible && !selectionMode;
-    if (!visible) keyboardFocusAllowed = false;
-    if (keepCursorVisibleForIme) requestAnimationFrame(fitAndNotify);
+    // IME insets are global. They may belong to search, credentials, or AI;
+    // only focusForIme() is allowed to grant terminal focus ownership.
+    if (!visible) {
+      keepCursorVisibleForIme = false;
+      keyboardFocusAllowed = false;
+      return;
+    }
+    if (keyboardFocusAllowed && !selectionMode) {
+      keepCursorVisibleForIme = true;
+      requestAnimationFrame(fitAndNotify);
+    }
   },
   setAppearance(value) {
     terminal.options.theme = value.theme;

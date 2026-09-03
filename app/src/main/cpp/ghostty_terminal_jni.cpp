@@ -1360,6 +1360,25 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeMouse(
     ghostty_mouse_encoder_setopt_from_terminal(
         native->mouse_encoder, native->terminal);
 
+    const GhosttyMouseEncoderSize size{
+        sizeof(GhosttyMouseEncoderSize),
+        native->cols * native->cell_width_px,
+        native->rows * native->cell_height_px,
+        native->cell_width_px,
+        native->cell_height_px,
+        0,
+        0,
+        0,
+        0,
+    };
+    ghostty_mouse_encoder_setopt(
+        native->mouse_encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
+    const bool track_last_cell = true;
+    ghostty_mouse_encoder_setopt(
+        native->mouse_encoder,
+        GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
+        &track_last_cell);
+
     ghostty_mouse_event_set_action(
         native->mouse_event, static_cast<GhosttyMouseAction>(action));
     if (button == 0) {

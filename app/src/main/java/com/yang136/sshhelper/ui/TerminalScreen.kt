@@ -194,6 +194,7 @@ fun TerminalScreen(
     val controller = remember(settings.terminalBackend) {
         createTerminalFrontend(settings.terminalBackend)
     }
+    val caseSensitiveSearchSupported = controller.supportsCaseSensitiveSearch
     val surfaceRevision = remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -250,6 +251,9 @@ fun TerminalScreen(
     }
     LaunchedEffect(imeVisible, controller) {
         controller.setImeVisible(imeVisible)
+    }
+    LaunchedEffect(controller) {
+        if (!controller.supportsCaseSensitiveSearch) searchCaseSensitive = false
     }
     DisposableEffect(controller) {
         controller.onSelectionStateChanged = { active, selected ->
@@ -357,6 +361,7 @@ fun TerminalScreen(
                 searchText = searchText,
                 searchResult = searchResult,
                 searchCaseSensitive = searchCaseSensitive,
+                caseSensitiveSearchSupported = caseSensitiveSearchSupported,
                 selectionMode = selectionMode,
                 hasSelection = hasSelection,
                 ctrlArmed = ctrlArmed,
@@ -479,6 +484,7 @@ fun TerminalScreen(
                                 query = searchText,
                                 result = searchResult,
                                 caseSensitive = searchCaseSensitive,
+                                caseSensitiveSupported = caseSensitiveSearchSupported,
                                 onQueryChange = { searchText = it; controller.search(it, false, searchCaseSensitive) },
                                 onPrevious = { controller.search(searchText, true, searchCaseSensitive) },
                                 onNext = { controller.search(searchText, false, searchCaseSensitive) },
@@ -679,6 +685,7 @@ private fun LandscapeTerminalLayout(
     searchText: String,
     searchResult: Pair<Int, Int>,
     searchCaseSensitive: Boolean,
+    caseSensitiveSearchSupported: Boolean,
     selectionMode: Boolean,
     hasSelection: Boolean,
     ctrlArmed: Boolean,
@@ -755,6 +762,7 @@ private fun LandscapeTerminalLayout(
                 searchText = searchText,
                 searchResult = searchResult,
                 searchCaseSensitive = searchCaseSensitive,
+                caseSensitiveSearchSupported = caseSensitiveSearchSupported,
                 hasSelection = hasSelection,
                 renderingDelayed = renderingDelayed,
                 onClose = { onTogglePanel(layoutState.panel) },
@@ -886,6 +894,7 @@ private fun LandscapeContextPanel(
     searchText: String,
     searchResult: Pair<Int, Int>,
     searchCaseSensitive: Boolean,
+    caseSensitiveSearchSupported: Boolean,
     hasSelection: Boolean,
     renderingDelayed: Boolean,
     onClose: () -> Unit,
@@ -929,7 +938,7 @@ private fun LandscapeContextPanel(
                     onCloseSession, onReconnect, onCancelReconnect, onUnlockVault, onCredentials,
                 )
                 TerminalPanel.SEARCH -> LandscapeSearchPanel(
-                    searchText, searchResult, searchCaseSensitive, onQueryChange,
+                    searchText, searchResult, searchCaseSensitive, caseSensitiveSearchSupported, onQueryChange,
                     onSearchPrevious, onSearchNext, onCaseSensitiveChange,
                 )
                 TerminalPanel.SNIPPETS -> LandscapeSnippetsPanel(snippets, onUseSnippet, onManageSnippets)
@@ -1012,6 +1021,7 @@ private fun LandscapeSearchPanel(
     query: String,
     result: Pair<Int, Int>,
     caseSensitive: Boolean,
+    caseSensitiveSupported: Boolean,
     onQueryChange: (String) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1024,8 +1034,18 @@ private fun LandscapeSearchPanel(
             OutlinedButton(onPrevious, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("上一个") }
             OutlinedButton(onNext, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("下一个") }
         }
-        OutlinedButton(onClick = { onCaseSensitiveChange(!caseSensitive) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (caseSensitive) "区分大小写：开" else "区分大小写：关")
+        OutlinedButton(
+            onClick = { onCaseSensitiveChange(!caseSensitive) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = caseSensitiveSupported,
+        ) {
+            Text(
+                when {
+                    !caseSensitiveSupported -> "当前后端不支持区分大小写"
+                    caseSensitive -> "区分大小写：开"
+                    else -> "区分大小写：关"
+                },
+            )
         }
     }
 }
@@ -1182,6 +1202,7 @@ private fun TerminalSearchBar(
     query: String,
     result: Pair<Int, Int>,
     caseSensitive: Boolean,
+    caseSensitiveSupported: Boolean,
     onQueryChange: (String) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1197,7 +1218,10 @@ private fun TerminalSearchBar(
         Text(if (result.second == 0) "0/0" else "${result.first + 1}/${result.second}", style = MaterialTheme.typography.labelMedium)
         OutlinedButton(onClick = onPrevious, enabled = query.isNotEmpty()) { Text("↑") }
         OutlinedButton(onClick = onNext, enabled = query.isNotEmpty()) { Text("↓") }
-        OutlinedButton(onClick = { onCaseSensitiveChange(!caseSensitive) }) { Text(if (caseSensitive) "Aa✓" else "Aa") }
+        OutlinedButton(
+            onClick = { onCaseSensitiveChange(!caseSensitive) },
+            enabled = caseSensitiveSupported,
+        ) { Text(if (caseSensitiveSupported && caseSensitive) "Aa✓" else "Aa") }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, "关闭搜索") }
     }
 }

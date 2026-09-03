@@ -57,14 +57,17 @@ class TerminalAssetRegressionTest {
     }
 
     @Test
-    fun touchInputRequiresCursorCellAndDoesNotHideImeWhileScrolling() {
+    fun deliberateTapRequestsInputAndImeInsetsCannotStealFocus() {
         val source = File("../terminal-web/src/index.js").readText()
         val touchMove = source.substringAfter("function handleTouchMove", "").substringBefore("function handleTouchEnd", "")
         val touchEnd = source.substringAfter("function handleTouchEnd", "").substringBefore("terminal.element?.addEventListener('touchstart'", "")
+        val imeVisible = source.substringAfter("setImeVisible(visible) {", "").substringBefore("  },", "")
 
         assertFalse("滚动终端不应主动关闭 Android IME", touchMove.contains("onHideKeyboard"))
-        assertTrue("点击输入必须校验当前光标行", touchEnd.contains("point.absoluteRow === cursorAbsoluteRow"))
-        assertTrue("点击输入必须校验当前光标列", touchEnd.contains("point.column === cursorColumn"))
-        assertTrue("点击光标单元格应请求 Android 软键盘", touchEnd.contains("onRequestKeyboard"))
+        assertTrue("有效点击应请求 Android 软键盘", touchEnd.contains("if (point)"))
+        assertTrue("点击终端应请求 Android 软键盘", touchEnd.contains("onRequestKeyboard"))
+        assertTrue("只有已授权的终端焦点才可响应 IME 可见", imeVisible.contains("keyboardFocusAllowed && !selectionMode"))
+        assertFalse("IME 可见通知不得授予终端焦点", imeVisible.contains("keyboardFocusAllowed = true"))
+        assertTrue("终端失焦后必须释放 IME 所有权", source.contains("addEventListener('blur'"))
     }
 }

@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import android.view.GestureDetector
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -29,13 +30,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 
-/**
- * First-layer Canvas renderer for the Ghostty backend.
- *
- * This intentionally implements only background, ordinary text, colors,
- * basic styles and cursor. Input, selection, search and scrollback remain
- * future commits.
- */
+/** Canvas renderer and native input surface for the Ghostty backend. */
 internal class GhosttyTerminalView(context: Context) : View(context) {
     private var engine: GhosttyNativeEngine? = null
     private var onGridResize: ((cols: Int, rows: Int) -> Unit)? = null
@@ -51,6 +46,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var pointerDown = false
     private var selectionActive = false
     private var selectionModeArmed = false
+    private var pressedMouseButton = MOUSE_BUTTON_LEFT
 
     private val scrollDetector = GestureDetector(
         context,
@@ -98,7 +94,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 velocityY: Float,
             ): Boolean {
                 if (selectionActive || cellHeightPx <= 0f) return false
-                flingVelocityY = velocityY
+                // GestureDetector distanceY and velocityY use opposite signs.
+                // Native viewport deltas define up as negative, so invert the
+                // velocity to continue in the same direction as the drag.
+                flingVelocityY = -velocityY
                 postOnAnimation(flingRunnable)
                 return true
             }
@@ -240,6 +239,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     fun focusAndShowKeyboard() {
         requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.restartInput(this)
         imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
 
@@ -250,8 +250,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
         if (dispatchMouseEvent(event)) return true
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
         val handled = scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -277,6 +277,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         return handled
     }
 
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) &&
+            event.actionMasked == MotionEvent.ACTION_SCROLL
+        ) {
+            val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+            val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+            if (vertical == 0f && horizontal == 0f) return true
+            val currentEngine = engine
+            if (currentEngine?.mouseReportingActive == true) {
+                sendReportedWheel(currentEngine, event, vertical, horizontal)
+            } else if (vertical != 0f) {
+                onScrollLines?.invoke(mouseWheelViewportDelta(vertical))
+            }
+            return true
+        }
+        if (dispatchMouseEvent(event)) return true
+        return super.onGenericMotionEvent(event)
+    }
+
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
@@ -292,7 +311,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 composing = false
-                if (!text.isNullOrEmpty()) sendInput(text.toString())
+                if (!text.isNullOrEmpty()) sendInput(normalizeTerminalInput(text.toString()))
                 return true
             }
 
@@ -306,6 +325,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 // 只有真正编辑已上屏内容时才发送退格。
                 if (!composing && beforeLength > 0) sendInput("\u007f")
                 return true
+            }
+
+            override fun deleteSurroundingTextInCodePoints(
+                beforeLength: Int,
+                afterLength: Int,
+            ): Boolean = deleteSurroundingText(beforeLength, afterLength)
+
+            override fun performEditorAction(actionCode: Int): Boolean = when (actionCode) {
+                EditorInfo.IME_ACTION_NONE,
+                EditorInfo.IME_ACTION_UNSPECIFIED,
+                EditorInfo.IME_ACTION_DONE,
+                EditorInfo.IME_ACTION_GO,
+                EditorInfo.IME_ACTION_NEXT,
+                EditorInfo.IME_ACTION_SEND,
+                -> {
+                    sendInput("\r")
+                    true
+                }
+                else -> super.performEditorAction(actionCode)
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
@@ -415,23 +453,77 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     private fun dispatchMouseEvent(event: MotionEvent): Boolean {
         val currentEngine = engine ?: return false
+        // A finger drag is terminal viewport navigation even when vim/tmux has
+        // enabled mouse tracking. Only an actual pointer device is forwarded.
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
+        if (selectionModeArmed || selectionActive) return false
         if (!currentEngine.mouseReportingActive) return false
         val action = when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> MOUSE_ACTION_PRESS
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> MOUSE_ACTION_RELEASE
-            MotionEvent.ACTION_MOVE -> MOUSE_ACTION_MOTION
-            else -> return true
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> MOUSE_ACTION_PRESS
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE, MotionEvent.ACTION_CANCEL ->
+                MOUSE_ACTION_RELEASE
+            MotionEvent.ACTION_MOVE, MotionEvent.ACTION_HOVER_MOVE -> MOUSE_ACTION_MOTION
+            else -> return false
         }
-        val button = if (action == MOUSE_ACTION_MOTION) 0 else MOUSE_BUTTON_LEFT
+        val button = if (action == MOUSE_ACTION_MOTION) {
+            0
+        } else {
+            mouseButton(event).also { pressedMouseButton = it }
+        }
         currentEngine.requestMouseEvent(
             action = action,
             button = button,
-            mods = 0,
+            mods = mouseModifiers(event),
             x = event.x,
             y = event.y,
-            anyButtonPressed = pointerDown,
+            anyButtonPressed = event.buttonState != 0,
         )
         return true
+    }
+
+    private fun mouseButton(event: MotionEvent): Int {
+        val state = if (event.actionButton != 0) event.actionButton else event.buttonState
+        return when {
+            state and MotionEvent.BUTTON_SECONDARY != 0 -> MOUSE_BUTTON_RIGHT
+            state and MotionEvent.BUTTON_TERTIARY != 0 -> MOUSE_BUTTON_MIDDLE
+            state and MotionEvent.BUTTON_BACK != 0 -> MOUSE_BUTTON_FOUR
+            state and MotionEvent.BUTTON_FORWARD != 0 -> MOUSE_BUTTON_FIVE
+            state and MotionEvent.BUTTON_PRIMARY != 0 -> MOUSE_BUTTON_LEFT
+            else -> pressedMouseButton
+        }
+    }
+
+    private fun mouseModifiers(event: MotionEvent): Int {
+        var mods = 0
+        if (event.metaState and KeyEvent.META_SHIFT_ON != 0) mods = mods or KEY_MOD_SHIFT
+        if (event.metaState and KeyEvent.META_CTRL_ON != 0) mods = mods or KEY_MOD_CTRL
+        if (event.metaState and KeyEvent.META_ALT_ON != 0) mods = mods or KEY_MOD_ALT
+        if (event.metaState and KeyEvent.META_META_ON != 0) mods = mods or KEY_MOD_SUPER
+        return mods
+    }
+
+    private fun sendReportedWheel(
+        currentEngine: GhosttyNativeEngine,
+        event: MotionEvent,
+        vertical: Float,
+        horizontal: Float,
+    ) {
+        val (button, magnitude) = when {
+            vertical > 0f -> MOUSE_BUTTON_FOUR to vertical
+            vertical < 0f -> MOUSE_BUTTON_FIVE to -vertical
+            horizontal > 0f -> MOUSE_BUTTON_SIX to horizontal
+            else -> MOUSE_BUTTON_SEVEN to -horizontal
+        }
+        repeat(wheelEventCount(magnitude)) {
+            currentEngine.requestMouseEvent(
+                action = MOUSE_ACTION_PRESS,
+                button = button,
+                mods = mouseModifiers(event),
+                x = event.x,
+                y = event.y,
+                anyButtonPressed = false,
+            )
+        }
     }
 
     private fun cellAt(x: Float, y: Float): Pair<Int, Int>? {
@@ -650,13 +742,42 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     cursorTop + cellHeightPx,
                     cursorPaint,
                 )
-                else -> canvas.drawRect(
-                    cursorLeft,
-                    cursorTop,
-                    cursorLeft + cellWidthPx,
-                    cursorTop + cellHeightPx,
-                    cursorPaint,
-                )
+                3 -> {
+                    cursorPaint.style = Paint.Style.STROKE
+                    cursorPaint.strokeWidth = max(2f, resources.displayMetrics.density)
+                    val inset = cursorPaint.strokeWidth / 2f
+                    canvas.drawRect(
+                        cursorLeft + inset,
+                        cursorTop + inset,
+                        cursorLeft + cellWidthPx - inset,
+                        cursorTop + cellHeightPx - inset,
+                        cursorPaint,
+                    )
+                    cursorPaint.style = Paint.Style.FILL
+                }
+                else -> {
+                    canvas.drawRect(
+                        cursorLeft,
+                        cursorTop,
+                        cursorLeft + cellWidthPx,
+                        cursorTop + cellHeightPx,
+                        cursorPaint,
+                    )
+                    // Redraw the glyph using the terminal background so an
+                    // opaque block cursor does not erase the character.
+                    val cell = frame.rows.getOrNull(snapshot.cursorY)
+                        ?.getOrNull(snapshot.cursorX)
+                    if (cell != null && cell.text.isNotEmpty() && !cell.invisible && !cell.wideTail) {
+                        textPaint.color = snapshot.backgroundArgb
+                        textPaint.alpha = 255
+                        textPaint.isFakeBoldText = cell.bold
+                        textPaint.textSkewX = if (cell.italic) ITALIC_SKEW_X else 0f
+                        canvas.drawText(cell.text, cursorLeft, cursorTop + baselinePx, textPaint)
+                        textPaint.color = foregroundArgb
+                        textPaint.isFakeBoldText = false
+                        textPaint.textSkewX = 0f
+                    }
+                }
             }
         }
     }
@@ -676,6 +797,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val MOUSE_ACTION_RELEASE = 1
         const val MOUSE_ACTION_MOTION = 2
         const val MOUSE_BUTTON_LEFT = 1
+        const val MOUSE_BUTTON_RIGHT = 2
+        const val MOUSE_BUTTON_MIDDLE = 3
+        const val MOUSE_BUTTON_FOUR = 4
+        const val MOUSE_BUTTON_FIVE = 5
+        const val MOUSE_BUTTON_SIX = 6
+        const val MOUSE_BUTTON_SEVEN = 7
         const val KEY_ACTION_RELEASE = 0
         const val KEY_ACTION_PRESS = 1
         const val KEY_ACTION_REPEAT = 2

@@ -20,9 +20,13 @@ import kotlinx.coroutines.TimeoutCancellationException
  *
  * The frontend owns a [GhosttyNativeEngine] which serializes all native calls
  * on a dedicated worker. A Canvas renderer ([GhosttyTerminalView]) reads the
- * a main-thread frame store populated by snapshots from that engine.
+ * main-thread frame store populated by snapshots from that engine.
  */
 internal class GhosttyTerminalFrontend : TerminalFrontend {
+    // libghostty-vt 0.1.0 search is ASCII case-insensitive and exposes no
+    // case-sensitive option. Advertise that instead of ignoring the Aa toggle.
+    override val supportsCaseSensitiveSearch: Boolean = false
+
     /** Receives bytes the terminal asks to write back to the PTY. */
     var onPtyWrite: ((ByteArray) -> Unit)? = null
 
@@ -41,11 +45,15 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     private val renderFrames = GhosttyRenderFrameStore()
 
     private val engine = GhosttyNativeEngine { bytes ->
-        onPtyWrite?.invoke(bytes)
+        frontendScope.launch { onPtyWrite?.invoke(bytes) }
     }.apply {
-        onBell = { this@GhosttyTerminalFrontend.onBell?.invoke() }
-        onTitleChange = { this@GhosttyTerminalFrontend.onTitleChange?.invoke(it) }
-        onPwdChange = { this@GhosttyTerminalFrontend.onPwdChange?.invoke(it) }
+        onBell = { frontendScope.launch { this@GhosttyTerminalFrontend.onBell?.invoke() } }
+        onTitleChange = { title ->
+            frontendScope.launch { this@GhosttyTerminalFrontend.onTitleChange?.invoke(title) }
+        }
+        onPwdChange = { pwd ->
+            frontendScope.launch { this@GhosttyTerminalFrontend.onPwdChange?.invoke(pwd) }
+        }
         onSnapshotReady = { snapshot ->
             frontendScope.launch {
                 val change = renderFrames.apply(snapshot) ?: return@launch
@@ -135,13 +143,9 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         view?.setFontSizeSp(fontSize.toFloat())
     }
 
-    override fun setImeVisible(visible: Boolean) {
-        if (visible) {
-            view?.focusAndShowKeyboard()
-        } else {
-            view?.hideKeyboard()
-        }
-    }
+    // WindowInsets reports global IME state; it does not grant this view focus
+    // ownership. Explicit terminal actions own show/hide requests.
+    override fun setImeVisible(visible: Boolean) = Unit
 
     override fun paste(context: Context) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -170,22 +174,26 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override fun enterSelectionMode() {
         view?.armSelectionMode()
+        onSelectionStateChanged?.invoke(true, false)
     }
 
     override fun clearSelection() {
         view?.clearSelectionAndResetGesture()
+        onSelectionStateChanged?.invoke(false, false)
         ensureStarted()
         engine.requestSelectionClear()
     }
 
     internal fun selectionPress(col: Int, row: Int) {
         ensureStarted()
+        onSelectionStateChanged?.invoke(true, false)
         engine.requestSelectionPress(col, row)
     }
 
     internal fun selectionDrag(col: Int, row: Int) {
         ensureStarted()
         engine.requestSelectionDrag(col, row)
+        onSelectionStateChanged?.invoke(true, true)
     }
 
     internal fun selectionRelease(col: Int, row: Int) {
@@ -208,16 +216,20 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override fun selectAll() {
         ensureStarted()
-        engine.requestSelectAll()
+        engine.requestSelectAll { selected ->
+            frontendScope.launch { onSelectionStateChanged?.invoke(selected, selected) }
+        }
     }
 
     override fun copySelection() {
         ensureStarted()
         engine.requestCopySelection { bytes ->
-            val text = bytes?.decodeToString().orEmpty()
-            if (text.isEmpty()) return@requestCopySelection
-            onCopied?.invoke(text.length)
-            copySink?.invoke(text)
+            frontendScope.launch {
+                val text = bytes?.decodeToString().orEmpty()
+                if (text.isEmpty()) return@launch
+                onCopied?.invoke(text.length)
+                copySink?.invoke(text)
+            }
         }
     }
 
@@ -231,12 +243,14 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         }
         if (lastSearchQuery != query) {
             lastSearchQuery = query
-            engine.requestSearchSet(query) { total ->
-                onSearchResults?.invoke(if (total > 0) 0 else -1, total)
+            engine.requestSearchSet(query, backwards) { index, total ->
+                frontendScope.launch {
+                    onSearchResults?.invoke(index, total)
+                }
             }
         } else {
             engine.requestSearchSelect(backwards) { index, total ->
-                onSearchResults?.invoke(index, total)
+                frontendScope.launch { onSearchResults?.invoke(index, total) }
             }
         }
     }

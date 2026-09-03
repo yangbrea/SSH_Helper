@@ -7,11 +7,12 @@ import com.yang136.sshhelper.ui.theme.TerminalPalette
 /**
  * Backend-independent terminal surface contract.
  *
- * [XtermTerminalFrontend] is the production backend until the Ghostty canvas
- * renderer lands. SessionManager/JSch must never depend on this interface's
- * implementations.
+ * SessionManager/JSch must never depend on this interface's implementations.
  */
 internal interface TerminalFrontend {
+    /** Whether this backend can honor case-sensitive terminal search. */
+    val supportsCaseSensitiveSearch: Boolean get() = true
+
     var onSelectionStateChanged: ((Boolean, Boolean) -> Unit)?
     var onCopied: ((Int) -> Unit)?
     var onSearchResults: ((Int, Int) -> Unit)?
@@ -44,9 +45,8 @@ internal interface TerminalFrontend {
 /**
  * Factory for the development/gray rollout switch.
  *
- * XTERM returns the production WebView/xterm frontend. GHOSTTY returns the
- * Step 3 placeholder; [TerminalScreen] renders an explicit "not implemented"
- * surface until the native renderer lands in later steps.
+ * XTERM returns the WebView/xterm compatibility frontend. GHOSTTY returns the
+ * native Canvas frontend. The rollout setting keeps both paths reversible.
  */
 internal fun createTerminalFrontend(backend: TerminalBackend): TerminalFrontend =
     when (backend) {

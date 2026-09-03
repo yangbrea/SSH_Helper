@@ -31,7 +31,11 @@ internal class GhosttyNativeEngine(
         Thread(runnable, "GhosttyEngine").apply { isDaemon = true }
     }
     private val dispatcher = executor.asCoroutineDispatcher()
-    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val engineJob = SupervisorJob()
+    private val scope = CoroutineScope(engineJob + dispatcher)
+
+    @Volatile
+    private var closing = false
 
     @Volatile
     private var handle: Long = 0L
@@ -96,20 +100,25 @@ internal class GhosttyNativeEngine(
         }
     }
 
-    fun requestSearchSet(query: String, onResult: (Int) -> Unit) {
+    fun requestSearchSet(query: String, backwards: Boolean, onResult: (Int, Int) -> Unit) {
         if (handle == 0L) {
-            onResult(0)
+            onResult(-1, 0)
             return
         }
         scope.launch {
             if (handle == 0L) {
-                onResult(0)
+                onResult(-1, 0)
                 return@launch
             }
             val bytes = query.takeIf { it.isNotEmpty() }?.encodeToByteArray()
             val total = GhosttyNativeBridge.nativeSearchSet(handle, bytes)
+            val index = if (total > 0) {
+                GhosttyNativeBridge.nativeSearchSelect(handle, backwards)
+            } else {
+                -1
+            }
             refreshSnapshot()
-            onResult(total)
+            onResult(index, total)
         }
     }
 
@@ -171,11 +180,15 @@ internal class GhosttyNativeEngine(
         }
     }
 
-    fun requestSelectAll() {
+    fun requestSelectAll(onResult: (Boolean) -> Unit) {
         scope.launch {
-            if (handle == 0L) return@launch
-            GhosttyNativeBridge.nativeSelectAll(handle)
+            if (handle == 0L) {
+                onResult(false)
+                return@launch
+            }
+            val selected = GhosttyNativeBridge.nativeSelectAll(handle)
             refreshSnapshot()
+            onResult(selected)
         }
     }
 
@@ -267,12 +280,16 @@ internal class GhosttyNativeEngine(
     }
 
     fun close() {
+        if (closing) return
+        closing = true
         scope.launch {
             if (handle != 0L) {
                 GhosttyNativeBridge.nativeFreeManaged(handle)
                 handle = 0L
             }
             mouseReportingActive = false
+            engineJob.cancel()
+            dispatcher.close()
             executor.shutdown()
         }
     }
