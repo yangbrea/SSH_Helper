@@ -105,6 +105,8 @@ import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_EXTRA_KEYS
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
+import com.yang136.sshhelper.settings.MIN_TERMINAL_BACKGROUND_OPACITY
+import com.yang136.sshhelper.settings.MAX_TERMINAL_BACKGROUND_OPACITY
 import com.yang136.sshhelper.settings.ExtraKeyId
 import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
@@ -219,6 +221,8 @@ fun SettingsScreen(
     onClearImageThemeError: () -> Unit,
     onFontSizeChange: (Int) -> Unit,
     onTerminalBackendChange: (TerminalBackend) -> Unit,
+    onTerminalTransparencyEnabledChange: (Boolean) -> Unit,
+    onTerminalBackgroundOpacityChange: (Float) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
     onAiBaseUrlChange: (String) -> Unit,
     onAiApiKeyChange: (String) -> Unit,
@@ -294,6 +298,8 @@ fun SettingsScreen(
                 settings = settings,
                 onFontSize = onFontSizeChange,
                 onBackend = onTerminalBackendChange,
+                onTransparencyEnabled = onTerminalTransparencyEnabledChange,
+                onBackgroundOpacity = onTerminalBackgroundOpacityChange,
                 onKeys = onExtraKeysChange,
                 modifier = contentModifier,
             )
@@ -657,6 +663,8 @@ private fun TerminalSettings(
     settings: AppSettings,
     onFontSize: (Int) -> Unit,
     onBackend: (TerminalBackend) -> Unit,
+    onTransparencyEnabled: (Boolean) -> Unit,
+    onBackgroundOpacity: (Float) -> Unit,
     onKeys: (List<ExtraKeyId>) -> Unit,
     modifier: Modifier,
 ) {
@@ -686,6 +694,47 @@ private fun TerminalSettings(
                         },
                     )
                 }
+            }
+        }
+        item {
+            SshSectionHeader(
+                "终端背景",
+                summary = if (settings.terminalTransparencyEnabled) {
+                    "${(settings.terminalBackgroundOpacity * 100).roundToInt()}% 不透明"
+                } else {
+                    "不透明"
+                },
+            )
+        }
+        item {
+            PreferenceGroup {
+                PreferenceSwitch(
+                    title = "半透明背景",
+                    summary = "仅适用于 Ghostty，xterm 不受影响",
+                    checked = settings.terminalTransparencyEnabled,
+                    onCheckedChange = onTransparencyEnabled,
+                )
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("背景不透明度", fontWeight = FontWeight.Medium)
+                        Text(
+                            "降低后可透出当前应用背景",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "${(settings.terminalBackgroundOpacity * 100).roundToInt()}%",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Slider(
+                    value = settings.terminalBackgroundOpacity,
+                    onValueChange = onBackgroundOpacity,
+                    valueRange = MIN_TERMINAL_BACKGROUND_OPACITY..MAX_TERMINAL_BACKGROUND_OPACITY,
+                    enabled = settings.terminalTransparencyEnabled,
+                )
             }
         }
         item { SshSectionHeader("终端字体", summary = "${settings.terminalFontSize} px") }

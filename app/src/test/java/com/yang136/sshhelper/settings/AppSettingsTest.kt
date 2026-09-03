@@ -1,6 +1,7 @@
 package com.yang136.sshhelper.settings
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class AppSettingsTest {
@@ -10,9 +11,20 @@ class AppSettingsTest {
         assertEquals(ThemePreset.OCEAN, AppSettings().themePreset)
         assertEquals(14, AppSettings().terminalFontSize)
         assertEquals(TerminalBackend.XTERM, AppSettings().terminalBackend)
+        assertFalse(AppSettings().terminalTransparencyEnabled)
+        assertEquals(DEFAULT_TERMINAL_BACKGROUND_OPACITY, AppSettings().terminalBackgroundOpacity)
         // 锁库后活动转发隧道凭据租约默认开启（产品决策）。
         assertEquals(true, AppSettings().forwardReconnectAfterLock)
         assertEquals(null, AppSettings().lastLocalRootUri)
+    }
+
+    @Test
+    fun terminalBackgroundOpacityIsClampedAndRejectsNonFiniteValues() {
+        assertEquals(MIN_TERMINAL_BACKGROUND_OPACITY, coerceTerminalBackgroundOpacity(0.1f))
+        assertEquals(0.75f, coerceTerminalBackgroundOpacity(0.75f))
+        assertEquals(MAX_TERMINAL_BACKGROUND_OPACITY, coerceTerminalBackgroundOpacity(1.0f))
+        assertEquals(DEFAULT_TERMINAL_BACKGROUND_OPACITY, coerceTerminalBackgroundOpacity(Float.NaN))
+        assertEquals(DEFAULT_TERMINAL_BACKGROUND_OPACITY, coerceTerminalBackgroundOpacity(Float.POSITIVE_INFINITY))
     }
 
     @Test

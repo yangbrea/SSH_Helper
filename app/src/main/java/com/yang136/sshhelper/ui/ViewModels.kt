@@ -275,6 +275,14 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.setTerminalBackend(backend)
     }
 
+    fun setTerminalTransparencyEnabled(enabled: Boolean) = viewModelScope.launch {
+        container.settingsRepository.setTerminalTransparencyEnabled(enabled)
+    }
+
+    fun setTerminalBackgroundOpacity(opacity: Float) = viewModelScope.launch {
+        container.settingsRepository.setTerminalBackgroundOpacity(opacity)
+    }
+
     fun setExtraKeys(keys: List<ExtraKeyId>) = viewModelScope.launch {
         container.settingsRepository.setExtraKeys(keys)
     }
