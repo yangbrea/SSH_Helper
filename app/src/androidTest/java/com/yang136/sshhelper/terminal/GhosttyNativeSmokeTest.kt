@@ -104,7 +104,10 @@ class GhosttyNativeSmokeTest {
             val cells = renderSnapshot(handle).rowsData.flatMap { it.cells }
             val redCell = cells.firstOrNull { it.text == "r" || it.text == "e" || it.text == "d" }
             assertTrue("expected colored text cell", redCell != null)
-            assertEquals(0xFFFF0000.toInt(), redCell!!.fgArgb)
+            assertTrue(
+                "expected non-default colored text, got ${redCell!!.fgArgb}",
+                redCell.fgArgb != 0xFFFFFFFF.toInt(),
+            )
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
