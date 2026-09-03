@@ -5,6 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import com.yang136.sshhelper.ui.theme.TerminalPalette
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 /**
  * Ghostty-backed terminal frontend.
@@ -26,6 +32,7 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     var onPwdChange: ((String) -> Unit)? = null
 
     private var lastSearchQuery: String? = null
+    private val frontendScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val engine = GhosttyNativeEngine { bytes ->
         onPtyWrite?.invoke(bytes)
@@ -71,7 +78,15 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override suspend fun write(bytes: ByteArray) {
         ensureStarted()
-        engine.write(bytes)
+        val writeJob = frontendScope.async { engine.write(bytes) }
+        try {
+            withTimeout(RENDER_DELAY_THRESHOLD_MS) { writeJob.await() }
+            onRenderingDelayed?.invoke(false)
+        } catch (_: TimeoutCancellationException) {
+            onRenderingDelayed?.invoke(true)
+            writeJob.await()
+            onRenderingDelayed?.invoke(false)
+        }
         view?.invalidate()
     }
 
@@ -166,5 +181,6 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     private companion object {
         const val DEFAULT_COLS = 80
         const val DEFAULT_ROWS = 24
+        const val RENDER_DELAY_THRESHOLD_MS = 500L
     }
 }
