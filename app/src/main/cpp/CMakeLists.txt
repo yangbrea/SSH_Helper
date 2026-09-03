@@ -38,11 +38,3 @@ target_compile_definitions(sshhelper_terminal PRIVATE GHOSTTY_STATIC)
 target_link_options(sshhelper_terminal PRIVATE
     "-Wl,-z,max-page-size=16384"
 )
-
-if(ANDROID_ABI STREQUAL "x86_64")
-    # Zig emits general-dynamic TLS on x86_64, which needs __tls_get_addr;
-    # bionic only exports it from API 29. Let it stay undefined at link time
-    # (overrides AGP's --no-undefined): x86_64 is an emulator-only ABI and
-    # API 29+ emulators resolve it from libc.so at load.
-    target_link_options(sshhelper_terminal PRIVATE "-Wl,-z,undefs")
-endif()

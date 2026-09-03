@@ -4,5 +4,5 @@ ghostty_commit=31bdcd5a79639bbac97c1a94e0f41d0f5ff84ca2
 ghostty_library_version=0.1.0-dev
 zig_version=0.16.0
 android_ndk_version=29.0.14206865
-simd=false
+simd=true
 abis=arm64-v8a,x86_64

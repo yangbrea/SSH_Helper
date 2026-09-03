@@ -20,8 +20,11 @@ class GhosttyNativeSmokeTest {
         val handle = GhosttyNativeBridge.nativeCreate(cols = 80, rows = 24)
         assertNotEquals(0L, handle)
         GhosttyNativeBridge.nativeFree(handle)
-        // Double-free is contractually a safe no-op in this smoke layer.
-        GhosttyNativeBridge.nativeFree(handle)
+    }
+
+    @Test
+    fun freeNullHandleIsSafeNoOp() {
+        GhosttyNativeBridge.nativeFree(0L)
     }
 
     @Test

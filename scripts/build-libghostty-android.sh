@@ -74,8 +74,8 @@ if [[ -z "$expected_commit" || -z "$expected_zig" || -z "$expected_ndk" || -z "$
     exit 1
 fi
 
-if [[ ! -d "$GHOSTTY_DIR/.git" ]]; then
-    echo "错误：Ghostty submodule 不存在：$GHOSTTY_DIR" >&2
+if ! git -C "$GHOSTTY_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "错误：Ghostty submodule 不存在或不是 Git 仓库：$GHOSTTY_DIR" >&2
     echo "请先运行 git submodule update --init --recursive" >&2
     exit 1
 fi
@@ -147,8 +147,8 @@ if [[ -z "$ndk_home" ]]; then
     exit 1
 fi
 
-if [[ "$expected_simd" != "false" ]]; then
-    echo "错误：本脚本只支持 lock 中 simd=false" >&2
+if [[ "$expected_simd" != "true" ]]; then
+    echo "错误：本脚本要求 lock 中 simd=true（避免 x86_64 Android TLS 问题）" >&2
     exit 1
 fi
 
@@ -158,6 +158,57 @@ mkdir -p "$WORK_DIR"
 
 abi_list=()
 IFS=',' read -ra abi_list <<< "$expected_abis"
+
+verify_archive_arch() {
+    local archive="$1"
+    local expected_arch="$2"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    (
+        cd "$tmpdir"
+        ar t "$archive" 2>/dev/null | while read -r member; do
+            mkdir -p "$(dirname "$member")" 2>/dev/null || true
+        done
+        ar x "$archive" >/dev/null 2>&1 || true
+    )
+    local first_obj
+    first_obj="$(find "$tmpdir" -name '*.o' -type f | head -1)"
+    local desc=""
+    if [[ -n "$first_obj" ]]; then
+        desc="$(file -b "$first_obj")"
+    fi
+    rm -rf "$tmpdir"
+
+    case "$expected_arch" in
+        arm64-v8a)
+            [[ "$desc" == *"ARM aarch64"* ]]
+            ;;
+        x86_64)
+            [[ "$desc" == *"x86-64"* ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+verify_public_symbol() {
+    local archive="$1"
+    local symbols
+    symbols="$(nm -g --defined-only "$archive" 2>/dev/null || true)"
+    [[ "$symbols" == *" ghostty_terminal_new"* ]]
+}
+
+verify_16kb_alignment() {
+    local shared_lib="$1"
+    [[ -f "$shared_lib" ]] || return 1
+    local alignments
+    alignments="$(readelf -lW "$shared_lib" 2>/dev/null | awk '$1 == "LOAD" {print $NF}')"
+    [[ -z "$alignments" ]] && return 1
+    while read -r alignment; do
+        [[ "$alignment" == "0x4000" ]] || return 1
+    done <<< "$alignments"
+}
 
 # Merge headers from the first successful build. Headers are target-independent.
 headers_copied=false
@@ -182,12 +233,26 @@ for abi in "${abi_list[@]}"; do
             -Demit-lib-vt \
             -Dtarget="$target" \
             -Doptimize=ReleaseFast \
-            -Dsimd=false \
+            -Dsimd=true \
             -p "$WORK_DIR/$abi"
     )
 
     mkdir -p "$OUTPUT_DIR/$abi"
     cp "$WORK_DIR/$abi/lib/libghostty-vt.a" "$OUTPUT_DIR/$abi/libghostty-vt.a"
+
+    echo "[ghostty] 校验 $abi 产物"
+    if ! verify_archive_arch "$OUTPUT_DIR/$abi/libghostty-vt.a" "$abi"; then
+        echo "错误：$abi 静态库架构校验失败" >&2
+        exit 1
+    fi
+    if ! verify_public_symbol "$OUTPUT_DIR/$abi/libghostty-vt.a"; then
+        echo "错误：$abi 静态库缺少 ghostty_terminal_new 符号" >&2
+        exit 1
+    fi
+    if ! verify_16kb_alignment "$WORK_DIR/$abi/lib/libghostty-vt.so.0.1.0"; then
+        echo "错误：$abi 上游共享库 16 KB 对齐校验失败" >&2
+        exit 1
+    fi
 
     if [[ "$headers_copied" != "true" ]]; then
         rm -rf "$OUTPUT_DIR/include"
@@ -197,13 +262,19 @@ for abi in "${abi_list[@]}"; do
     fi
 done
 
-# Write checksums for every produced file.
+# Write checksums for every produced file. Use a temp file outside OUTPUT_DIR
+# so the generated SHA256SUMS (and any temporary file) is never self-included
+# and `sha256sum -c SHA256SUMS` always succeeds.
+tmp_file="$(mktemp "${TMPDIR:-/tmp}/ghostty-sha256.XXXXXX")"
+trap 'rm -f "$tmp_file"' EXIT
 (
     cd "$OUTPUT_DIR"
-    find . -type f | sort | while read -r file; do
+    find . -type f ! -name SHA256SUMS -print0 | sort -z | while IFS= read -r -d '' file; do
         sha256sum "$file"
-    done > SHA256SUMS
-)
+    done
+) > "$tmp_file"
+mv "$tmp_file" "$OUTPUT_DIR/SHA256SUMS"
+trap - EXIT
 
 echo "[ghostty] 输出目录：$OUTPUT_DIR"
 cat "$OUTPUT_DIR/SHA256SUMS"
