@@ -17,6 +17,9 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     /** Receives bytes the terminal asks to write back to the PTY. */
     var onPtyWrite: ((ByteArray) -> Unit)? = null
 
+    /** Receives copied terminal text; the surface installs a clipboard writer. */
+    var copySink: ((String) -> Unit)? = null
+
     private val engine = GhosttyNativeEngine { bytes ->
         onPtyWrite?.invoke(bytes)
     }
@@ -93,8 +96,23 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     }
 
     override fun enterSelectionMode() = Unit
-    override fun selectAll() = Unit
-    override fun copySelection() = Unit
+
+    override fun selectAll() {
+        ensureStarted()
+        engine.requestSelectAll()
+        view?.invalidate()
+    }
+
+    override fun copySelection() {
+        ensureStarted()
+        engine.requestCopySelection { bytes ->
+            val text = bytes?.decodeToString().orEmpty()
+            if (text.isEmpty()) return@requestCopySelection
+            onCopied?.invoke(text.length)
+            copySink?.invoke(text)
+        }
+    }
+
     override fun clearSelection() = Unit
 
     override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) = Unit

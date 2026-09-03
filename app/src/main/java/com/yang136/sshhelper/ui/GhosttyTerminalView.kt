@@ -1,5 +1,7 @@
 package com.yang136.sshhelper.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -319,6 +321,10 @@ internal fun GhosttyTerminalSurface(
         factory = { context ->
             GhosttyTerminalView(context).apply {
                 frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
+                frontend.copySink = { text ->
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("SSH terminal", text))
+                }
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
                 frontend.attachView(this)
             }

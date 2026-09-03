@@ -74,6 +74,26 @@ internal class GhosttyNativeEngine(
         }
     }
 
+    fun requestSelectAll() {
+        if (handle == 0L) return
+        scope.launch {
+            if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeSelectAll(handle)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestCopySelection(onResult: (ByteArray?) -> Unit) {
+        if (handle == 0L) {
+            onResult(null)
+            return
+        }
+        scope.launch {
+            val bytes = if (handle == 0L) null else GhosttyNativeBridge.nativeCopySelection(handle)
+            onResult(bytes)
+        }
+    }
+
     fun requestScrollViewport(deltaRows: Int) {
         if (handle == 0L || deltaRows == 0) return
         scope.launch {
