@@ -128,6 +128,7 @@ internal fun HostWorkspacePane(
 
     // 同一时间只展开一个会话；用 String 保存便于跨页面返回恢复。
     var expandedSessionId by rememberSaveable(host.id) { mutableStateOf<String?>(null) }
+    var autoCreateConsumed by rememberSaveable(host.id) { mutableStateOf(false) }
     var sessionLimitReached by remember { mutableStateOf(false) }
     var renameSession by remember { mutableStateOf<ManagedSessionState?>(null) }
     var closeSession by remember { mutableStateOf<ManagedSessionState?>(null) }
@@ -152,7 +153,10 @@ internal fun HostWorkspacePane(
     }
 
     LaunchedEffect(Unit) {
-        if (createSession) performCreateSession()
+        if (createSession && !autoCreateConsumed) {
+            autoCreateConsumed = true
+            performCreateSession()
+        }
     }
 
     HostWorkspaceContent(
