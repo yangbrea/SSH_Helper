@@ -17,6 +17,7 @@ import android.view.View
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -126,6 +127,18 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     fun setOnInputBytes(callback: (ByteArray) -> Unit) {
         onInputBytes = callback
+    }
+
+    fun focusAndShowKeyboard() {
+        requestFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    fun hideKeyboard() {
+        clearFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(windowToken, 0)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -431,7 +444,7 @@ internal fun GhosttyTerminalSurface(
                 }
                 setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
                 setOnScrollLines { delta -> frontend.scrollLines(delta) }
-                setOnInputBytes { bytes -> currentOnPtyWrite.value(bytes) }
+                setOnInputBytes { bytes -> frontend.sendUserInput(bytes) }
                 frontend.attachView(this)
             }
         },
@@ -439,7 +452,7 @@ internal fun GhosttyTerminalSurface(
             frontend.onPtyWrite = { bytes -> currentOnPtyWrite.value(bytes) }
             view.setOnGridResize { cols, rows -> currentOnResize.value(cols, rows) }
             view.setOnScrollLines { delta -> frontend.scrollLines(delta) }
-            view.setOnInputBytes { bytes -> currentOnPtyWrite.value(bytes) }
+            view.setOnInputBytes { bytes -> frontend.sendUserInput(bytes) }
             frontend.attachView(view)
         },
         onRelease = { view ->

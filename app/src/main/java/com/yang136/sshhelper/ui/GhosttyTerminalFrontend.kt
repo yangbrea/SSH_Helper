@@ -32,6 +32,7 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     var onPwdChange: ((String) -> Unit)? = null
 
     private var lastSearchQuery: String? = null
+    private var ctrlArmed = false
     private val frontendScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val engine = GhosttyNativeEngine { bytes ->
@@ -68,6 +69,23 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     internal fun detachView(terminalView: GhosttyTerminalView) {
         if (view === terminalView) view = null
+    }
+
+    internal fun sendUserInput(bytes: ByteArray) {
+        val output = if (ctrlArmed && bytes.isNotEmpty()) {
+            ctrlArmed = false
+            onCtrlArmed?.invoke(false)
+            val first = bytes[0].toInt()
+            val ctrl = when {
+                first in 0x61..0x7A -> first - 0x60
+                first in 0x41..0x5A -> first - 0x40
+                else -> first
+            }
+            byteArrayOf(ctrl.toByte()) + bytes.copyOfRange(1, bytes.size)
+        } else {
+            bytes
+        }
+        onPtyWrite?.invoke(output)
     }
 
     internal fun scrollLines(delta: Int) {
@@ -168,9 +186,21 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         onSearchResults?.invoke(-1, 0)
     }
 
-    override fun armCtrl() = Unit
-    override fun focusAndShowKeyboard() = Unit
-    override fun hideKeyboard() = Unit
+    override fun armCtrl() {
+        ctrlArmed = !ctrlArmed
+        onCtrlArmed?.invoke(ctrlArmed)
+        if (ctrlArmed) view?.focusAndShowKeyboard()
+    }
+
+    override fun focusAndShowKeyboard() {
+        view?.focusAndShowKeyboard()
+    }
+
+    override fun hideKeyboard() {
+        ctrlArmed = false
+        onCtrlArmed?.invoke(false)
+        view?.hideKeyboard()
+    }
 
     override fun close() {
         engine.close()
