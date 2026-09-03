@@ -25,6 +25,7 @@ import com.yang136.sshhelper.terminal.GhosttyRenderCell
 import com.yang136.sshhelper.terminal.GhosttyRenderFrameStore
 import com.yang136.sshhelper.terminal.GhosttyRenderSnapshot
 import com.yang136.sshhelper.ui.theme.TerminalPalette
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -41,10 +42,16 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var onScrollLines: ((Int) -> Unit)? = null
     private var onInputBytes: ((ByteArray) -> Unit)? = null
     private var scrollAccum = 0f
+    private var flingVelocityY = 0f
 
     private val scrollDetector = GestureDetector(
         context,
         object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                flingVelocityY = 0f
+                return true
+            }
+
             override fun onScroll(
                 e1: MotionEvent?,
                 e2: MotionEvent,
@@ -60,8 +67,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 }
                 return true
             }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float,
+            ): Boolean {
+                if (cellHeightPx <= 0f) return false
+                flingVelocityY = velocityY
+                postOnAnimation(flingRunnable)
+                return true
+            }
         },
     )
+
+    private val flingRunnable = object : Runnable {
+        override fun run() {
+            if (cellHeightPx <= 0f || abs(flingVelocityY) < FLING_STOP_VELOCITY_PX) {
+                flingVelocityY = 0f
+                return
+            }
+            val delta = (flingVelocityY / cellHeightPx).toInt()
+            if (delta != 0) onScrollLines?.invoke(delta)
+            flingVelocityY *= FLING_DECELERATION
+            postOnAnimation(this)
+        }
+    }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
@@ -90,6 +122,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     private var cursorBlinkOn = true
     private var cursorBlinking = false
+    private var hasFocus = false
     private val cursorBlinkRunnable = object : Runnable {
         override fun run() {
             if (!cursorBlinking) return
@@ -108,7 +141,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     fun attach(nativeEngine: GhosttyNativeEngine, renderFrames: GhosttyRenderFrameStore) {
         engine = nativeEngine
         frameStore = renderFrames
-        renderFrames.currentFrame()?.snapshot?.let { updateCursorBlink(it.cursorBlinking) }
+        renderFrames.currentFrame()?.snapshot?.let { updateCursorBlink(shouldBlink(it)) }
         if (width > 0 && height > 0) {
             resizeGrid()
         }
@@ -223,14 +256,26 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         resizeGrid()
     }
 
+    override fun onFocusChanged(
+        gainFocus: Boolean,
+        direction: Int,
+        previouslyFocusedRect: android.graphics.Rect?,
+    ) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        hasFocus = gainFocus
+        syncCursorBlink()
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        frameStore?.currentFrame()?.snapshot?.let { updateCursorBlink(it.cursorBlinking) }
+        hasFocus = hasFocus()
+        frameStore?.currentFrame()?.snapshot?.let { updateCursorBlink(shouldBlink(it)) }
     }
 
     override fun onDetachedFromWindow() {
         cursorBlinking = false
         removeCallbacks(cursorBlinkRunnable)
+        removeCallbacks(flingRunnable)
         super.onDetachedFromWindow()
     }
 
@@ -274,7 +319,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         snapshot: GhosttyRenderSnapshot,
         change: GhosttyRenderFrameStore.Change,
     ) {
-        updateCursorBlink(snapshot.cursorBlinking)
+        updateCursorBlink(shouldBlink(snapshot))
         if (change.fullRedraw || height <= 0 || width <= 0) {
             invalidate()
             return
@@ -284,11 +329,22 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         postInvalidateOnAnimation(0, top, width, bottom)
     }
 
+    private fun shouldBlink(snapshot: GhosttyRenderSnapshot): Boolean =
+        // 对齐旧 xterm.js 的 cursorBlink=true：只要光标可见且 View 持有焦点就闪烁，
+        // 不依赖远端是否发送 DECSET 12。
+        hasFocus && snapshot.cursorVisible
+
+    private fun syncCursorBlink() {
+        val snapshot = frameStore?.currentFrame()?.snapshot ?: return
+        updateCursorBlink(shouldBlink(snapshot))
+    }
+
     private fun updateCursorBlink(enabled: Boolean) {
         if (enabled == cursorBlinking) return
         cursorBlinking = enabled
         removeCallbacks(cursorBlinkRunnable)
         cursorBlinkOn = true
+        postInvalidateOnAnimation()
         if (enabled && isAttachedToWindow) {
             postDelayed(cursorBlinkRunnable, CURSOR_BLINK_INTERVAL_MS)
         }
@@ -443,6 +499,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val OVERLINE_OFFSET = 1f
         const val UNDERLINE_Y_OFFSET = 3f
         const val CURSOR_BLINK_INTERVAL_MS = 500L
+        const val FLING_STOP_VELOCITY_PX = 40f
+        const val FLING_DECELERATION = 0.92f
     }
 }
 

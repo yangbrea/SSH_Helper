@@ -169,16 +169,21 @@ class GhosttyNativeSmokeTest {
     }
 
     @Test
-    fun scrollViewportDoesNotCrash() {
+    fun scrollViewportShowsOlderLines() {
         val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 10)
         try {
             repeat(30) { index ->
                 GhosttyNativeBridge.nativeWrite(handle, "line-$index\r\n".encodeToByteArray())
             }
+            val before = renderSnapshot(handle).rowsData
+                .firstOrNull()?.cells?.joinToString("") { it.text }.orEmpty()
+            assertTrue("expected line-20 at top before scroll, got: $before", before.contains("line-20"))
+
             GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows = -5)
-            val snapshot = renderSnapshot(handle)
-            assertTrue(snapshot.cols > 0)
-            assertTrue(snapshot.rows > 0)
+            val after = renderSnapshot(handle).rowsData
+                .firstOrNull()?.cells?.joinToString("") { it.text }.orEmpty()
+            assertTrue("expected line-15 at top after scroll, got: $after", after.contains("line-15"))
+            assertNotEquals(before, after)
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
