@@ -220,7 +220,10 @@ fun TerminalScreen(
             activeId = hostSessions.first().id
         }
     }
-    LaunchedEffect(activeId, surfaceRevision.intValue) {
+    // The frontend is replaced when the rollout backend changes. Keying this
+    // effect by controller guarantees the old output collector is cancelled
+    // before the new frontend is reset and receives the current snapshot.
+    LaunchedEffect(activeId, surfaceRevision.intValue, controller) {
         val id = activeId ?: return@LaunchedEffect
         sessionsViewModel.enableFeature(id, SessionFeature.SHELL)
         controller.reset()
@@ -242,10 +245,10 @@ fun TerminalScreen(
             }
         }
     }
-    LaunchedEffect(terminalPalette, settings.terminalFontSize) {
+    LaunchedEffect(terminalPalette, settings.terminalFontSize, controller) {
         controller.setAppearance(terminalPalette, settings.terminalFontSize)
     }
-    LaunchedEffect(imeVisible) {
+    LaunchedEffect(imeVisible, controller) {
         controller.setImeVisible(imeVisible)
     }
     DisposableEffect(controller) {
@@ -1733,7 +1736,7 @@ private fun GhosttyTerminalPlaceholder(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun TerminalWebView(
-    controller: TerminalFrontend,
+    controller: XtermTerminalFrontend,
     initialBackground: String,
     onInput: (ByteArray) -> Unit,
     onResize: (Int, Int) -> Unit,
@@ -1745,8 +1748,6 @@ private fun TerminalWebView(
     val inputState = rememberUpdatedState(onInput)
     val resizeState = rememberUpdatedState(onResize)
     val surfaceCreatedState = rememberUpdatedState(onSurfaceCreated)
-    val xtermController = controller as? XtermTerminalFrontend
-        ?: error("TerminalWebView only supports XtermTerminalFrontend")
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -1771,11 +1772,11 @@ private fun TerminalWebView(
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         request.url.host != "appassets.androidplatform.net"
                 }
-                xtermController.attach(this)
+                controller.attach(this)
                 addJavascriptInterface(
                     TerminalBridge(
                         this,
-                        xtermController,
+                        controller,
                         { inputState.value(it) },
                         { columns, rows -> resizeState.value(columns, rows) },
                     ),
@@ -1785,7 +1786,7 @@ private fun TerminalWebView(
                 loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
             }
         },
-        update = { xtermController.attach(it) },
+        update = { controller.attach(it) },
     )
 }
 
