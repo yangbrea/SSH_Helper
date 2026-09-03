@@ -36,6 +36,11 @@ internal class GhosttyNativeEngine(
     @Volatile
     private var handle: Long = 0L
 
+    /** Whether the active terminal app has enabled any mouse reporting mode. */
+    @Volatile
+    var mouseReportingActive: Boolean = false
+        private set
+
     @Volatile
     private var pendingResize: ResizeRequest? = null
     private var resizeJob: Job? = null
@@ -48,6 +53,7 @@ internal class GhosttyNativeEngine(
         scope.launch {
             if (handle == 0L) {
                 handle = GhosttyNativeBridge.nativeCreateManaged(cols, rows)
+                updateMouseReportingState()
                 pendingResize?.let { resize ->
                     pendingResize = null
                     applyResize(resize)
@@ -62,6 +68,7 @@ internal class GhosttyNativeEngine(
         withContext(dispatcher) {
             if (handle == 0L) return@withContext
             GhosttyNativeBridge.nativeWrite(handle, data)
+            updateMouseReportingState()
             drainPtyWrites()
             drainEvents()
             refreshSnapshot()
@@ -72,6 +79,7 @@ internal class GhosttyNativeEngine(
         withContext(dispatcher) {
             if (handle == 0L) return@withContext
             GhosttyNativeBridge.nativeReset(handle)
+            updateMouseReportingState()
             refreshSnapshot()
         }
     }
@@ -264,8 +272,13 @@ internal class GhosttyNativeEngine(
                 GhosttyNativeBridge.nativeFreeManaged(handle)
                 handle = 0L
             }
+            mouseReportingActive = false
             executor.shutdown()
         }
+    }
+
+    private fun updateMouseReportingState() {
+        mouseReportingActive = handle != 0L && GhosttyNativeBridge.nativeMouseReportingActive(handle)
     }
 
     private fun drainPtyWrites() {

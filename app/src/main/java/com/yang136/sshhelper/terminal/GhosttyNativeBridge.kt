@@ -48,6 +48,9 @@ object GhosttyNativeBridge {
     /** Clears the active selection and resets selection gesture state. */
     external fun nativeSelectionClear(handle: Long)
 
+    /** Returns true when the terminal has enabled any mouse reporting mode. */
+    external fun nativeMouseReportingActive(handle: Long): Boolean
+
     /** Returns the hyperlink URI at a viewport cell, or null. */
     external fun nativeLinkUriAt(handle: Long, col: Int, row: Int): ByteArray?
 

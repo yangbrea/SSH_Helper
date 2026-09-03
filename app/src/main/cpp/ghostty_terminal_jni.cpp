@@ -492,6 +492,28 @@ bool gridRefAtViewport(NativeTerminal* native, jint col, jint row, GhosttyGridRe
     return ghostty_terminal_grid_ref(native->terminal, point, out) == GHOSTTY_SUCCESS;
 }
 
+bool isMouseReportingActive(NativeTerminal* native) {
+    if (native == nullptr || native->terminal == nullptr) return false;
+    const GhosttyMode modes[] = {
+        GHOSTTY_MODE_X10_MOUSE,
+        GHOSTTY_MODE_NORMAL_MOUSE,
+        GHOSTTY_MODE_BUTTON_MOUSE,
+        GHOSTTY_MODE_ANY_MOUSE,
+    };
+    for (const GhosttyMode mode : modes) {
+        GhosttyTerminalModeConfig config{};
+        config.mode = mode;
+        if (ghostty_terminal_get(
+                native->terminal,
+                GHOSTTY_TERMINAL_DATA_MODE,
+                &config) == GHOSTTY_SUCCESS &&
+            config.value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool applySelectionEvent(
     NativeTerminal* native,
     GhosttySelectionGestureEventType type,
@@ -896,6 +918,20 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionClear(
     if (native->selection_gesture != nullptr) {
         ghostty_selection_gesture_reset(native->selection_gesture, native->terminal);
     }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeMouseReportingActive(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto* native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_FALSE;
+    }
+    return isMouseReportingActive(native) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

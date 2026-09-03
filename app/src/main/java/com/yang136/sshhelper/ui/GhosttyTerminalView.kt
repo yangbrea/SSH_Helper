@@ -250,10 +250,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
+        if (dispatchMouseEvent(event)) return true
         val handled = scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pointerDown = true
                 requestFocus()
             }
             MotionEvent.ACTION_UP -> {
@@ -359,6 +360,27 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         removeCallbacks(cursorBlinkRunnable)
         removeCallbacks(flingRunnable)
         super.onDetachedFromWindow()
+    }
+
+    private fun dispatchMouseEvent(event: MotionEvent): Boolean {
+        val currentEngine = engine ?: return false
+        if (!currentEngine.mouseReportingActive) return false
+        val action = when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> MOUSE_ACTION_PRESS
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> MOUSE_ACTION_RELEASE
+            MotionEvent.ACTION_MOVE -> MOUSE_ACTION_MOTION
+            else -> return true
+        }
+        val button = if (action == MOUSE_ACTION_MOTION) 0 else MOUSE_BUTTON_LEFT
+        currentEngine.requestMouseEvent(
+            action = action,
+            button = button,
+            mods = 0,
+            x = event.x,
+            y = event.y,
+            anyButtonPressed = pointerDown,
+        )
+        return true
     }
 
     private fun cellAt(x: Float, y: Float): Pair<Int, Int>? {
@@ -599,6 +621,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val FLING_STOP_VELOCITY_PX = 40f
         const val FLING_DECELERATION = 0.92f
         const val SELECTION_BG_ARGB = 0xFF155E75.toInt()
+        const val MOUSE_ACTION_PRESS = 0
+        const val MOUSE_ACTION_RELEASE = 1
+        const val MOUSE_ACTION_MOTION = 2
+        const val MOUSE_BUTTON_LEFT = 1
     }
 }
 

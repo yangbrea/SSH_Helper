@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -164,6 +165,20 @@ class GhosttyNativeSmokeTest {
                 row.cells.joinToString("") { it.text }
             }
             assertTrue(text.contains("before-resize"))
+        } finally {
+            GhosttyNativeBridge.nativeFreeManaged(handle)
+        }
+    }
+
+    @Test
+    fun mouseReportingActiveFollowsTerminalMode() {
+        val handle = GhosttyNativeBridge.nativeCreateManaged(cols = 80, rows = 10)
+        try {
+            assertFalse(GhosttyNativeBridge.nativeMouseReportingActive(handle))
+            GhosttyNativeBridge.nativeWrite(handle, "\u001b[?1000h".encodeToByteArray())
+            assertTrue(GhosttyNativeBridge.nativeMouseReportingActive(handle))
+            GhosttyNativeBridge.nativeWrite(handle, "\u001b[?1000l".encodeToByteArray())
+            assertFalse(GhosttyNativeBridge.nativeMouseReportingActive(handle))
         } finally {
             GhosttyNativeBridge.nativeFreeManaged(handle)
         }
