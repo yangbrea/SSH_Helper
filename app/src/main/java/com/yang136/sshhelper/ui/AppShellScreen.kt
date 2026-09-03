@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -83,6 +84,10 @@ fun AppShellScreen(
             Scaffold(
                 containerColor = imageAwareScaffoldColor(),
                 contentColor = imageAwareContentColor(),
+                // Each destination owns its TopAppBar and therefore its status-bar
+                // inset. Consuming safeDrawing here would push that bar below the
+                // notification row and leave the system bar outside its scrim.
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 bottomBar = {
                     if (!detailVisible) NavigationBar(
                         containerColor = structuralSurfaceColor(
