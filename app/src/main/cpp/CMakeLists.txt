@@ -49,6 +49,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_error.cpp
     ssh/ssh_jni.cpp
     ssh/ssh_runtime.cpp
+    ssh/ssh_socket.cpp
 )
 
 target_include_directories(sshhelper_ssh PRIVATE
