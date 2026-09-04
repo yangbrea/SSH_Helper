@@ -19,10 +19,17 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
-- blocking handshake、password auth、hostKey()、execCommand()。
+- blocking handshake、password auth、publicKeyAuth()、hostKey()、execCommand()。
+- `BlockingSshConnection` 保持“已完成 handshake 但未认证”的连接，供 host-key 确认后再发送凭据。
 - AsyncSSH E2E host test 已跑通：
   `TCP -> SSH handshake -> password auth -> host key read -> exec -> output`.
-- JNI `NativeSshBridge.nativeConnectExec()` 已暴露给 Kotlin 编译。
+- host-key gate E2E 已跑通：先读取 type/fingerprint/keyBase64，通过后再 password auth + exec。
+- JNI 暴露 `nativeOpenDirectHandshake()` + host-key 读取 + `nativeDirectPasswordExec()` / `nativeDirectPrivateKeyExec()`。
+
+### host-key 确认流程（direct blocking POC）
+- `Libssh2SshSession` 在认证前从 native 读取 host key，与 `KnownHostDao` 比较。
+- UNKNOWN 发布 `HostKeyRequest`，用户接受后写库再认证；MATCH 不重复提示；CHANGED 阻断连接并保留请求。
+- native host-key type 映射修正为真实 libssh2 常量（ssh-rsa、ecdsa-sha2-nistp384/521、ssh-ed25519）。
 
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
@@ -36,7 +43,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ## 尚未完成（按计划顺序）
 - native 非阻塞 event-loop 完整接入 libssh2（当前 POC 为 blocking）。
-- host-key 持久化/确认流程 native 化。
+- host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
 - private key / keyboard-interactive auth。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。
 - SFTP、forward、jump 的 native API。
@@ -45,4 +52,5 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
-（最新提交随进度更新；里程碑建议后续打 tag `ssh-native-step-NN`。）
+- `d7ddc59 feat(ssh-native): gate direct auth behind host key verification`
+（里程碑建议后续打 tag `ssh-native-step-NN`。）
