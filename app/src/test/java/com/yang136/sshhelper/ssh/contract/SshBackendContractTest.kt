@@ -458,6 +458,29 @@ abstract class SshBackendContractTest {
     }
 
 
+    @Test
+    fun connectsThroughSocks5Proxy() = runBlocking {
+        val proxy = Socks5Proxy("127.0.0.1", server.port)
+        val profile = HostProfile(
+            name = "socks-host",
+            hostname = "target.internal",
+            port = 22,
+            username = "test",
+            authType = AuthType.PASSWORD,
+            proxyType = ProxyType.SOCKS5,
+            proxyHost = "127.0.0.1",
+            proxyPort = proxy.port,
+        )
+        val session = createSession(MemoryKnownHostDao())
+        try {
+            connectAndConfirm(session, hostProfile = profile)
+            assertTrue("SSH handshake must traverse SOCKS5 proxy", proxy.connections.get() >= 1)
+        } finally {
+            session.close()
+        }
+    }
+
+
     protected class MemoryKnownHostDao(initial: KnownHostEntity? = null) : KnownHostDao {
         private var value: KnownHostEntity? = initial
         override suspend fun find(hostname: String, port: Int): KnownHostEntity? = value
@@ -498,6 +521,7 @@ abstract class SshBackendContractTest {
     }
 
 
+
     private class HttpConnectProxy(private val targetHost: String, private val targetPort: Int) {
         private val server = ServerSocket(0)
         val connections = AtomicInteger(0)
@@ -531,6 +555,76 @@ abstract class SshBackendContractTest {
                     }.also { it.isDaemon = true; it.start() }
                 }
             }.also { it.isDaemon = true; it.start() }
+        }
+
+        private fun pump(client: Socket, remote: Socket) {
+            val done = java.util.concurrent.atomic.AtomicBoolean(false)
+            val finish = {
+                if (done.compareAndSet(false, true)) {
+                    runCatching { client.close() }
+                    runCatching { remote.close() }
+                }
+            }
+            Thread {
+                runCatching { client.getInputStream().use { input -> input.copyTo(remote.getOutputStream()) } }
+                finish()
+            }.also { it.isDaemon = true; it.start() }
+            Thread {
+                runCatching { remote.getInputStream().use { input -> input.copyTo(client.getOutputStream()) } }
+                finish()
+            }.also { it.isDaemon = true; it.start() }
+        }
+    }
+
+
+    private class Socks5Proxy(private val targetHost: String, private val targetPort: Int) {
+        private val server = ServerSocket(0)
+        val connections = AtomicInteger(0)
+        val port: Int get() = server.localPort
+
+        init {
+            Thread {
+                while (true) {
+                    val client = try { server.accept() } catch (e: Exception) { return@Thread }
+                    Thread {
+                        try {
+                            val input = client.getInputStream()
+                            val output = client.getOutputStream()
+                            val greeting = ByteArray(2)
+                            readFully(input, greeting)
+                            val methods = ByteArray(greeting[1].toInt())
+                            readFully(input, methods)
+                            output.write(byteArrayOf(0x05, 0x00)); output.flush()
+
+                            val header = ByteArray(4)
+                            readFully(input, header)
+                            connections.incrementAndGet()
+                            when (header[3].toInt()) {
+                                0x01 -> { val addr = ByteArray(4); readFully(input, addr) }
+                                0x04 -> { val addr = ByteArray(16); readFully(input, addr) }
+                                0x03 -> { val len = input.read(); val addr = ByteArray(len); readFully(input, addr) }
+                                else -> error("unsupported SOCKS5 address type")
+                            }
+                            val portBytes = ByteArray(2); readFully(input, portBytes)
+
+                            val remote = Socket(targetHost, targetPort)
+                            output.write(byteArrayOf(0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0)); output.flush()
+                            pump(client, remote)
+                        } catch (e: Exception) {
+                            runCatching { client.close() }
+                        }
+                    }.also { it.isDaemon = true; it.start() }
+                }
+            }.also { it.isDaemon = true; it.start() }
+        }
+
+        private fun readFully(input: java.io.InputStream, data: ByteArray) {
+            var offset = 0
+            while (offset < data.size) {
+                val count = input.read(data, offset, data.size - offset)
+                if (count < 0) error("EOF")
+                offset += count
+            }
         }
 
         private fun pump(client: Socket, remote: Socket) {
