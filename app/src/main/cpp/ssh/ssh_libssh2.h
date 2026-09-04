@@ -19,6 +19,15 @@ public:
 
     LIBSSH2_SESSION* get() const { return session_; }
 
+    void setBlocking(bool enabled);
+
+    // Perform a blocking SSH transport handshake on an already-connected socket.
+    // The caller keeps ownership of the socket.
+    void handshake(int socket_fd);
+
+    // Perform blocking password authentication. Returns true on success.
+    bool passwordAuth(const std::string& username, const std::string& password);
+
     static std::string libraryVersion();
 
 private:

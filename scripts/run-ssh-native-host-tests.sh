@@ -53,6 +53,11 @@ compile_and_run_libssh2 libssh2_lifecycle \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/test/cpp/ssh_libssh2_test.cpp"
 
+compile_and_run_libssh2 libssh2_handshake \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_libssh2_handshake_test.cpp"
+
 compile_and_run runtime \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_test.cpp"
