@@ -31,6 +31,10 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - UNKNOWN 发布 `HostKeyRequest`，用户接受后写库再认证；MATCH 不重复提示；CHANGED 阻断连接并保留请求。
 - native host-key type 映射修正为真实 libssh2 常量（ssh-rsa、ecdsa-sha2-nistp384/521、ssh-ed25519）。
 
+### 认证（blocking POC）
+- password auth 和 in-memory private key auth 已有 E2E。
+- keyboard-interactive fallback 已实现：先读服务器 auth 方法，仅当无 plain password 时用同一密码回答单个 keyboard-interactive prompt；E2E 已跑通。
+
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
   - direct connect + host-key UNKNOWN/MATCH/CHANGED
@@ -44,7 +48,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 ## 尚未完成（按计划顺序）
 - native 非阻塞 event-loop 完整接入 libssh2（当前 POC 为 blocking）。
 - host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
-- private key / keyboard-interactive auth。
+- keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。
 - SFTP、forward、jump 的 native API。
 - `Libssh2SshSession` 生产实现与默认切换。
@@ -52,5 +56,6 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `a31c001 feat(ssh-native): support keyboard-interactive password fallback`
 - `d7ddc59 feat(ssh-native): gate direct auth behind host key verification`
 （里程碑建议后续打 tag `ssh-native-step-NN`。）
