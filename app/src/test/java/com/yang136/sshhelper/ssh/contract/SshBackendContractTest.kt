@@ -1,22 +1,29 @@
 package com.yang136.sshhelper.ssh.contract
 
 import com.yang136.sshhelper.data.AuthType
+import com.yang136.sshhelper.data.ForwardType
 import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.ssh.ConnectionState
+import com.yang136.sshhelper.ssh.ForwardRequest
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.RouteCredentials
+import com.yang136.sshhelper.ssh.PortForwardCapableSession
 import com.yang136.sshhelper.ssh.SftpCapableSession
 import com.yang136.sshhelper.ssh.SshRoute
 import com.yang136.sshhelper.ssh.SshSession
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.net.ServerSocket
+import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -28,6 +35,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.sshd.server.SshServer
 import org.apache.sshd.server.auth.password.PasswordAuthenticator
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider
+import org.apache.sshd.server.forward.AcceptAllForwardingFilter
 import org.apache.sshd.server.shell.ProcessShellCommandFactory
 import org.apache.sshd.server.shell.ProcessShellFactory
 import org.apache.sshd.sftp.server.SftpSubsystemFactory
@@ -64,6 +72,7 @@ abstract class SshBackendContractTest {
             }
             shellFactory = ProcessShellFactory("/bin/sh -i", listOf("/bin/sh", "-i"))
             commandFactory = ProcessShellCommandFactory.INSTANCE
+            forwardingFilter = AcceptAllForwardingFilter.INSTANCE
             subsystemFactories = listOf(SftpSubsystemFactory.Builder().build())
             fileSystemFactory = org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory(root)
             start()
@@ -275,6 +284,38 @@ abstract class SshBackendContractTest {
     }
 
 
+    @Test
+    fun localForwardRoundTripsThroughBackendNeutralSession() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        val forwardCapable = session as? PortForwardCapableSession
+            ?: error("contract backend must implement PortForwardCapableSession")
+        val echo = EchoServer()
+        try {
+            connectAndConfirm(session, openShell = false)
+            val handle = forwardCapable.registerForward(
+                ForwardRequest(ForwardType.LOCAL, "127.0.0.1", 0, "127.0.0.1", echo.port),
+            )
+            try {
+                Socket("127.0.0.1", handle.actualListenPort).use { socket ->
+                    val payload = "forward-contract".encodeToByteArray()
+                    socket.getOutputStream().write(payload)
+                    socket.getOutputStream().flush()
+                    val reply = ByteArray(payload.size)
+                    DataInputStream(socket.getInputStream()).readFully(reply)
+                    assertArrayEquals(payload, reply)
+                }
+            } finally {
+                handle.close()
+                handle.close()
+            }
+        } finally {
+            echo.close()
+            session.close()
+        }
+    }
+
+
+
     protected class MemoryKnownHostDao(initial: KnownHostEntity? = null) : KnownHostDao {
         private var value: KnownHostEntity? = initial
         override suspend fun find(hostname: String, port: Int): KnownHostEntity? = value
@@ -283,6 +324,33 @@ abstract class SshBackendContractTest {
         }
         override suspend fun delete(hostname: String, port: Int) {
             value = null
+        }
+    }
+
+    private class EchoServer {
+        private val server = ServerSocket(0)
+        private val running = AtomicBoolean(true)
+        val port: Int get() = server.localPort
+
+        init {
+            Thread {
+                while (running.get()) {
+                    val socket = try { server.accept() } catch (e: Exception) { return@Thread }
+                    Thread {
+                        try {
+                            socket.getInputStream().use { input ->
+                                socket.getOutputStream().use { output -> input.copyTo(output) }
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }.also { it.isDaemon = true; it.start() }
+                }
+            }.also { it.isDaemon = true; it.start() }
+        }
+
+        fun close() {
+            running.set(false)
+            runCatching { server.close() }
         }
     }
 }
