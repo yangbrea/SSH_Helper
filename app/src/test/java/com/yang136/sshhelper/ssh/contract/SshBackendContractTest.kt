@@ -6,12 +6,14 @@ import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.ssh.ConnectionState
+import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.RouteCredentials
 import com.yang136.sshhelper.ssh.SshRoute
 import com.yang136.sshhelper.ssh.SshSession
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -209,8 +211,40 @@ abstract class SshBackendContractTest {
     }
 
 
-    protected class MemoryKnownHostDao : KnownHostDao {
-        private var value: KnownHostEntity? = null
+    @Test
+    fun changedHostKeyBlocksConnectionAndKeepsChangedRequest() = runBlocking {
+        val dao = MemoryKnownHostDao(
+            KnownHostEntity(
+                id = "127.0.0.1:${server.port}",
+                hostname = "127.0.0.1",
+                port = server.port,
+                keyType = "ssh-ed25519",
+                keyBase64 = Base64.getEncoder().encodeToString("stale-wrong-key".encodeToByteArray()),
+                fingerprintSha256 = "SHA256:stale",
+            ),
+        )
+        val session = createSession(dao)
+        try {
+            val connection = async {
+                session.connect(
+                    SshRoute(profile(), null),
+                    RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                    openShell = false,
+                )
+            }
+            val request = withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
+            assertEquals(HostKeyIssue.CHANGED, request.issue)
+            withTimeout(10_000) { connection.await() }
+            assertTrue("expected Error, got ${session.state.value}", session.state.value is ConnectionState.Error)
+            assertEquals(HostKeyIssue.CHANGED, session.hostKeyRequest.value?.issue)
+        } finally {
+            session.close()
+        }
+    }
+
+
+    protected class MemoryKnownHostDao(initial: KnownHostEntity? = null) : KnownHostDao {
+        private var value: KnownHostEntity? = initial
         override suspend fun find(hostname: String, port: Int): KnownHostEntity? = value
         override suspend fun insert(knownHost: KnownHostEntity) {
             value = knownHost
