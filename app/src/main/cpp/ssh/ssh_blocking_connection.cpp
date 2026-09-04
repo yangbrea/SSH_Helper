@@ -49,7 +49,7 @@ int BlockingSshConnection::execPassword(
     const std::string& password,
     const std::string& command,
     std::string& output) {
-    if (!session_.passwordAuth(username, password)) {
+    if (!session_.passwordOrKeyboardAuth(username, password)) {
         throw std::runtime_error("SSH authentication failed");
     }
     return session_.execCommand(command, output);

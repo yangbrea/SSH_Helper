@@ -74,4 +74,41 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     -lcrypto \
     -o "$gate_binary"
 "$gate_binary" "$port"
+
+kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"
+kbdint_server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-err.XXXXXX")"
+kbdint_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint.XXXXXX")"
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+
+python3 "$project_dir/scripts/ssh-native-test-server.py" kbdint >"$kbdint_port_file" 2>"$kbdint_server_err" &
+kbdint_server_pid=$!
+for _ in $(seq 1 50); do
+    if [[ -s "$kbdint_port_file" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+if [[ ! -s "$kbdint_port_file" ]]; then
+    echo "[ssh-native] e2e failed to start kbdint test server" >&2
+    cat "$kbdint_server_err" >&2 || true
+    exit 1
+fi
+kbdint_port="$(head -1 "$kbdint_port_file")"
+
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_blocking_connection.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_keyboard_interactive_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$kbdint_binary"
+"$kbdint_binary" "$kbdint_port"
 echo "[ssh-native] e2e passed"

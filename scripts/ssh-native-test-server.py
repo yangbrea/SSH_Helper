@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """AsyncSSH test server used by ssh-native E2E host tests.
 
-Supports password auth and a single exec command that prints
-"native-exec-ok" and exits 0. Prints the listening port on stdout.
+Supports password auth (default), public-key auth, and an optional
+keyboard-interactive-only mode passed as "kbdint". It handles a single exec
+command that prints "native-exec-ok" and exits 0. Prints the listening port on
+stdout.
 """
 import asyncio
 import asyncssh
@@ -22,14 +24,32 @@ class ExecSession(asyncssh.SSHServerSession):
 
 
 class Server(asyncssh.SSHServer):
+    def __init__(self, auth_mode="password"):
+        self._auth_mode = auth_mode
+
     def begin_auth(self, username):
         return True
 
     def password_auth_supported(self):
-        return True
+        return self._auth_mode == "password"
+
+    def kbdint_auth_supported(self):
+        return self._auth_mode == "kbdint"
 
     def validate_password(self, username, password):
         return username == "test" and password == "secret"
+
+    def get_kbdint_challenge(self, username, lang, submethods):
+        if self._auth_mode == "kbdint":
+            return ("", "Password authentication", "", [("Password: ", False)])
+        return False
+
+    def validate_kbdint_response(self, username, responses):
+        return (
+            self._auth_mode == "kbdint"
+            and username == "test"
+            and responses == ["secret"]
+        )
 
     def public_key_auth_supported(self):
         return True
@@ -42,9 +62,12 @@ class Server(asyncssh.SSHServer):
 
 
 async def main():
+    auth_mode = sys.argv[1] if len(sys.argv) > 1 else "password"
+    if auth_mode not in ("password", "kbdint"):
+        raise SystemExit("unknown auth mode: " + auth_mode)
     key = asyncssh.generate_private_key("ssh-ed25519")
     server = await asyncssh.create_server(
-        Server,
+        lambda: Server(auth_mode),
         "127.0.0.1",
         0,
         server_host_keys=[key],

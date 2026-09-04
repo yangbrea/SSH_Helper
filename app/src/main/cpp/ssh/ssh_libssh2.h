@@ -29,6 +29,13 @@ public:
     // Perform blocking password authentication. Returns true on success.
     bool passwordAuth(const std::string& username, const std::string& password);
 
+    // Authenticate with a password using plain "password" when the server offers
+    // it, otherwise fall back to keyboard-interactive once when that is the only
+    // available method. This avoids retrying a bad password on a second method.
+    bool passwordOrKeyboardAuth(
+        const std::string& username,
+        const std::string& password);
+
     // Perform blocking public-key authentication from an in-memory OpenSSH/PEM
     // private key. Passphrase may be empty for unencrypted keys.
     bool publicKeyAuth(

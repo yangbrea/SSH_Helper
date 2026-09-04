@@ -1,5 +1,7 @@
 #include "ssh_libssh2.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <stdexcept>
 
@@ -17,6 +19,43 @@ void initializeLibssh2() {
 
 void ensureInitialized() {
     std::call_once(gInitFlag, initializeLibssh2);
+}
+
+bool hasAuthMethod(const char* methods, const char* wanted) {
+    if (methods == nullptr) return false;
+    const std::string list(methods);
+    const std::string needle(wanted);
+    size_t start = 0;
+    while (start <= list.size()) {
+        const size_t end = list.find(',', start);
+        const std::string token = list.substr(
+            start, end == std::string::npos ? std::string::npos : end - start);
+        if (token == needle) return true;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return false;
+}
+
+void keyboardInteractiveCallback(
+    const char* /* name */,
+    int /* name_len */,
+    const char* /* instruction */,
+    int /* instruction_len */,
+    int num_prompts,
+    const LIBSSH2_USERAUTH_KBDINT_PROMPT* /* prompts */,
+    LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses,
+    void** abstract) {
+    if (num_prompts != 1 || abstract == nullptr || *abstract == nullptr) {
+        return;
+    }
+    const auto* password = static_cast<const std::string*>(*abstract);
+    char* copy = static_cast<char*>(std::malloc(password->size() + 1));
+    if (copy == nullptr) return;
+    std::memcpy(copy, password->data(), password->size());
+    copy[password->size()] = '\0';
+    responses[0].text = copy;
+    responses[0].length = static_cast<unsigned int>(password->size());
 }
 
 } // namespace
@@ -55,6 +94,30 @@ bool Libssh2Session::passwordAuth(
     const std::string& password) {
     return libssh2_userauth_password(
         session_, username.c_str(), password.c_str()) == 0;
+}
+
+bool Libssh2Session::passwordOrKeyboardAuth(
+    const std::string& username,
+    const std::string& password) {
+    char* methods = libssh2_userauth_list(
+        session_, username.c_str(), static_cast<unsigned int>(username.size()));
+    if (hasAuthMethod(methods, "password")) {
+        return passwordAuth(username, password);
+    }
+    if (!hasAuthMethod(methods, "keyboard-interactive")) {
+        return false;
+    }
+    const std::string password_storage = password;
+    void** abstract_slot = libssh2_session_abstract(session_);
+    if (abstract_slot != nullptr) {
+        *abstract_slot = const_cast<std::string*>(&password_storage);
+    }
+    const int result = libssh2_userauth_keyboard_interactive(
+        session_, username.c_str(), keyboardInteractiveCallback);
+    if (abstract_slot != nullptr) {
+        *abstract_slot = nullptr;
+    }
+    return result == 0;
 }
 
 
