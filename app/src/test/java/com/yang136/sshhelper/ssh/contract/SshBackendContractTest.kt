@@ -12,12 +12,14 @@ import com.yang136.sshhelper.ssh.SshRoute
 import com.yang136.sshhelper.ssh.SshSession
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.sshd.server.SshServer
 import org.apache.sshd.server.auth.password.PasswordAuthenticator
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider
@@ -39,6 +41,7 @@ import org.junit.Test
 abstract class SshBackendContractTest {
     protected lateinit var server: SshServer
     protected lateinit var root: Path
+    protected val passwordAttempts = AtomicInteger(0)
 
     protected abstract fun createSession(knownHostDao: KnownHostDao): SshSession
 
@@ -49,6 +52,7 @@ abstract class SshBackendContractTest {
             port = 0
             keyPairProvider = SimpleGeneratorHostKeyProvider(root.resolve("host-key"))
             passwordAuthenticator = PasswordAuthenticator { username, password, _ ->
+                passwordAttempts.incrementAndGet()
                 username == "test" && password == "secret"
             }
             shellFactory = ProcessShellFactory("/bin/sh -i", listOf("/bin/sh", "-i"))
@@ -133,6 +137,77 @@ abstract class SshBackendContractTest {
             session.close()
         }
     }
+
+    private suspend fun connectWithPasswordAndExpectError(
+        session: SshSession,
+        password: String,
+    ) = coroutineScope {
+        val connection = async {
+            session.connect(
+                SshRoute(profile(), null),
+                RouteCredentials(Credential.Password(password.toCharArray()), null),
+                openShell = false,
+            )
+        }
+        // Host-key confirmation still happens before authentication.
+        val request = withTimeout(5_000) { session.hostKeyRequest.filterNotNull().first() }
+        assertEquals(HostKeySubject.TARGET, request.subject)
+        session.respondToHostKey(true)
+        withTimeout(10_000) { connection.await() }
+        assertTrue("expected Error, got ${session.state.value}", session.state.value is ConnectionState.Error)
+    }
+
+    private suspend fun connectExpectingNoHostKeyPrompt(
+        session: SshSession,
+        dao: KnownHostDao,
+    ) = coroutineScope {
+        val connection = async {
+            session.connect(
+                SshRoute(profile(), null),
+                RouteCredentials(Credential.Password("secret".toCharArray()), null),
+                openShell = false,
+            )
+        }
+        // A matching known host must not surface a second host-key prompt.
+        val unexpectedPrompt = withTimeoutOrNull(1_000) {
+            session.hostKeyRequest.filterNotNull().first()
+        }
+        assertEquals(null, unexpectedPrompt)
+        withTimeout(10_000) { connection.await() }
+        assertTrue("expected Connected, got ${session.state.value}", session.state.value is ConnectionState.Connected)
+        assertTrue("known host must be stored", dao.find("127.0.0.1", server.port) != null)
+    }
+
+    @Test
+    fun wrongPasswordFailsAfterSingleAuthenticationAttempt() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        try {
+            connectWithPasswordAndExpectError(session, "wrong-password")
+            assertEquals("wrong password must be tried exactly once", 1, passwordAttempts.get())
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
+    fun acceptedHostKeyIsReusedWithoutSecondPrompt() = runBlocking {
+        val dao = MemoryKnownHostDao()
+        val first = createSession(dao)
+        try {
+            connectAndConfirm(first, openShell = false)
+            first.disconnect()
+        } finally {
+            first.close()
+        }
+
+        val second = createSession(dao)
+        try {
+            connectExpectingNoHostKeyPrompt(second, dao)
+        } finally {
+            second.close()
+        }
+    }
+
 
     protected class MemoryKnownHostDao : KnownHostDao {
         private var value: KnownHostEntity? = null
