@@ -31,3 +31,8 @@ compile_and_run runtime \
 compile_and_run socket \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_socket_test.cpp"
+
+compile_and_run http_proxy \
+    "$project_dir/app/src/main/cpp/ssh/ssh_http_proxy.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_http_proxy_test.cpp"
