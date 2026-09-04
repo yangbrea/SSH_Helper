@@ -48,6 +48,7 @@ jobs:
       - name: Run host and JVM tests
         run: |
           ./scripts/run-ghostty-host-tests.sh
+          ./scripts/run-ssh-native-host-tests.sh
           ./gradlew testDebugUnitTest
 
       - name: Lint and build all APKs without devices

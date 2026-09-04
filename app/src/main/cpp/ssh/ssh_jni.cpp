@@ -139,10 +139,12 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeClose(
         return;
     }
     try {
-        // Removing the shared_ptr from the registry is the only close action
-        // in this lifecycle smoke step; later steps will stop the event loop,
-        // close channels/SFTP and tear down the libssh2 session in RAII order.
-        gSshRegistry.remove(handle);
+        // Stop the owner event loop, run already-queued work, then drop the
+        // registry reference. Repeated/unknown/0 handles remain safe no-ops.
+        auto removed = gSshRegistry.remove(handle);
+        if (removed) {
+            removed->shutdown();
+        }
     } catch (...) {
         throwIllegalState(env, "nativeClose failed");
     }
