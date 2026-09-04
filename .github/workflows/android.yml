@@ -40,6 +40,11 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
         run: ./scripts/build-libghostty-android.sh
 
+      - name: Build pinned OpenSSL/libssh2
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
+        run: ./scripts/build-libssh2-android.sh
+
       - name: Run host and JVM tests
         run: |
           ./scripts/run-ghostty-host-tests.sh
@@ -49,4 +54,6 @@ jobs:
         run: ./gradlew lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
 
       - name: Verify packaged JNI libraries
-        run: ./scripts/verify-ghostty-packaging.sh
+        run: |
+          ./scripts/verify-ghostty-packaging.sh
+          ./scripts/verify-ssh-native-packaging.sh

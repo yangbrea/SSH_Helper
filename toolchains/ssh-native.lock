@@ -1,0 +1,10 @@
+# libssh2 + OpenSSL Android build lock.
+# Any upgrade must change exactly one field per commit and update hashes/tests.
+openssl_version=3.5.8
+openssl_sha256=a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
+libssh2_commit=8e181e7a8e2ded832be63d2e0749d8ff8dc26cd6
+android_ndk_version=29.0.14206865
+android_api=26
+abis=arm64-v8a,x86_64
+crypto_backend=openssl
+legacy_algorithms=false

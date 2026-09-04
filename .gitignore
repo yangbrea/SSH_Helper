@@ -21,6 +21,9 @@ build-*.log
 /.zig-cache-global/
 /.zig-cache/
 
+# libssh2/OpenSSL migration generated directories (sources, objects, archives)
+/app/build/ssh-native/
+
 # Debug keystore is intentionally not committed; missing file falls back to AGP default.
 /keystore/
 
