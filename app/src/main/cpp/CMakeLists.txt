@@ -50,6 +50,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_http_proxy.cpp
     ssh/ssh_jni.cpp
     ssh/ssh_runtime.cpp
+    ssh/ssh_socks5_proxy.cpp
     ssh/ssh_socket.cpp
 )
 
