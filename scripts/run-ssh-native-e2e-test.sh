@@ -14,7 +14,8 @@ fi
 test_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-e2e.XXXXXX")"
 port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-port.XXXXXX")"
 server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-server-err.XXXXXX")"
-trap 'rm -f "$test_binary" "$port_file" "$server_err"' EXIT
+key_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-key.XXXXXX")"
+trap 'rm -f "$test_binary" "$port_file" "$server_err" "$key_file"' EXIT
 
 "${CXX:-c++}" \
     -std=c++17 \
@@ -31,7 +32,7 @@ trap 'rm -f "$test_binary" "$port_file" "$server_err"' EXIT
 
 python3 "$project_dir/scripts/ssh-native-test-server.py" >"$port_file" 2>"$server_err" &
 server_pid=$!
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$port_file" "$server_err"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$port_file" "$server_err" "$key_file"' EXIT
 
 for _ in $(seq 1 50); do
     if [[ -s "$port_file" ]]; then
@@ -47,5 +48,11 @@ if [[ ! -s "$port_file" ]]; then
 fi
 
 port="$(head -1 "$port_file")"
-"$test_binary" "$port"
+python3 - "$key_file" <<'PY'
+import sys
+import asyncssh
+key = asyncssh.generate_private_key("ssh-ed25519")
+key.write_private_key(sys.argv[1])
+PY
+"$test_binary" "$port" "$key_file"
 echo "[ssh-native] e2e passed"

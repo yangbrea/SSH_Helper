@@ -58,6 +58,23 @@ bool Libssh2Session::passwordAuth(
 }
 
 
+
+bool Libssh2Session::publicKeyAuth(
+    const std::string& username,
+    const std::string& private_key,
+    const std::string& passphrase) {
+    const int result = libssh2_userauth_publickey_frommemory(
+        session_,
+        username.c_str(),
+        username.size(),
+        nullptr,
+        0,
+        private_key.data(),
+        private_key.size(),
+        passphrase.empty() ? nullptr : passphrase.c_str());
+    return result == 0;
+}
+
 std::vector<uint8_t> Libssh2Session::hostKey() {
     size_t length = 0;
     int type = 0;

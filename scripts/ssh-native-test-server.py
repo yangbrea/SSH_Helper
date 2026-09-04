@@ -31,6 +31,12 @@ class Server(asyncssh.SSHServer):
     def validate_password(self, username, password):
         return username == "test" and password == "secret"
 
+    def public_key_auth_supported(self):
+        return True
+
+    def validate_public_key(self, username, key):
+        return username == "test"
+
     def session_requested(self):
         return ExecSession()
 

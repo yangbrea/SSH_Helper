@@ -4,12 +4,20 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 int main(int argc, char** argv) {
-    if (argc != 2) return 64;
+    if (argc != 3) return 64;
     const int port = std::atoi(argv[1]);
+    std::ifstream key_file(argv[2], std::ios::binary);
+    if (!key_file) return 65;
+    std::ostringstream key_buffer;
+    key_buffer << key_file.rdbuf();
+    const std::string private_key = key_buffer.str();
+
     const int fd = sshnative::connectTcp(
         "127.0.0.1",
         static_cast<uint16_t>(port),
@@ -17,7 +25,7 @@ int main(int argc, char** argv) {
     sshnative::Libssh2Session session;
     session.setBlocking(true);
     session.handshake(fd);
-    if (!session.passwordAuth("test", "secret")) {
+    if (!session.publicKeyAuth("test", private_key, "")) {
         return 2;
     }
     const auto key = session.hostKey();

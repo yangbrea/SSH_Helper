@@ -29,6 +29,13 @@ public:
     // Perform blocking password authentication. Returns true on success.
     bool passwordAuth(const std::string& username, const std::string& password);
 
+    // Perform blocking public-key authentication from an in-memory OpenSSH/PEM
+    // private key. Passphrase may be empty for unencrypted keys.
+    bool publicKeyAuth(
+        const std::string& username,
+        const std::string& private_key,
+        const std::string& passphrase);
+
     // After a successful handshake, return the server host key blob.
     std::vector<uint8_t> hostKey();
 
