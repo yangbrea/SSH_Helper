@@ -24,9 +24,34 @@ compile_and_run() {
     echo "[ssh-native] $name passed"
 }
 
+compile_and_run_libssh2() {
+    local name="$1"
+    shift
+    local test_binary
+    test_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-$name.XXXXXX")"
+    trap 'rm -f "$test_binary"' RETURN
+
+    "${CXX:-c++}" \
+        -std=c++17 \
+        -pthread \
+        -Wall \
+        -Wextra \
+        -Werror \
+        -I"$project_dir/app/src/main/cpp" \
+        "$@" \
+        -lssh2 \
+        -o "$test_binary"
+    "$test_binary"
+    echo "[ssh-native] $name passed"
+}
+
 compile_and_run algorithm_policy \
     "$project_dir/app/src/main/cpp/ssh/ssh_algorithm_policy.cpp" \
     "$project_dir/app/src/test/cpp/ssh_algorithm_policy_test.cpp"
+
+compile_and_run_libssh2 libssh2_lifecycle \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_libssh2_test.cpp"
 
 compile_and_run runtime \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
