@@ -24,6 +24,10 @@ compile_and_run() {
     echo "[ssh-native] $name passed"
 }
 
+compile_and_run algorithm_policy \
+    "$project_dir/app/src/main/cpp/ssh/ssh_algorithm_policy.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_algorithm_policy_test.cpp"
+
 compile_and_run runtime \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_test.cpp"

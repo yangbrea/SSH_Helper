@@ -46,6 +46,7 @@ if(NOT EXISTS "${LIBSSH2_STATIC_LIB}" OR NOT EXISTS "${LIBCRYPTO_STATIC_LIB}")
 endif()
 
 add_library(sshhelper_ssh SHARED
+    ssh/ssh_algorithm_policy.cpp
     ssh/ssh_error.cpp
     ssh/ssh_http_proxy.cpp
     ssh/ssh_jni.cpp
