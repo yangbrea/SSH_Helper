@@ -9,8 +9,11 @@ import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.RouteCredentials
+import com.yang136.sshhelper.ssh.SftpCapableSession
 import com.yang136.sshhelper.ssh.SshRoute
 import com.yang136.sshhelper.ssh.SshSession
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
@@ -27,7 +30,9 @@ import org.apache.sshd.server.auth.password.PasswordAuthenticator
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider
 import org.apache.sshd.server.shell.ProcessShellCommandFactory
 import org.apache.sshd.server.shell.ProcessShellFactory
+import org.apache.sshd.sftp.server.SftpSubsystemFactory
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -59,6 +64,8 @@ abstract class SshBackendContractTest {
             }
             shellFactory = ProcessShellFactory("/bin/sh -i", listOf("/bin/sh", "-i"))
             commandFactory = ProcessShellCommandFactory.INSTANCE
+            subsystemFactories = listOf(SftpSubsystemFactory.Builder().build())
+            fileSystemFactory = org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory(root)
             start()
         }
     }
@@ -237,6 +244,31 @@ abstract class SshBackendContractTest {
             withTimeout(10_000) { connection.await() }
             assertTrue("expected Error, got ${session.state.value}", session.state.value is ConnectionState.Error)
             assertEquals(HostKeyIssue.CHANGED, session.hostKeyRequest.value?.issue)
+        } finally {
+            session.close()
+        }
+    }
+
+
+    @Test
+    fun sftpLifecycleThroughBackendNeutralSession() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        val sftpCapable = session as? SftpCapableSession
+            ?: error("contract backend must implement SftpCapableSession")
+        try {
+            connectAndConfirm(session, openShell = false)
+            val sftp = sftpCapable.openSftpClient()
+            try {
+                val payload = "sftp-contract-data".encodeToByteArray()
+                sftp.upload(ByteArrayInputStream(payload), "contract.bin")
+                assertTrue(sftp.list(".").any { it.name == "contract.bin" })
+                val downloaded = ByteArrayOutputStream()
+                sftp.download("contract.bin", downloaded)
+                assertArrayEquals(payload, downloaded.toByteArray())
+                sftp.delete("contract.bin")
+            } finally {
+                sftp.close()
+            }
         } finally {
             session.close()
         }
