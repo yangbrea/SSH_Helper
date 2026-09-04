@@ -52,7 +52,7 @@ python3 - "$key_file" <<'PY'
 import sys
 import asyncssh
 key = asyncssh.generate_private_key("ssh-ed25519")
-key.write_private_key(sys.argv[1])
+key.write_private_key(sys.argv[1], passphrase="secret")
 PY
 "$test_binary" "$port" "$key_file"
 echo "[ssh-native] e2e passed"

@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     sshnative::Libssh2Session session;
     session.setBlocking(true);
     session.handshake(fd);
-    if (!session.publicKeyAuth("test", private_key, "")) {
+    if (!session.publicKeyAuth("test", private_key, "secret")) {
         return 2;
     }
     const auto key = session.hostKey();
