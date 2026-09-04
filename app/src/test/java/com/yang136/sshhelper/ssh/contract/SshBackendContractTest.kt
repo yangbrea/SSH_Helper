@@ -20,6 +20,7 @@ import com.yang136.sshhelper.ssh.SshSession
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
@@ -316,6 +317,59 @@ abstract class SshBackendContractTest {
 
 
     @Test
+    fun remoteForwardExposesServerSideListener() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        val forwardCapable = session as? PortForwardCapableSession
+            ?: error("contract backend must implement PortForwardCapableSession")
+        val echo = EchoServer()
+        try {
+            connectAndConfirm(session, openShell = false)
+            val remotePort = 19000 + (Math.random() * 1000).toInt()
+            val handle = forwardCapable.registerForward(
+                ForwardRequest(ForwardType.REMOTE, "127.0.0.1", remotePort, "127.0.0.1", echo.port),
+            )
+            try {
+                Socket("127.0.0.1", remotePort).use { socket ->
+                    echoRoundTrip(socket, "remote-forward-contract")
+                }
+            } finally {
+                handle.close()
+                handle.close()
+            }
+        } finally {
+            echo.close()
+            session.close()
+        }
+    }
+
+    @Test
+    fun dynamicSocks5ConnectsThroughBackendNeutralSession() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        val forwardCapable = session as? PortForwardCapableSession
+            ?: error("contract backend must implement PortForwardCapableSession")
+        val echo = EchoServer()
+        try {
+            connectAndConfirm(session, openShell = false)
+            val handle = forwardCapable.registerForward(
+                ForwardRequest(ForwardType.DYNAMIC, "127.0.0.1", 0, null, null),
+            )
+            try {
+                Socket("127.0.0.1", handle.actualListenPort).use { socket ->
+                    socksConnect(socket, "127.0.0.1", echo.port)
+                    echoRoundTrip(socket, "dynamic-socks-contract")
+                }
+            } finally {
+                handle.close()
+                handle.close()
+            }
+        } finally {
+            echo.close()
+            session.close()
+        }
+    }
+
+
+    @Test
     fun localForwardRoundTripsThroughBackendNeutralSession() = runBlocking {
         val session = createSession(MemoryKnownHostDao())
         val forwardCapable = session as? PortForwardCapableSession
@@ -345,6 +399,35 @@ abstract class SshBackendContractTest {
         }
     }
 
+
+
+    private fun echoRoundTrip(socket: Socket, payload: String) {
+        val bytes = payload.encodeToByteArray()
+        socket.getOutputStream().write(bytes)
+        socket.getOutputStream().flush()
+        val reply = ByteArray(bytes.size)
+        DataInputStream(socket.getInputStream()).readFully(reply)
+        assertArrayEquals(bytes, reply)
+    }
+
+    private fun socksConnect(socket: Socket, host: String, port: Int): DataOutputStream {
+        val output = DataOutputStream(socket.getOutputStream())
+        val input = DataInputStream(socket.getInputStream())
+        output.writeByte(0x05); output.writeByte(0x01); output.writeByte(0x00); output.flush()
+        assertEquals(0x05, input.readUnsignedByte())
+        assertEquals(0x00, input.readUnsignedByte())
+        output.writeByte(0x05); output.writeByte(0x01); output.writeByte(0x00) // CONNECT
+        output.writeByte(0x01) // IPv4
+        host.split(".").forEach { output.writeByte(it.toInt()) }
+        output.writeShort(port); output.flush()
+        assertEquals(0x05, input.readUnsignedByte())
+        assertEquals(0x00, input.readUnsignedByte())
+        input.readUnsignedByte() // RSV
+        input.readUnsignedByte() // ATYP
+        val bound = ByteArray(4); input.readFully(bound)
+        input.readUnsignedShort()
+        return output
+    }
 
 
     protected class MemoryKnownHostDao(initial: KnownHostEntity? = null) : KnownHostDao {
