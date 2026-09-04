@@ -55,4 +55,23 @@ key = asyncssh.generate_private_key("ssh-ed25519")
 key.write_private_key(sys.argv[1], passphrase="secret")
 PY
 "$test_binary" "$port" "$key_file"
+
+gate_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-gate.XXXXXX")"
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$port_file" "$server_err" "$key_file"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_blocking_connection.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_blocking_connection_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$gate_binary"
+"$gate_binary" "$port"
 echo "[ssh-native] e2e passed"

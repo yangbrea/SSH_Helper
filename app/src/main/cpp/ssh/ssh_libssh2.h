@@ -36,8 +36,9 @@ public:
         const std::string& private_key,
         const std::string& passphrase);
 
-    // After a successful handshake, return the server host key blob.
-    std::vector<uint8_t> hostKey();
+    // After a successful handshake, return the server host key blob. When
+    // type_out is non-null it receives the libssh2 host-key type constant.
+    std::vector<uint8_t> hostKey(int* type_out = nullptr);
 
     // Execute a command in blocking mode and return its exit status.
     int execCommand(const std::string& command, std::string& output);

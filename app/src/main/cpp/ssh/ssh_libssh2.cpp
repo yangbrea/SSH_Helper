@@ -75,12 +75,15 @@ bool Libssh2Session::publicKeyAuth(
     return result == 0;
 }
 
-std::vector<uint8_t> Libssh2Session::hostKey() {
+std::vector<uint8_t> Libssh2Session::hostKey(int* type_out) {
     size_t length = 0;
     int type = 0;
     const char* key = libssh2_session_hostkey(session_, &length, &type);
     if (key == nullptr) {
         throw std::runtime_error("libssh2_session_hostkey failed");
+    }
+    if (type_out != nullptr) {
+        *type_out = type;
     }
     return std::vector<uint8_t>(key, key + length);
 }

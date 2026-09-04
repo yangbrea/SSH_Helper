@@ -50,17 +50,33 @@ std::string hostKeySha256Fingerprint(const std::vector<uint8_t>& key_blob) {
     return "SHA256:" + base64EncodeNoPadding(digest.data(), digest.size());
 }
 
+std::string hostKeyBase64(const std::vector<uint8_t>& key_blob) {
+    if (key_blob.empty()) return std::string();
+    std::string output(((key_blob.size() + 2) / 3) * 4, '\0');
+    const int encoded = EVP_EncodeBlock(
+        reinterpret_cast<unsigned char*>(&output[0]),
+        key_blob.data(),
+        static_cast<int>(key_blob.size()));
+    if (encoded <= 0) return std::string();
+    output.resize(static_cast<size_t>(encoded));
+    return output;
+}
+
 std::string hostKeyTypeName(int type) {
     switch (type) {
         case 0:
             return "unknown";
         case 1:
-            return "rsa-sha2-256/512";
+            return "ssh-rsa";
         case 2:
             return "ssh-dss";
         case 3:
             return "ecdsa-sha2-nistp256";
         case 4:
+            return "ecdsa-sha2-nistp384";
+        case 5:
+            return "ecdsa-sha2-nistp521";
+        case 6:
             return "ssh-ed25519";
         default:
             return "unknown";

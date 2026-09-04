@@ -12,7 +12,13 @@ int main() {
     assert(fingerprint.rfind("SHA256:", 0) == 0);
     assert(fingerprint.size() > 7);
 
-    assert(hostKeyTypeName(1).find("rsa") != std::string::npos);
+    const std::string base64 = hostKeyBase64(blob);
+    assert(base64.size() > 0);
+    assert(base64.find('=') == std::string::npos || base64.size() % 4 == 0);
+
+    assert(hostKeyTypeName(1) == "ssh-rsa");
     assert(hostKeyTypeName(2) == "ssh-dss");
-    assert(hostKeyTypeName(4) == "ssh-ed25519");
+    assert(hostKeyTypeName(4) == "ecdsa-sha2-nistp384");
+    assert(hostKeyTypeName(5) == "ecdsa-sha2-nistp521");
+    assert(hostKeyTypeName(6) == "ssh-ed25519");
 }
