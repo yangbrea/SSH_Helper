@@ -3,6 +3,7 @@
 #include <libssh2.h>
 
 #include <string>
+#include <vector>
 
 namespace sshnative {
 
@@ -27,6 +28,12 @@ public:
 
     // Perform blocking password authentication. Returns true on success.
     bool passwordAuth(const std::string& username, const std::string& password);
+
+    // After a successful handshake, return the server host key blob.
+    std::vector<uint8_t> hostKey();
+
+    // Execute a command in blocking mode and return its exit status.
+    int execCommand(const std::string& command, std::string& output);
 
     static std::string libraryVersion();
 

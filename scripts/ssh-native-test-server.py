@@ -1,11 +1,24 @@
 #!/usr/bin/env python3
 """AsyncSSH test server used by ssh-native E2E host tests.
 
-Prints the chosen listening port on stdout and runs until terminated.
+Supports password auth and a single exec command that prints
+"native-exec-ok" and exits 0. Prints the listening port on stdout.
 """
 import asyncio
 import asyncssh
 import sys
+
+
+class ExecSession(asyncssh.SSHServerSession):
+    def connection_made(self, chan):
+        self._chan = chan
+
+    def exec_requested(self, command):
+        return True
+
+    def session_started(self):
+        self._chan.write("native-exec-ok")
+        self._chan.exit(0)
 
 
 class Server(asyncssh.SSHServer):
@@ -17,6 +30,9 @@ class Server(asyncssh.SSHServer):
 
     def validate_password(self, username, password):
         return username == "test" and password == "secret"
+
+    def session_requested(self):
+        return ExecSession()
 
 
 async def main():

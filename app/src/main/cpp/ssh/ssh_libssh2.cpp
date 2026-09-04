@@ -57,6 +57,47 @@ bool Libssh2Session::passwordAuth(
         session_, username.c_str(), password.c_str()) == 0;
 }
 
+
+std::vector<uint8_t> Libssh2Session::hostKey() {
+    size_t length = 0;
+    int type = 0;
+    const char* key = libssh2_session_hostkey(session_, &length, &type);
+    if (key == nullptr) {
+        throw std::runtime_error("libssh2_session_hostkey failed");
+    }
+    return std::vector<uint8_t>(key, key + length);
+}
+
+int Libssh2Session::execCommand(const std::string& command, std::string& output) {
+    LIBSSH2_CHANNEL* channel = libssh2_channel_open_session(session_);
+    if (channel == nullptr) {
+        throw std::runtime_error("libssh2_channel_open_session failed");
+    }
+    const int exec_result = libssh2_channel_exec(channel, command.c_str());
+    if (exec_result != 0) {
+        libssh2_channel_free(channel);
+        throw std::runtime_error("libssh2_channel_exec failed");
+    }
+
+    output.clear();
+    char buffer[4096];
+    while (true) {
+        const ssize_t count = libssh2_channel_read(channel, buffer, sizeof(buffer));
+        if (count > 0) {
+            output.append(buffer, static_cast<size_t>(count));
+            continue;
+        }
+        if (count == LIBSSH2_ERROR_EAGAIN) {
+            continue;
+        }
+        break;
+    }
+    const int exit_status = libssh2_channel_get_exit_status(channel);
+    libssh2_channel_close(channel);
+    libssh2_channel_free(channel);
+    return exit_status;
+}
+
 std::string Libssh2Session::libraryVersion() {
     const char* version = libssh2_version(0);
     return version == nullptr ? std::string() : std::string(version);
