@@ -41,3 +41,10 @@ compile_and_run socks5_proxy \
     "$project_dir/app/src/main/cpp/ssh/ssh_socks5_proxy.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_socks5_proxy_test.cpp"
+
+compile_and_run transport \
+    "$project_dir/app/src/main/cpp/ssh/ssh_transport.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_http_proxy.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socks5_proxy.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_transport_test.cpp"

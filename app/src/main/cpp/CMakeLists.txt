@@ -52,6 +52,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_runtime.cpp
     ssh/ssh_socks5_proxy.cpp
     ssh/ssh_socket.cpp
+    ssh/ssh_transport.cpp
 )
 
 target_include_directories(sshhelper_ssh PRIVATE
