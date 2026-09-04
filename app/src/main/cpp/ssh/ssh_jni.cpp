@@ -17,7 +17,9 @@
 
 #include "../handle_registry.h"
 #include "ssh_error.h"
+#include "ssh_libssh2.h"
 #include "ssh_runtime.h"
+#include "ssh_socket.h"
 
 namespace {
 
@@ -69,8 +71,72 @@ std::string capabilitiesString() {
 
 } // namespace
 
+
+namespace {
+
+std::string jstringToString(JNIEnv* env, jstring value) {
+    if (value == nullptr) return std::string();
+    const char* chars = env->GetStringUTFChars(value, nullptr);
+    if (chars == nullptr) return std::string();
+    std::string result(chars);
+    env->ReleaseStringUTFChars(value, chars);
+    return result;
+}
+
+} // namespace
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* /* vm */, void* /* reserved */) {
     return JNI_VERSION_1_6;
+}
+
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeConnectExec(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jstring jhost,
+    jint jport,
+    jstring jusername,
+    jstring jpassword,
+    jstring jcommand) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        const std::string command = jstringToString(env, jcommand);
+        if (host.empty() || username.empty() || password.empty() || command.empty()) {
+            throw std::invalid_argument("host/username/password/command must not be empty");
+        }
+        if (jport <= 0 || jport > 65535) {
+            throw std::invalid_argument("port out of range");
+        }
+
+        const int fd = sshnative::connectTcp(host, static_cast<uint16_t>(jport), std::chrono::seconds(10));
+        sshnative::Libssh2Session session;
+        session.setBlocking(true);
+        session.handshake(fd);
+        const bool authed = session.passwordAuth(username, password);
+        if (!authed) {
+            sshnative::closeFd(fd);
+            throw std::runtime_error("SSH authentication failed");
+        }
+        std::string output;
+        const int exit_code = session.execCommand(command, output);
+        sshnative::closeFd(fd);
+        const std::string result = "exit=" + std::to_string(exit_code) + "\n" + output;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeConnectExec failed");
+        return nullptr;
+    }
 }
 
 extern "C" JNIEXPORT jstring JNICALL

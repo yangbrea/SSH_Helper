@@ -23,4 +23,17 @@ object NativeSshBridge {
 
     /** Closes a native SSH runtime handle; 0, repeated and unknown IDs are safe. */
     external fun nativeClose(handle: Long)
+
+    /**
+     * Synchronous direct-connection POC: connect, SSH handshake, password auth,
+     * run one command and return "exit=N\n" + stdout. Later steps will replace
+     * this with event-loop driven commands and route/proxy support.
+     */
+    external fun nativeConnectExec(
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        command: String,
+    ): String
 }
