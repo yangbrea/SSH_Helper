@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets
 /**
  * Cell style flags produced by nativeRenderSnapshot.
  */
-internal const val SNAPSHOT_VERSION = 3
+internal const val SNAPSHOT_VERSION = 4
 
 internal const val SNAPSHOT_DIRTY_NONE = 0
 internal const val SNAPSHOT_DIRTY_PARTIAL = 1
@@ -25,10 +25,18 @@ internal const val CELL_FLAG_OVERLINE = 1 shl 6
 internal const val CELL_FLAG_INVISIBLE = 1 shl 7
 internal const val CELL_FLAG_WIDE = 1 shl 8
 internal const val CELL_FLAG_WIDE_TAIL = 1 shl 9
+internal const val CELL_FLAG_BLINK = 1 shl 13
+
+internal data class GhosttySearchRange(
+    val startCol: Int,
+    val endCol: Int,
+    val active: Boolean,
+)
 
 internal data class GhosttyRenderCell(
     val fgArgb: Int,
     val bgArgb: Int,
+    val underlineArgb: Int = fgArgb,
     val flags: Int,
     val text: String,
     val selected: Boolean = false,
@@ -45,11 +53,15 @@ internal data class GhosttyRenderCell(
     val invisible: Boolean get() = flags and CELL_FLAG_INVISIBLE != 0
     val wide: Boolean get() = flags and CELL_FLAG_WIDE != 0
     val wideTail: Boolean get() = flags and CELL_FLAG_WIDE_TAIL != 0
+    val blink: Boolean get() = flags and CELL_FLAG_BLINK != 0
 }
 
 internal data class GhosttyRenderRow(
     val rowIndex: Int,
     val cells: List<GhosttyRenderCell>,
+    val wrap: Boolean = false,
+    val wrapContinuation: Boolean = false,
+    val searchRanges: List<GhosttySearchRange> = emptyList(),
 )
 
 internal data class GhosttyRenderSnapshot(
@@ -80,6 +92,7 @@ internal object RenderSnapshotDecoder {
     private const val HEADER_INTS = 14
 
     fun decode(buffer: ByteBuffer, byteCount: Int): GhosttyRenderSnapshot? {
+        if (byteCount < 0 || byteCount > buffer.capacity()) return null
         if (byteCount < HEADER_INTS * Int.SIZE_BYTES) return null
         val originalOrder = buffer.order()
         val originalLimit = buffer.limit()
@@ -103,23 +116,41 @@ internal object RenderSnapshotDecoder {
             val generation = buffer.int
             val cursorArgb = buffer.int
 
-            if (version != SNAPSHOT_VERSION) return null
-            if (rowCount < 0) return null
+            if (version != SNAPSHOT_VERSION || dirtyKind !in 0..2) return null
+            if (cols !in 1..MAX_GRID_DIMENSION || rows !in 1..MAX_GRID_DIMENSION ||
+                rowCount !in 0..rows
+            ) return null
 
             val rowsData = ArrayList<GhosttyRenderRow>(rowCount)
             repeat(rowCount) {
-                if (buffer.remaining() < Int.SIZE_BYTES * 4) return null
+                if (buffer.remaining() < Int.SIZE_BYTES * 7) return null
                 val rowIndex = buffer.int
                 val selectionStartX = buffer.int
                 val selectionEndX = buffer.int
+                val wrap = buffer.int != 0
+                val wrapContinuation = buffer.int != 0
+                val searchRangeCount = buffer.int
                 val cellCount = buffer.int
-                if (cellCount < 0 || cellCount > cols * 4) return null
+                if (cols <= 0 || rows <= 0 || rowIndex !in 0 until rows) return null
+                if (cellCount < 0 || cellCount > cols) return null
+                if (searchRangeCount < 0 || searchRangeCount > cols) return null
+
+                val searchRanges = ArrayList<GhosttySearchRange>(searchRangeCount)
+                repeat(searchRangeCount) {
+                    if (buffer.remaining() < Int.SIZE_BYTES * 3) return null
+                    val start = buffer.int
+                    val end = buffer.int
+                    val active = buffer.int != 0
+                    if (start !in 0 until cols || end !in start until cols) return null
+                    searchRanges += GhosttySearchRange(start, end, active)
+                }
 
                 val cells = ArrayList<GhosttyRenderCell>(cellCount)
                 repeat(cellCount) {
-                    if (buffer.remaining() < Int.SIZE_BYTES * 2 + Short.SIZE_BYTES * 2) return null
+                    if (buffer.remaining() < Int.SIZE_BYTES * 3 + Short.SIZE_BYTES * 2) return null
                     val fgArgb = buffer.int
                     val bgArgb = buffer.int
+                    val underlineArgb = buffer.int
                     val flags = buffer.short.toInt() and 0xFFFF
                     val textLength = buffer.short.toInt() and 0xFFFF
                     if (textLength < 0 || buffer.remaining() < textLength) return null
@@ -130,6 +161,7 @@ internal object RenderSnapshotDecoder {
                     cells += GhosttyRenderCell(
                         fgArgb = fgArgb,
                         bgArgb = bgArgb,
+                        underlineArgb = underlineArgb,
                         flags = flags,
                         text = text,
                         selected = selectionStartX >= 0 &&
@@ -137,7 +169,13 @@ internal object RenderSnapshotDecoder {
                             column in selectionStartX..selectionEndX,
                     )
                 }
-                rowsData += GhosttyRenderRow(rowIndex = rowIndex, cells = cells)
+                rowsData += GhosttyRenderRow(
+                    rowIndex = rowIndex,
+                    cells = cells,
+                    wrap = wrap,
+                    wrapContinuation = wrapContinuation,
+                    searchRanges = searchRanges,
+                )
             }
 
             return GhosttyRenderSnapshot(
@@ -161,4 +199,6 @@ internal object RenderSnapshotDecoder {
             buffer.limit(originalLimit)
         }
     }
+
+    private const val MAX_GRID_DIMENSION = 65_535
 }

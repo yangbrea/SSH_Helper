@@ -35,4 +35,15 @@ class TerminalReplayBufferTest {
         assertEquals(10, snapshot.size)
         assertEquals("\u001bc89ABCDEF", snapshot.decodeToString())
     }
+
+    @Test
+    fun explicitReattachBoundaryDropsAllPreviousOutput() {
+        val buffer = TerminalReplayBuffer(32)
+        buffer.append("old scrollback".encodeToByteArray())
+
+        buffer.clear()
+        buffer.append("restored screen".encodeToByteArray())
+
+        assertEquals("restored screen", buffer.snapshot().decodeToString())
+    }
 }

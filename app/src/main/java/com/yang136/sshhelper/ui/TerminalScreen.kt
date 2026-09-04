@@ -23,6 +23,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -133,6 +134,7 @@ import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeyRequest
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ssh.MultiplexerSessionState
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
@@ -141,6 +143,7 @@ import com.yang136.sshhelper.settings.ExtraKeyId
 import com.yang136.sshhelper.settings.effectiveTerminalBackgroundOpacity
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
+import com.yang136.sshhelper.ssh.SessionKind
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
@@ -217,10 +220,35 @@ fun TerminalScreen(
     var sessionLimitReached by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
     var aiHidden by rememberSaveable { mutableStateOf(false) }
+    var remoteTitle by remember { mutableStateOf("") }
+    var remoteWorkingDirectory by remember { mutableStateOf("") }
+    var persistentDialogVisible by remember { mutableStateOf(false) }
+    var deleteRemoteSessionName by remember { mutableStateOf<String?>(null) }
+    var showNewSessionDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
             activeId = hostSessions.first().id
+        }
+    }
+    LaunchedEffect(activeId, controller) {
+        remoteTitle = ""
+        remoteWorkingDirectory = ""
+    }
+    LaunchedEffect(activeId, current?.multiplexerState, current?.connection) {
+        val actionable = when (current?.multiplexerState) {
+            MultiplexerSessionState.Checking,
+            is MultiplexerSessionState.AwaitingSelection,
+            is MultiplexerSessionState.FallbackPrompt,
+            is MultiplexerSessionState.RecoveryRequired -> true
+            else -> false
+        }
+        if (current?.connection is ConnectionState.Connected && actionable) {
+            persistentDialogVisible = true
+        } else if (current?.multiplexerState is MultiplexerSessionState.Opening ||
+            current?.multiplexerState is MultiplexerSessionState.Active
+        ) {
+            persistentDialogVisible = false
         }
     }
     // The frontend is replaced when the rollout backend changes. Keying this
@@ -235,7 +263,7 @@ fun TerminalScreen(
             when (event) {
                 is TerminalOutputEvent.Snapshot -> {
                     if (event.sequence >= lastSequence) {
-                        controller.write(event.bytes)
+                        controller.restore(event.bytes)
                         lastSequence = event.sequence
                     }
                 }
@@ -244,6 +272,10 @@ fun TerminalScreen(
                         controller.write(event.bytes)
                         lastSequence = event.sequence
                     }
+                }
+                is TerminalOutputEvent.Reset -> {
+                    controller.reset()
+                    lastSequence = event.sequence
                 }
             }
         }
@@ -270,6 +302,11 @@ fun TerminalScreen(
         controller.onOpenLink = { pendingLink = it }
         controller.onCtrlArmed = { ctrlArmed = it }
         controller.onRenderingDelayed = { renderingDelayed = it }
+        controller.onBell = {
+            (controller as? GhosttyTerminalFrontend)?.view?.performBellFeedback()
+        }
+        controller.onTitleChange = { remoteTitle = sanitizeTerminalMetadata(it) }
+        controller.onPwdChange = { remoteWorkingDirectory = displayTerminalWorkingDirectory(it) }
         onDispose {
             controller.onSelectionStateChanged = null
             controller.onCopied = null
@@ -277,6 +314,9 @@ fun TerminalScreen(
             controller.onOpenLink = null
             controller.onCtrlArmed = null
             controller.onRenderingDelayed = null
+            controller.onBell = null
+            controller.onTitleChange = null
+            controller.onPwdChange = null
             controller.close()
         }
     }
@@ -391,6 +431,11 @@ fun TerminalScreen(
                 renderingDelayed = renderingDelayed,
                 showMoreMenu = showMoreMenu,
                 terminalBackground = terminalContainerBackground,
+                remoteStatus = listOf(
+                    current?.remoteSessionName?.let { "${current.kind.name.lowercase()}:$it" },
+                    remoteTitle.takeIf(String::isNotBlank),
+                    remoteWorkingDirectory.takeIf(String::isNotBlank),
+                ).filterNotNull().joinToString(" · "),
                 statusBarHidden = isLandscape,
                 expandedWindow = adaptive.useTwoPane,
                 onBack = onBack,
@@ -403,9 +448,7 @@ fun TerminalScreen(
                     layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ClosePanel)
                 },
                 onNewSession = {
-                    val profile = current?.profile ?: return@LandscapeTerminalLayout
-                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
-                        ?: run { sessionLimitReached = true }
+                    if (current?.profile != null) showNewSessionDialog = true
                 },
                 onCloseSession = { closingSession = it },
                 onReconnect = sessionsViewModel::reconnect,
@@ -421,7 +464,7 @@ fun TerminalScreen(
                 onCopy = controller::copySelection,
                 onSelectAll = controller::selectAll,
                 onCancelSelection = controller::clearSelection,
-                onSendKey = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
+                onSendKey = controller::sendInput,
                 onShowKeyboard = controller::focusAndShowKeyboard,
                 onArmCtrl = controller::armCtrl,
                 onPaste = { controller.paste(context) },
@@ -429,6 +472,12 @@ fun TerminalScreen(
                 onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                 onFont = { showFontDialog = true },
                 onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                onPersistentSessions = {
+                    current?.let {
+                        persistentDialogVisible = true
+                        sessionsViewModel.refreshPersistentSessions(it.id)
+                    }
+                },
                 terminal = { modifier -> TerminalViewport(current, terminalContainerBackground, modifier, terminalSurface) },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -443,15 +492,16 @@ fun TerminalScreen(
                     Column {
                         SshTopAppBar(
                             title = current?.displayName ?: "SSH 终端",
-                            subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
+                            subtitle = terminalSubtitle(
+                                current?.connection ?: ConnectionState.Idle,
+                                current?.remoteSessionName,
+                                remoteTitle,
+                                remoteWorkingDirectory,
+                            ),
                             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                             actions = {
                                 IconButton(
-                                    onClick = {
-                                        val profile = current?.profile ?: return@IconButton
-                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
-                                            ?: run { sessionLimitReached = true }
-                                    },
+                                    onClick = { if (current?.profile != null) showNewSessionDialog = true },
                                     enabled = current != null,
                                 ) { Icon(Icons.Default.Add, "新建会话") }
                                 IconButton(onClick = { togglePanel(TerminalPanel.SEARCH) }) { Icon(Icons.Default.Search, "搜索") }
@@ -471,6 +521,13 @@ fun TerminalScreen(
                                         onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                                         onFont = { showFontDialog = true },
                                         onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                                        onPersistentSessions = {
+                                            current?.let {
+                                                persistentDialogVisible = true
+                                                sessionsViewModel.refreshPersistentSessions(it.id)
+                                            }
+                                        },
+                                        persistentEnabled = current?.kind != SessionKind.SSH,
                                         onToggleExtraKeys = ::toggleExtraKeys,
                                     )
                                 }
@@ -520,7 +577,7 @@ fun TerminalScreen(
                             )
                             TerminalPanel.SELECTION -> SelectionKeys(hasSelection, controller::copySelection, controller::selectAll, controller::clearSelection)
                             else -> if (!hasHwKeyboard || layoutState.extraKeysVisible) {
-                                ExtraKeys(settings.extraKeys, ctrlArmed, { sessionsViewModel.send(session.id, it) }, controller::focusAndShowKeyboard, controller::armCtrl)
+                                ExtraKeys(settings.extraKeys, ctrlArmed, controller::sendInput, controller::focusAndShowKeyboard, controller::armCtrl)
                             }
                         }
                     }
@@ -596,12 +653,70 @@ fun TerminalScreen(
         )
     }
 
+    if (persistentDialogVisible && current != null &&
+        current.kind != SessionKind.SSH
+    ) {
+        PersistentSessionDialog(
+            session = current,
+            onDismiss = { persistentDialogVisible = false },
+            onRefresh = { sessionsViewModel.refreshPersistentSessions(current.id) },
+            onAttach = { name ->
+                val alreadyOpen = hostSessions.firstOrNull { it.remoteSessionName == name }
+                if (alreadyOpen != null) activeId = alreadyOpen.id
+                else sessionsViewModel.attachPersistentSession(current.id, name)
+                persistentDialogVisible = false
+            },
+            onNew = { sessionsViewModel.createPersistentSession(current.id); persistentDialogVisible = false },
+            onDelete = { name -> deleteRemoteSessionName = name },
+            onFallback = { sessionsViewModel.fallbackToPlainShell(current.id); persistentDialogVisible = false },
+        )
+    }
+
+    deleteRemoteSessionName?.let { name ->
+        AlertDialog(
+            onDismissRequest = { deleteRemoteSessionName = null },
+            title = { Text("删除远端会话？") },
+            text = { Text("将终止远端会话 $name 及其中的程序，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    current?.let {
+                        sessionsViewModel.deletePersistentSession(it.id, name)
+                        persistentDialogVisible = true
+                    }
+                    deleteRemoteSessionName = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteRemoteSessionName = null }) { Text("取消") } },
+        )
+    }
+
+    if (showNewSessionDialog && current != null) {
+        SessionKindPickerDialog(
+            onDismiss = { showNewSessionDialog = false },
+            onConfirm = { kind ->
+                val profile = current.profile
+                showNewSessionDialog = false
+                val created = sessionsViewModel.create(profile, SessionFeature.SHELL, kind)
+                created?.let { activeId = it } ?: run { sessionLimitReached = true }
+            },
+        )
+    }
+
     closingSession?.let { id ->
-        val label = hostSessions.firstOrNull { it.id == id }?.displayName.orEmpty()
+        val closing = hostSessions.firstOrNull { it.id == id }
+        val label = closing?.displayName.orEmpty()
         AlertDialog(
             onDismissRequest = { closingSession = null },
             title = { Text("关闭会话？") },
-            text = { Text("将断开并关闭“$label”，终端输出也会被清除。") },
+            text = {
+                Text(
+                    if (closing?.remoteSessionName != null) {
+                        "将关闭本地标签并从 ${closing.remoteSessionName} 分离；远端会话及其中程序不会被终止。"
+                    } else {
+                        "将断开并关闭“$label”，终端输出也会被清除。"
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     closingSession = null
@@ -646,7 +761,7 @@ fun TerminalScreen(
             onDismissRequest = { immediateCommand = null },
             title = { Text("执行快捷命令？") },
             text = { Text(command, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) },
-            confirmButton = { TextButton(onClick = { activeId?.let { sessionsViewModel.send(it, (command + "\r").encodeToByteArray()) }; immediateCommand = null }) { Text("执行") } },
+            confirmButton = { TextButton(onClick = { controller.sendInput((command + "\r").encodeToByteArray()); immediateCommand = null }) { Text("执行") } },
             dismissButton = { TextButton(onClick = { immediateCommand = null }) { Text("取消") } },
         )
     }
@@ -680,6 +795,18 @@ private fun connectionLabel(state: ConnectionState): String = when (state) {
     is ConnectionState.Error -> "连接失败"
 }
 
+private fun terminalSubtitle(
+    state: ConnectionState,
+    remoteSessionName: String?,
+    remoteTitle: String,
+    remoteWorkingDirectory: String,
+): String = listOf(
+    connectionLabel(state),
+    remoteSessionName?.let { "持久会话 $it" },
+    remoteTitle.takeIf(String::isNotBlank),
+    remoteWorkingDirectory.takeIf(String::isNotBlank),
+).filterNotNull().joinToString(" · ")
+
 @Composable
 private fun TerminalViewport(
     current: ManagedSessionState?,
@@ -704,6 +831,99 @@ private fun TerminalViewport(
 }
 
 @Composable
+private fun PersistentSessionDialog(
+    session: ManagedSessionState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onAttach: (String) -> Unit,
+    onNew: () -> Unit,
+    onDelete: (String) -> Unit,
+    onFallback: () -> Unit,
+) {
+    val state = session.multiplexerState
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${session.kind.name.lowercase()} 持久会话") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (state) {
+                    MultiplexerSessionState.Checking -> Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(22.dp))
+                        Text("正在检查远端工具和会话…")
+                    }
+                    is MultiplexerSessionState.AwaitingSelection -> {
+                        state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (session.remoteSessions.isEmpty()) {
+                            Text("远端当前没有会话。")
+                        } else {
+                            Text("选择要附加的远端会话：")
+                            LazyColumn(
+                                Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(session.remoteSessions, key = { it.name }) { remote ->
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { onAttach(remote.name) },
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Text(
+                                                if (remote.attached) "${remote.name} · ${remote.attachedClients} 个客户端已连接"
+                                                else "${remote.name} · 未附加",
+                                            )
+                                        }
+                                        TextButton(onClick = { onDelete(remote.name) }) {
+                                            Text("删除", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    is MultiplexerSessionState.FallbackPrompt -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error)
+                        Text("普通 Shell 仅用于本次连接，不会修改主机配置。")
+                    }
+                    is MultiplexerSessionState.RecoveryRequired -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error)
+                        Text("SSH transport 仍保持连接。刷新后可选择其他远端会话。")
+                    }
+                    is MultiplexerSessionState.Opening -> Text(
+                        if (state.create) "正在新建 ${state.name}…" else "正在附加 ${state.name}…",
+                    )
+                    is MultiplexerSessionState.Active -> Text("当前已附加 ${state.name}")
+                    MultiplexerSessionState.Disabled,
+                    MultiplexerSessionState.PlainShellFallback -> Text("当前使用普通 Shell。")
+                }
+            }
+        },
+        confirmButton = {
+            when (state) {
+                is MultiplexerSessionState.AwaitingSelection -> TextButton(onClick = onNew) { Text("新建") }
+                is MultiplexerSessionState.FallbackPrompt -> TextButton(onClick = onFallback) { Text("使用普通 Shell") }
+                is MultiplexerSessionState.RecoveryRequired -> TextButton(onClick = onRefresh) { Text("刷新列表") }
+                else -> Unit
+            }
+        },
+        dismissButton = {
+            Row {
+                if (state is MultiplexerSessionState.AwaitingSelection || state is MultiplexerSessionState.FallbackPrompt) {
+                    TextButton(onClick = onRefresh) { Text("重试") }
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+@Composable
 private fun LandscapeTerminalLayout(
     hostSessions: List<ManagedSessionState>,
     current: ManagedSessionState?,
@@ -721,6 +941,7 @@ private fun LandscapeTerminalLayout(
     renderingDelayed: Boolean,
     showMoreMenu: Boolean,
     terminalBackground: androidx.compose.ui.graphics.Color,
+    remoteStatus: String,
     statusBarHidden: Boolean,
     expandedWindow: Boolean,
     onBack: () -> Unit,
@@ -751,6 +972,7 @@ private fun LandscapeTerminalLayout(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
     terminal: @Composable (Modifier) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -780,6 +1002,7 @@ private fun LandscapeTerminalLayout(
             onForwards = onForwards,
             onFont = onFont,
             onDisconnect = onDisconnect,
+            onPersistentSessions = onPersistentSessions,
         )
         if (layoutState.panel != TerminalPanel.NONE) {
             LandscapeContextPanel(
@@ -814,7 +1037,20 @@ private fun LandscapeTerminalLayout(
                 maxWidth = if (expandedWindow) 360.dp else 300.dp,
             )
         }
-        terminal(Modifier.weight(1f).fillMaxHeight())
+        Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+            terminal(Modifier.fillMaxSize())
+            if (remoteStatus.isNotBlank()) {
+                Text(
+                    remoteStatus,
+                    Modifier.align(Alignment.TopEnd)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+            }
+        }
         if (layoutState.extraKeysVisible && current != null) {
             LandscapeExtraKeys(
                 keys = settings.extraKeys,
@@ -844,6 +1080,7 @@ private fun LandscapeTerminalRail(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
 ) {
     Surface(
         Modifier.width(56.dp).fillMaxHeight(),
@@ -883,6 +1120,8 @@ private fun LandscapeTerminalRail(
                         onForwards = onForwards,
                         onFont = onFont,
                         onDisconnect = onDisconnect,
+                        onPersistentSessions = onPersistentSessions,
+                        persistentEnabled = current?.kind != SessionKind.SSH,
                         onToggleExtraKeys = {},
                     )
                 }
@@ -1518,6 +1757,9 @@ internal class XtermTerminalFrontend : TerminalFrontend {
     override var onOpenLink: ((String) -> Unit)? = null
     override var onCtrlArmed: ((Boolean) -> Unit)? = null
     override var onRenderingDelayed: ((Boolean) -> Unit)? = null
+    override var onBell: (() -> Unit)? = null
+    override var onTitleChange: ((String) -> Unit)? = null
+    override var onPwdChange: ((String) -> Unit)? = null
 
     init {
         scope.launch { renderLoop() }
@@ -1573,6 +1815,10 @@ internal class XtermTerminalFrontend : TerminalFrontend {
     }
 
     override fun pasteText(text: String) = writeInput(text, webView)
+    override fun sendInput(bytes: ByteArray) {
+        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        evaluate("window.sshTerminal.pasteBase64('$base64')")
+    }
 
     override fun setAppearance(palette: TerminalPalette, fontSize: Int) {
         appearance = palette to fontSize
@@ -1908,12 +2154,19 @@ private fun TerminalMoreMenuItems(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
+    persistentEnabled: Boolean,
     onToggleExtraKeys: () -> Unit,
 ) {
     DropdownMenuItem(text = { Text("粘贴") }, onClick = { onDismiss(); onPaste() }, enabled = !selectionMode)
     DropdownMenuItem(text = { Text("选择文本") }, onClick = { onDismiss(); onSelectText() }, enabled = !selectionMode)
     DropdownMenuItem(text = { Text("端口转发") }, onClick = { onDismiss(); onForwards() })
     DropdownMenuItem(text = { Text("字体大小") }, onClick = { onDismiss(); onFont() })
+    DropdownMenuItem(
+        text = { Text("持久会话") },
+        onClick = { onDismiss(); onPersistentSessions() },
+        enabled = persistentEnabled,
+    )
     DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { onDismiss(); onDisconnect() })
     if (hasHardwareKeyboard) {
         DropdownMenuItem(text = { Text(if (forceExtraKeys) "隐藏扩展键" else "显示扩展键") }, onClick = { onDismiss(); onToggleExtraKeys() })

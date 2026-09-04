@@ -42,6 +42,9 @@ internal class TerminalReplayBuffer(private val maxBytes: Int) {
     @Synchronized
     fun snapshot(): ByteArray = bytes.toByteArray()
 
+    @Synchronized
+    fun clear() = bytes.reset()
+
     private companion object {
         // RIS: reset terminal state and parser before replaying a truncated tail.
         val TERMINAL_RESET = byteArrayOf(0x1B, 'c'.code.toByte())

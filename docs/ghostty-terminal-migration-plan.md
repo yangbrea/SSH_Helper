@@ -1,5 +1,23 @@
 # Ghostty 终端迁移计划
 
+> 2026-09 Beta 状态：Ghostty 继续作为可选实验后端，xterm.js 仍为默认回退。
+> 已补齐句柄安全、scrollback 上限、完整调色板、搜索高亮与大小写搜索、
+> 安全粘贴、远程剪贴板确认、HTTP(S) 链接、焦点/尺寸/配色协议、终端事件、
+> IME 预编辑和触摸鼠标策略。JVM、宿主机测试和无设备构建会实际执行；
+> Android 仪器测试源码只编译，尚未在模拟器或真机运行，因此默认切换、性能结论
+> 和设备兼容性签字仍是后续独立发布门槛。Kitty 图形协议与内置 Nerd Font 延期。
+
+### 2026-09 本轮交付清单
+
+- [x] 线程安全 opaque handle、幂等释放、10,000 行/16 MiB scrollback 上限。
+- [x] xterm-256color、尺寸/单元格/配色查询、焦点 1004、终端事件与剪贴板策略。
+- [x] 48 KiB 串行写入、统一用户输入、约 4 ms 搜索分片与 generation 取消。
+- [x] 快照 v4、256 色/下划线色/闪烁/软换行/搜索标记及 Canvas 交互补齐。
+- [x] JVM 与宿主原生测试实际执行；Android 仪器测试已编写并仅验证编译打包。
+- [x] Java 17、NDK 29.0.14206865、Zig 0.16.0 的无设备 CI 与双 ABI ELF 校验。
+- [ ] 真机/模拟器行为、性能基线和设备兼容性验证（未来默认切换的发布门槛）。
+- [ ] Kitty 图形协议、Ghostty 默认切换、xterm/WebView 移除（不在本轮范围）。
+
 ## 1. 目标与结论
 
 本项目计划使用 Ghostty 的终端核心完全取代当前的 xterm.js 终端前端，同时保留现有 JSch SSH 传输、会话管理和 Jetpack Compose 应用结构。
@@ -635,9 +653,12 @@ docs: update terminal architecture and third-party notices
 7. 检查每个 `.so` 的 ELF 架构、依赖和 16 KB 对齐。
 8. 检查 Release `.so` 不含不必要的 debug sections。
 9. 运行 Kotlin 单元测试。
-10. 运行 JNI 生命周期和 VT golden tests。
-11. 至少在 x86_64 模拟器运行一次 instrumentation smoke test。
+10. 编译 JNI 生命周期和 VT instrumentation tests 的测试 APK，但无设备 CI 不执行它们。
+11. 运行不依赖 Android UI 的宿主原生入口，覆盖句柄、搜索 generation、粘贴结果和快照边界。
 12. 确认构建结束没有产生应提交但未提交的锁定文件变化。
+
+模拟器和真机 instrumentation smoke test 保留为默认后端切换前的独立发布门槛，
+不属于本轮本地或 CI 验证，也不得据此宣称设备兼容性已经通过。
 
 CI 缓存只用于加速 Zig 和 Gradle 构建，不能作为唯一依赖来源。删除缓存后仍必须能够根据锁定版本完整重建。
 
@@ -727,4 +748,3 @@ CI 缓存只用于加速 Zig 和 Gradle 构建，不能作为唯一依赖来源�
 - 所有第三方许可证和 notices 已更新。
 - Git 历史保持可审查、可回退、可 bisect。
 - 正式版本已创建不可变 Git tag。
-

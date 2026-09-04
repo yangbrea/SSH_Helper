@@ -4,7 +4,7 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Color
+import com.yang136.sshhelper.terminal.GhosttyNativeBridge
 import com.yang136.sshhelper.terminal.GhosttyRenderFrameStore
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import kotlinx.coroutines.CoroutineScope
@@ -23,9 +23,7 @@ import kotlinx.coroutines.TimeoutCancellationException
  * main-thread frame store populated by snapshots from that engine.
  */
 internal class GhosttyTerminalFrontend : TerminalFrontend {
-    // libghostty-vt 0.1.0 search is ASCII case-insensitive and exposes no
-    // case-sensitive option. Advertise that instead of ignoring the Aa toggle.
-    override val supportsCaseSensitiveSearch: Boolean = false
+    override val supportsCaseSensitiveSearch: Boolean = true
 
     /** Receives bytes the terminal asks to write back to the PTY. */
     var onPtyWrite: ((ByteArray) -> Unit)? = null
@@ -34,11 +32,12 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     var copySink: ((String) -> Unit)? = null
 
     /** Terminal effects from OSC/BEL. */
-    var onBell: (() -> Unit)? = null
-    var onTitleChange: ((String) -> Unit)? = null
-    var onPwdChange: ((String) -> Unit)? = null
+    override var onBell: (() -> Unit)? = null
+    override var onTitleChange: ((String) -> Unit)? = null
+    override var onPwdChange: ((String) -> Unit)? = null
 
     private var lastSearchQuery: String? = null
+    private var lastSearchCaseSensitive = false
     private var ctrlArmed = false
     private val frontendJob = SupervisorJob()
     private val frontendScope = CoroutineScope(frontendJob + Dispatchers.Main.immediate)
@@ -53,6 +52,12 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         }
         onPwdChange = { pwd ->
             frontendScope.launch { this@GhosttyTerminalFrontend.onPwdChange?.invoke(pwd) }
+        }
+        onClipboardWrite = { request ->
+            frontendScope.launch { showClipboardWriteConfirmation(request) }
+        }
+        onSearchUpdated = { index, total ->
+            frontendScope.launch { this@GhosttyTerminalFrontend.onSearchResults?.invoke(index, total) }
         }
         onSnapshotReady = { snapshot ->
             frontendScope.launch {
@@ -84,6 +89,7 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
     internal fun attachView(terminalView: GhosttyTerminalView) {
         view = terminalView
         terminalView.attach(engine, renderFrames)
+        terminalView.setOnTerminalFocusChange(engine::requestFocus)
         ensureStarted()
     }
 
@@ -105,8 +111,11 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         } else {
             bytes
         }
-        onPtyWrite?.invoke(output)
+        ensureStarted()
+        engine.requestRawUserInput(output)
     }
+
+    override fun sendInput(bytes: ByteArray) = sendUserInput(bytes)
 
     internal fun scrollLines(delta: Int) {
         ensureStarted()
@@ -126,18 +135,27 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         }
     }
 
+    override suspend fun restore(bytes: ByteArray) {
+        ensureStarted()
+        engine.write(bytes, emitProtocolReplies = false)
+    }
+
     override suspend fun reset() {
         ensureStarted()
         engine.reset()
+        view?.clearComposingText()
         view?.invalidate()
     }
 
     override fun setAppearance(palette: TerminalPalette, fontSize: Int) {
         ensureStarted()
-        engine.requestSetDefaultColors(
-            backgroundArgb = Color.parseColor(palette.background),
-            foregroundArgb = Color.parseColor(palette.foreground),
-            cursorArgb = Color.parseColor(palette.cursor),
+        val background = terminalColorToArgb(palette.background)
+        engine.requestSetAppearance(
+            backgroundArgb = background,
+            foregroundArgb = terminalColorToArgb(palette.foreground),
+            cursorArgb = terminalColorToArgb(palette.cursor),
+            paletteArgb = palette.toXterm256Argb(),
+            dark = isDarkTerminalColor(background),
         )
         view?.setPalette(palette)
         view?.setFontSizeSp(fontSize.toFloat())
@@ -145,31 +163,46 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     // WindowInsets reports global IME state; it does not grant this view focus
     // ownership. Explicit terminal actions own show/hide requests.
-    override fun setImeVisible(visible: Boolean) = Unit
+    override fun setImeVisible(visible: Boolean) {
+        if (!visible) view?.clearComposingText()
+    }
 
     override fun paste(context: Context) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
         if (text.isNullOrEmpty()) return
-        val hasUnsafeControl = text.any { ch ->
-            ch.code < 0x20 && ch != '\n' && ch != '\r' && ch != '\t'
+        ensureStarted()
+        engine.requestPasteText(
+            text,
+            GhosttyNativeBridge.PASTE_SOURCE_CLIPBOARD,
+            allowUnsafe = false,
+        ) { result ->
+            if (result != GhosttyNativeBridge.PASTE_RESULT_REJECTED) return@requestPasteText
+            frontendScope.launch {
+                AlertDialog.Builder(context)
+                    .setTitle("粘贴多行或控制内容")
+                    .setMessage("该内容可能被远端 shell 直接执行。确认继续粘贴吗？")
+                    .setPositiveButton("继续粘贴") { _, _ ->
+                        engine.requestPasteText(
+                            text,
+                            GhosttyNativeBridge.PASTE_SOURCE_CLIPBOARD,
+                            allowUnsafe = true,
+                        )
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
         }
-        if (!hasUnsafeControl) {
-            pasteText(text)
-            return
-        }
-        AlertDialog.Builder(context)
-            .setTitle("粘贴不安全内容")
-            .setMessage("剪贴板包含控制字符，粘贴后可能被当成按键序列执行。是否仍然粘贴？")
-            .setPositiveButton("仍然粘贴") { _, _ -> pasteText(text) }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     override fun pasteText(text: String) {
         if (text.isEmpty()) return
         ensureStarted()
-        engine.requestPasteText(text)
+        engine.requestPasteText(
+            text,
+            GhosttyNativeBridge.PASTE_SOURCE_TEXT,
+            allowUnsafe = true,
+        )
     }
 
     override fun enterSelectionMode() {
@@ -211,10 +244,13 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         ensureStarted()
         engine.requestLinkUriAt(col, row) { uri ->
             frontendScope.launch {
-                if (uri.isNullOrEmpty()) {
+                val resolved = uri ?: renderFrames.currentFrame()?.let {
+                    TerminalUrlDetector.findAt(it, row, col)
+                }
+                if (resolved.isNullOrEmpty()) {
                     view?.focusAndShowKeyboard()
                 } else {
-                    onOpenLink?.invoke(uri)
+                    onOpenLink?.invoke(resolved)
                 }
             }
         }
@@ -235,6 +271,7 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
                 if (text.isEmpty()) return@launch
                 onCopied?.invoke(text.length)
                 copySink?.invoke(text)
+                clearSelection()
             }
         }
     }
@@ -247,9 +284,10 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
             onSearchResults?.invoke(-1, 0)
             return
         }
-        if (lastSearchQuery != query) {
+        if (lastSearchQuery != query || lastSearchCaseSensitive != caseSensitive) {
             lastSearchQuery = query
-            engine.requestSearchSet(query, backwards) { index, total ->
+            lastSearchCaseSensitive = caseSensitive
+            engine.requestSearchSet(query, backwards, caseSensitive) { index, total ->
                 frontendScope.launch {
                     onSearchResults?.invoke(index, total)
                 }
@@ -263,6 +301,7 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
 
     override fun clearSearch() {
         lastSearchQuery = null
+        lastSearchCaseSensitive = false
         ensureStarted()
         engine.requestSearchClear()
         onSearchResults?.invoke(-1, 0)
@@ -293,9 +332,46 @@ internal class GhosttyTerminalFrontend : TerminalFrontend {
         started = false
     }
 
+    private fun showClipboardWriteConfirmation(
+        request: GhosttyNativeBridge.ClipboardWriteRequest,
+    ) {
+        val context = view?.context
+        if (context == null) {
+            engine.resolveClipboardWrite(request.requestId, false)
+            return
+        }
+        var resolved = false
+        fun resolve(allowed: Boolean) {
+            if (resolved) return
+            resolved = true
+            if (allowed) {
+                runCatching {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("Remote terminal", request.text),
+                    )
+                }.onFailure {
+                    engine.resolveClipboardWrite(request.requestId, false)
+                    return
+                }
+            }
+            engine.resolveClipboardWrite(request.requestId, allowed)
+        }
+        val source = sanitizeTerminalMetadata(request.programName).ifEmpty { "远端程序" }
+        val preview = sanitizeTerminalMetadata(request.text).take(CLIPBOARD_PREVIEW_CHARS)
+        AlertDialog.Builder(context)
+            .setTitle("允许远端写入剪贴板？")
+            .setMessage("来源：$source\n大小：${request.text.encodeToByteArray().size} 字节\n\n$preview")
+            .setPositiveButton("允许") { _, _ -> resolve(true) }
+            .setNegativeButton("拒绝") { _, _ -> resolve(false) }
+            .setOnCancelListener { resolve(false) }
+            .show()
+    }
+
     private companion object {
         const val DEFAULT_COLS = 80
         const val DEFAULT_ROWS = 24
         const val RENDER_DELAY_THRESHOLD_MS = 500L
+        const val CLIPBOARD_PREVIEW_CHARS = 240
     }
 }

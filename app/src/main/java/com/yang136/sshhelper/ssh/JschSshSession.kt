@@ -1,6 +1,8 @@
 package com.yang136.sshhelper.ssh
 
 import com.jcraft.jsch.ChannelDirectTCPIP
+import com.jcraft.jsch.Channel
+import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.HostKey
@@ -33,6 +35,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.io.OutputStream
+import java.io.ByteArrayOutputStream
 import java.net.ConnectException
 import java.net.SocketException
 import java.net.SocketTimeoutException
@@ -71,6 +74,7 @@ class JschSshSession(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val mutableOutput = MutableSharedFlow<ByteArray>(extraBufferCapacity = 128)
+    private val mutableTerminalState = MutableStateFlow<TerminalChannelState>(TerminalChannelState.Closed)
     private val mutableHostKeyRequest = MutableStateFlow<HostKeyRequest?>(null)
     private val mutableStage = MutableStateFlow(ConnectionStage.READY)
     private val hostKeyDecision = AtomicReference<CompletableDeferred<Boolean>?>(null)
@@ -79,20 +83,23 @@ class JschSshSession(
 
     override val state: StateFlow<ConnectionState> = mutableState.asStateFlow()
     override val output: Flow<ByteArray> = mutableOutput.asSharedFlow()
+    override val terminalState: StateFlow<TerminalChannelState> = mutableTerminalState.asStateFlow()
     override val hostKeyRequest: StateFlow<HostKeyRequest?> = mutableHostKeyRequest.asStateFlow()
     override val stage: StateFlow<ConnectionStage> = mutableStage.asStateFlow()
 
     @Volatile private var session: Session? = null
     @Volatile private var jumpSession: Session? = null
-    @Volatile private var channel: ChannelShell? = null
+    @Volatile private var channel: Channel? = null
     @Volatile private var writer: OutputStream? = null
     private var readerJob: Job? = null
 
     /** 串行化 connect/disconnect/close，杜绝并发连接交错导致 JSch 会话/线程泄漏。 */
     private val lifecycleMutex = Mutex()
     @Volatile private var closed = false
-    /** 当前连接是否带有 shell 通道（转发专用会话不创建 shell/PTY）。 */
-    @Volatile private var shellEnabled = false
+    /** 当前连接是否带有交互式 shell/exec PTY。 */
+    @Volatile private var terminalEnabled = false
+    @Volatile private var ptyColumns = 80
+    @Volatile private var ptyRows = 24
 
     override suspend fun openSftpClient(): SftpClient = withContext(Dispatchers.IO) {
         val activeSession = session?.takeIf(Session::isConnected) ?: error("SSH 连接不可用")
@@ -201,25 +208,10 @@ class JschSshSession(
                 proxyPassword = credentials.targetProxyPassword,
             )
             session = target
-            // 转发专用会话（PORT_FORWARD）不创建 shell/PTY：只允许 TCP forwarding 的
-            // SSH 账号可用，且服务端关闭空闲 shell 不会误判为传输断开。
-            val input = if (openShell) {
-                val newChannel = (target.openChannel("shell") as ChannelShell).apply {
-                    setPtyType("xterm-256color")
-                    setPtySize(80, 24, 0, 0)
-                }
-                writer = newChannel.outputStream
-                channel = newChannel
-                newChannel.connect(SSH_CONNECT_TIMEOUT_MS)
-                diagnostics.record(traceId, DiagnosticEventStage.CHANNEL, "ssh.shell_opened", "Shell 通道已建立", hop = DiagnosticHop.TARGET)
-                shellEnabled = true
-                newChannel.inputStream
-            } else {
-                writer = null
-                channel = null
-                shellEnabled = false
-                null
-            }
+            writer = null
+            channel = null
+            terminalEnabled = false
+            mutableTerminalState.value = TerminalChannelState.Closed
             // 连接建立期间会话被 close()：立即拆除刚建立的会话，避免 JSch 会话泄漏。
             if (closed) {
                 disconnectInternal("应用已关闭连接", DisconnectCause.APP_CLOSED, publishState = false)
@@ -228,10 +220,8 @@ class JschSshSession(
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Connected(connectedLabel(route))
             diagnostics.record(traceId, DiagnosticEventStage.LIFECYCLE, "ssh.connected", "SSH 连接已就绪", hop = DiagnosticHop.TARGET)
-            readerJob = scope.launch {
-                val stream = input
-                if (stream != null) readOutput(stream) else watchTransport()
-            }
+            if (openShell) openTerminalLocked(TerminalTarget.PlainShell)
+            else readerJob = scope.launch { watchTransport() }
         } catch (error: Throwable) {
             if (error is CancellationException) {
                 diagnostics.record(traceId, DiagnosticEventStage.LIFECYCLE, "ssh.connect_cancelled", "SSH 连接已取消", DiagnosticEventLevel.WARNING)
@@ -332,9 +322,12 @@ class JschSshSession(
                         is Credential.PrivateKey -> "publickey"
                     },
                 )
-                // JSch defaults to three password prompts. One bad password could
-                // otherwise rapidly trigger sshd/PAM account lockout.
+                // JSch's effective client-side retry cap is MaxAuthTries (default 6).
+                // NumberOfPasswordPrompts is not consumed by this JSch fork; without
+                // this cap, one bad password is retried 6 times inside the same TCP
+                // connection and can rapidly trigger sshd/PAM account lockout.
                 put("NumberOfPasswordPrompts", "1")
+                put("MaxAuthTries", "1")
             })
             when (credential) {
                 is Credential.Password -> {
@@ -394,6 +387,152 @@ class JschSshSession(
         }
     }
 
+    override suspend fun execute(
+        command: String,
+        timeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): RemoteCommandResult = withContext(Dispatchers.IO) {
+        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+        require(maxOutputBytes > 0) { "maxOutputBytes must be positive" }
+        val activeSession = session?.takeIf(Session::isConnected) ?: error("SSH 连接不可用")
+        val exec = activeSession.openChannel("exec") as ChannelExec
+        val stdout = ByteArrayOutputStream()
+        val stderr = ByteArrayOutputStream()
+        try {
+            exec.setCommand(command)
+            val stdoutInput = exec.inputStream
+            val stderrInput = exec.extInputStream
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+            exec.connect(timeoutMillis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            val buffer = ByteArray(8192)
+            while (true) {
+                drainAvailable(stdoutInput, stdout, stderr.size(), maxOutputBytes, buffer)
+                drainAvailable(stderrInput, stderr, stdout.size(), maxOutputBytes, buffer)
+                if (stdout.size() + stderr.size() > maxOutputBytes) {
+                    return@withContext RemoteCommandResult(
+                        REMOTE_COMMAND_OUTPUT_LIMIT_EXIT_CODE,
+                        stdout.toString(Charsets.UTF_8.name()),
+                        "远端命令输出超过 ${maxOutputBytes} 字节限制",
+                    )
+                }
+                if (exec.isClosed && stdoutInput.available() == 0 && stderrInput.available() == 0) break
+                if (System.nanoTime() >= deadline) {
+                    return@withContext RemoteCommandResult(
+                        REMOTE_COMMAND_TIMEOUT_EXIT_CODE,
+                        stdout.toString(Charsets.UTF_8.name()),
+                        "远端命令执行超时",
+                    )
+                }
+                delay(REMOTE_COMMAND_POLL_INTERVAL_MS)
+            }
+            RemoteCommandResult(
+                exec.exitStatus.takeIf { it >= 0 } ?: 0,
+                stdout.toString(Charsets.UTF_8.name()),
+                stderr.toString(Charsets.UTF_8.name()),
+            )
+        } catch (error: JSchException) {
+            if (!error.message.orEmpty().contains("timeout", ignoreCase = true)) throw error
+            RemoteCommandResult(
+                REMOTE_COMMAND_TIMEOUT_EXIT_CODE,
+                stdout.toString(Charsets.UTF_8.name()),
+                "远端命令执行超时",
+            )
+        } finally {
+            runCatching { exec.disconnect() }
+        }
+    }
+
+    private fun drainAvailable(
+        input: InputStream,
+        output: ByteArrayOutputStream,
+        otherSize: Int,
+        maxOutputBytes: Int,
+        buffer: ByteArray,
+    ) {
+        while (input.available() > 0 && output.size() + otherSize <= maxOutputBytes) {
+            val count = input.read(buffer, 0, minOf(buffer.size, input.available()))
+            if (count <= 0) return
+            output.write(buffer, 0, count)
+        }
+    }
+
+    override suspend fun openTerminal(target: TerminalTarget) = withContext(Dispatchers.IO) {
+        lifecycleMutex.withLock {
+            check(!closed) { "SSH 会话已关闭" }
+            check(session?.isConnected == true) { "SSH 连接不可用" }
+            openTerminalLocked(target)
+        }
+    }
+
+    private suspend fun openTerminalLocked(target: TerminalTarget) {
+        closeTerminalLocked(startTransportWatcher = false)
+        mutableTerminalState.value = TerminalChannelState.Opening
+        val activeSession = session?.takeIf(Session::isConnected) ?: error("SSH 连接不可用")
+        val opened: Channel = when (target) {
+            TerminalTarget.PlainShell -> (activeSession.openChannel("shell") as ChannelShell).apply {
+                setPtyType("xterm-256color", ptyColumns, ptyRows, 0, 0)
+            }
+            is TerminalTarget.Persistent -> {
+                val multiplexer = MultiplexerRegistry.forType(target.type)
+                    ?: error("未配置远端会话管理器")
+                (activeSession.openChannel("exec") as ChannelExec).apply {
+                    setPty(true)
+                    setPtyType("xterm-256color", ptyColumns, ptyRows, 0, 0)
+                    setCommand(
+                        if (target.create) multiplexer.createCommand(target.name)
+                        else multiplexer.attachCommand(target.name),
+                    )
+                }
+            }
+        }
+        try {
+            val input = opened.inputStream
+            val output = opened.outputStream
+            opened.connect(SSH_CHANNEL_CONNECT_TIMEOUT_MS)
+            channel = opened
+            writer = output
+            terminalEnabled = true
+            mutableTerminalState.value = TerminalChannelState.Active(target)
+            activeTraceId.get()?.let { traceId ->
+                diagnostics.record(
+                    traceId,
+                    DiagnosticEventStage.CHANNEL,
+                    if (target is TerminalTarget.Persistent) "ssh.pty_exec_opened" else "ssh.shell_opened",
+                    if (target is TerminalTarget.Persistent) "持久会话 PTY 通道已建立" else "Shell 通道已建立",
+                    hop = DiagnosticHop.TARGET,
+                )
+            }
+            readerJob = scope.launch { readOutput(input, opened, target) }
+        } catch (error: Throwable) {
+            runCatching { opened.disconnect() }
+            channel = null
+            writer = null
+            terminalEnabled = false
+            mutableTerminalState.value = TerminalChannelState.Error(error.toChineseMessage())
+            if (session?.isConnected == true) readerJob = scope.launch { watchTransport() }
+            throw error
+        }
+    }
+
+    override suspend fun closeTerminal() = withContext(Dispatchers.IO) {
+        lifecycleMutex.withLock { closeTerminalLocked(startTransportWatcher = true) }
+    }
+
+    private suspend fun closeTerminalLocked(startTransportWatcher: Boolean) {
+        val activeChannel = channel
+        val job = readerJob
+        channel = null
+        writer = null
+        readerJob = null
+        terminalEnabled = false
+        runCatching { activeChannel?.disconnect() }
+        if (job != null && job != kotlinx.coroutines.currentCoroutineContext()[Job]) job.cancelAndJoin()
+        mutableTerminalState.value = TerminalChannelState.Closed
+        if (startTransportWatcher && session?.isConnected == true) {
+            readerJob = scope.launch { watchTransport() }
+        }
+    }
+
     /** Streams the target SSH handshake through a direct-tcpip channel on the jump session. */
     private class JumpHostProxy(private val tunnel: ChannelDirectTCPIP) : Proxy {
         @Volatile private var input: InputStream? = null
@@ -416,7 +555,7 @@ class JschSshSession(
         }
     }
 
-    private suspend fun readOutput(input: InputStream) {
+    private suspend fun readOutput(input: InputStream, observedChannel: Channel, target: TerminalTarget) {
         val buffer = ByteArray(8192)
         try {
             while (true) {
@@ -424,15 +563,41 @@ class JschSshSession(
                 if (count < 0) break
                 if (count > 0) mutableOutput.emit(buffer.copyOf(count))
             }
-            publishUnexpectedDisconnect(classifyDisconnect(null))
+            terminalEnded(observedChannel, target, null)
         } catch (error: Throwable) {
-            if (error !is CancellationException) publishUnexpectedDisconnect(classifyDisconnect(error))
+            if (error !is CancellationException) terminalEnded(observedChannel, target, error)
         }
+    }
+
+    private fun terminalEnded(observedChannel: Channel, target: TerminalTarget, error: Throwable?) {
+        if (channel !== observedChannel) return
+        val activeSession = session
+        if (activeSession?.isConnected != true) {
+            publishUnexpectedDisconnect(classifyDisconnect(error, observedChannel))
+            return
+        }
+        channel = null
+        writer = null
+        terminalEnabled = false
+        val exitCode = observedChannel.exitStatus.takeIf { it >= 0 }
+        val label = when (target) {
+            TerminalTarget.PlainShell -> "远端 Shell 已退出"
+            is TerminalTarget.Persistent -> "持久会话已分离或结束"
+        }
+        mutableTerminalState.value = if (error == null) {
+            TerminalChannelState.Ended(
+                reason = if (exitCode == null) label else "$label（代码 $exitCode）",
+                exitCode = exitCode,
+            )
+        } else {
+            TerminalChannelState.Error("$label：${error.safeMessage()}")
+        }
+        readerJob = scope.launch { watchTransport() }
     }
 
     override suspend fun write(data: ByteArray) = withContext(Dispatchers.IO) {
         // 无 shell 的转发会话没有终端输入通道，直接忽略。
-        if (!shellEnabled) return@withContext
+        if (!terminalEnabled) return@withContext
         var failure: Throwable? = null
         writeMutex.withLock {
             val output = writer
@@ -447,22 +612,36 @@ class JschSshSession(
             }
         }
         failure?.let { error ->
-            publishUnexpectedDisconnect(
-                ConnectionState.Disconnected(
-                    reason = "SSH 写入失败：${error.safeMessage()}",
-                    cause = DisconnectCause.WRITE_ERROR,
+            if (session?.isConnected == true) {
+                mutableTerminalState.value = TerminalChannelState.Error("终端写入失败：${error.safeMessage()}")
+                lifecycleMutex.withLock { closeTerminalLocked(startTransportWatcher = true) }
+            } else {
+                publishUnexpectedDisconnect(
+                    ConnectionState.Disconnected(
+                        reason = "SSH 写入失败：${error.safeMessage()}",
+                        cause = DisconnectCause.WRITE_ERROR,
+                    )
                 )
-            )
-            disconnectInternal("SSH 写入失败", DisconnectCause.WRITE_ERROR, publishState = false)
+                lifecycleMutex.withLock {
+                    disconnectInternal("SSH 写入失败", DisconnectCause.WRITE_ERROR, publishState = false)
+                }
+            }
         }
         Unit
     }
 
     override suspend fun resize(columns: Int, rows: Int) = withContext(Dispatchers.IO) {
-        if (!shellEnabled) return@withContext
         val safeColumns = columns.coerceIn(2, 500)
         val safeRows = rows.coerceIn(2, 300)
-        runCatching { channel?.takeIf { it.isConnected }?.setPtySize(safeColumns, safeRows, 0, 0) }
+        ptyColumns = safeColumns
+        ptyRows = safeRows
+        if (!terminalEnabled) return@withContext
+        runCatching {
+            when (val active = channel?.takeIf { it.isConnected }) {
+                is ChannelShell -> active.setPtySize(safeColumns, safeRows, 0, 0)
+                is ChannelExec -> active.setPtySize(safeColumns, safeRows, 0, 0)
+            }
+        }
         Unit
     }
 
@@ -486,7 +665,8 @@ class JschSshSession(
         channel = null
         session = null
         jumpSession = null
-        shellEnabled = false
+        terminalEnabled = false
+        mutableTerminalState.value = TerminalChannelState.Closed
 
         // Closing the channel must happen before waiting for the reader. A coroutine
         // cancellation alone cannot interrupt InputStream.read(), and closing the
@@ -531,8 +711,8 @@ class JschSshSession(
         scope.launch { diagnostics.finishTrace(traceId, status, summary) }
     }
 
-    private fun classifyDisconnect(error: Throwable?): ConnectionState.Disconnected {
-        val activeChannel = channel
+    private fun classifyDisconnect(error: Throwable?, observedChannel: Channel? = channel): ConnectionState.Disconnected {
+        val activeChannel = observedChannel
         val activeSession = session
         val exitStatus = activeChannel?.exitStatus ?: -1
         return when {
@@ -608,7 +788,8 @@ class JschSshSession(
         channel = null
         session = null
         jumpSession = null
-        shellEnabled = false
+        terminalEnabled = false
+        mutableTerminalState.value = TerminalChannelState.Closed
         runCatching { activeChannel?.disconnect() }
         runCatching { activeSession?.disconnect() }
         runCatching { activeJump?.disconnect() }
@@ -792,6 +973,10 @@ private fun HostKeySubject.toDiagnosticHop(): DiagnosticHop = when (this) {
 }
 
 internal const val SSH_CONNECT_TIMEOUT_MS = 15_000
+internal const val SSH_CHANNEL_CONNECT_TIMEOUT_MS = 10_000
+internal const val REMOTE_COMMAND_TIMEOUT_EXIT_CODE = 124
+internal const val REMOTE_COMMAND_OUTPUT_LIMIT_EXIT_CODE = 125
+internal const val REMOTE_COMMAND_POLL_INTERVAL_MS = 20L
 /**
  * 保活探针间隔 5s：比默认 20s 更激进，配合服务端/NAT 空闲清理（常见 30s~5min）
  * 留足余量；即使个别探针被 Wi-Fi 省电延迟，也能赶在路径超时前刷新连接。

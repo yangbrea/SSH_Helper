@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
@@ -51,6 +52,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var onSelectionRelease: ((Int, Int) -> Unit)? = null
     private var onSelectionClear: (() -> Unit)? = null
     private var onCellTap: ((Int, Int) -> Unit)? = null
+    private var onTerminalFocusChange: ((Boolean) -> Unit)? = null
     private var scrollAccum = 0f
     private val flingScroller = OverScroller(context)
     private val maximumFlingVelocity = ViewConfiguration.get(context).scaledMaximumFlingVelocity
@@ -58,9 +60,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var flingLastY = 0
     private var flingPixelRemainder = 0f
     private var pointerDown = false
-    private var selectionActive = false
-    private var selectionModeArmed = false
     private var pressedMouseButton = MOUSE_BUTTON_LEFT
+    private val touchState = GhosttyTouchState()
+    private var twoFingerLastY = 0f
+    private var lastSelectionX = 0f
+    private var lastSelectionY = 0f
+    private val drawClip = Rect()
 
     private val scrollDetector = GestureDetector(
         context,
@@ -71,12 +76,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 flingPixelRemainder = 0f
                 scrollAccum = 0f
                 pointerDown = true
-                if (selectionModeArmed) {
-                    selectionModeArmed = false
+                if (touchState.selectionArmed) {
                     cellAt(e.x, e.y)?.let { (col, row) ->
-                        selectionActive = true
+                        touchState.beginSelection()
                         onSelectionPress?.invoke(col, row)
-                    }
+                    } ?: touchState.clearSelection()
                 }
                 return true
             }
@@ -87,7 +91,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 distanceX: Float,
                 distanceY: Float,
             ): Boolean {
-                if (selectionActive) {
+                if (touchState.selectionActive) {
                     // 扩选由 onTouchEvent 的 ACTION_MOVE 统一处理；长按后
                     // GestureDetector 不保证继续回调 onScroll。
                     return true
@@ -97,7 +101,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 val delta = (scrollAccum / cellHeightPx).toInt()
                 if (delta != 0) {
                     scrollAccum -= delta * cellHeightPx
-                    onScrollLines?.invoke(delta)
+                    val current = engine
+                    if (current?.mouseReportingActive == true && e2.pointerCount == 1) {
+                        // One-finger drag is the primary mobile scroll gesture. When a
+                        // remote app (e.g. tmux with mouse on) owns the screen, deliver it
+                        // as wheel clicks instead of a native viewport scroll (which is a
+                        // no-op inside its alternate screen) or a mouse drag.
+                        releaseTouchMouse(e2)
+                        sendWheelClicks(
+                            current,
+                            // Finger up == scroll down == wheel down (button 5);
+                            // finger down == scroll up == wheel up (button 4).
+                            if (delta > 0) MOUSE_BUTTON_FIVE else MOUSE_BUTTON_FOUR,
+                            abs(delta),
+                            e2.x,
+                            e2.y,
+                        )
+                    } else {
+                        onScrollLines?.invoke(delta)
+                    }
                 }
                 return true
             }
@@ -108,7 +130,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 velocityX: Float,
                 velocityY: Float,
             ): Boolean {
-                if (selectionActive || cellHeightPx <= 0f) return false
+                if (touchState.selectionActive || cellHeightPx <= 0f) return false
                 if (abs(velocityY) < minimumFlingVelocity) return false
                 flingLastY = 0
                 flingPixelRemainder = 0f
@@ -128,15 +150,16 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                if (!pointerDown || selectionActive) return
+                if (!pointerDown || touchState.selectionActive) return
                 val cell = cellAt(e.x, e.y) ?: return
-                selectionActive = true
+                releaseTouchMouse(e)
+                touchState.beginSelection()
                 performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 onSelectionPress?.invoke(cell.first, cell.second)
             }
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (selectionActive) return false
+                if (touchState.selectionActive || engine?.mouseReportingActive == true) return false
                 cellAt(e.x, e.y)?.let { (col, row) -> onCellTap?.invoke(col, row) }
                 return true
             }
@@ -155,9 +178,37 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             val deltaRows = (flingPixelRemainder / cellHeightPx).toInt()
             if (deltaRows != 0) {
                 flingPixelRemainder -= deltaRows * cellHeightPx
-                onScrollLines?.invoke(deltaRows)
+                val current = engine
+                if (current?.mouseReportingActive == true) {
+                    sendWheelClicks(
+                        current,
+                        if (deltaRows > 0) MOUSE_BUTTON_FIVE else MOUSE_BUTTON_FOUR,
+                        abs(deltaRows),
+                        width / 2f,
+                        height / 2f,
+                    )
+                } else {
+                    onScrollLines?.invoke(deltaRows)
+                }
             }
             if (!flingScroller.isFinished) postOnAnimation(this)
+        }
+    }
+
+    private val selectionAutoScrollRunnable = object : Runnable {
+        override fun run() {
+            if (!touchState.selectionActive || cellHeightPx <= 0f) return
+            val edge = cellHeightPx
+            val delta = when {
+                lastSelectionY < edge -> -edgeScrollSpeed(lastSelectionY, edge)
+                lastSelectionY > height - edge -> edgeScrollSpeed(height - lastSelectionY, edge)
+                else -> 0
+            }
+            if (delta != 0) {
+                onScrollLines?.invoke(delta)
+                cellAt(lastSelectionX, lastSelectionY)?.let { onSelectionDrag?.invoke(it.first, it.second) }
+                postDelayed(this, SELECTION_AUTO_SCROLL_INTERVAL_MS)
+            }
         }
     }
 
@@ -182,6 +233,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var backgroundArgb = Color.BLACK
     private var foregroundArgb = Color.WHITE
     private var backgroundOpacity = 1f
+    private var selectionArgb = 0x99155E75.toInt()
+    private var cursorAccentArgb = Color.BLACK
+    private val fallbackTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val emojiTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val glyphTypefaceCache = LinkedHashMap<String, Typeface>(256, 0.75f, true)
+    private val imeState = GhosttyImeState()
 
     // Native snapshots are dirty-row deltas. The store retains a complete
     // frame across View resizes until the matching full native frame arrives.
@@ -189,10 +246,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     private var cursorBlinkOn = true
     private var cursorBlinking = false
+    private var textBlinking = false
     private var hasFocus = false
     private val cursorBlinkRunnable = object : Runnable {
         override fun run() {
-            if (!cursorBlinking) return
+            if (!cursorBlinking && !textBlinking) return
             cursorBlinkOn = !cursorBlinkOn
             postInvalidateOnAnimation()
             postDelayed(this, CURSOR_BLINK_INTERVAL_MS)
@@ -208,7 +266,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     fun attach(nativeEngine: GhosttyNativeEngine, renderFrames: GhosttyRenderFrameStore) {
         engine = nativeEngine
         frameStore = renderFrames
-        renderFrames.currentFrame()?.snapshot?.let { updateCursorBlink(shouldBlink(it)) }
+        renderFrames.currentFrame()?.let {
+            updateCursorBlink(shouldBlink(it.snapshot))
+            updateTextBlink(it.rows.any { row -> row.any { cell -> cell?.blink == true } })
+        }
         if (width > 0 && height > 0) {
             resizeGrid()
         }
@@ -216,8 +277,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     fun setPalette(palette: TerminalPalette) {
-        backgroundArgb = Color.parseColor(palette.background)
-        foregroundArgb = Color.parseColor(palette.foreground)
+        backgroundArgb = terminalColorToArgb(palette.background)
+        foregroundArgb = terminalColorToArgb(palette.foreground)
+        selectionArgb = terminalColorToArgb(palette.selectionBackground)
+        cursorAccentArgb = terminalColorToArgb(palette.cursorAccent)
         invalidate()
     }
 
@@ -264,15 +327,42 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         onCellTap = callback
     }
 
+    fun setOnTerminalFocusChange(callback: (Boolean) -> Unit) {
+        onTerminalFocusChange = callback
+    }
+
+    fun clearComposingText() {
+        if (!imeState.isComposing) return
+        imeState.cancel()
+        invalidate()
+    }
+
+    fun performBellFeedback() {
+        if (!isAttachedToWindow || !isShown || !hasWindowFocus()) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBellAtMs < BELL_RATE_LIMIT_MS) return
+        lastBellAtMs = now
+        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private var lastBellAtMs = 0L
+
     fun armSelectionMode() {
-        selectionModeArmed = true
-        selectionActive = false
+        if (touchState.armSelection()) {
+            engine?.requestMouseEvent(
+                MOUSE_ACTION_RELEASE,
+                MOUSE_BUTTON_LEFT,
+                0,
+                0f,
+                0f,
+                false,
+            )
+        }
         requestFocus()
     }
 
     fun clearSelectionAndResetGesture() {
-        selectionModeArmed = false
-        selectionActive = false
+        touchState.clearSelection()
     }
 
     fun focusAndShowKeyboard() {
@@ -289,40 +379,97 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (dispatchMouseEvent(event)) return true
+        val currentEngine = engine
+        if (currentEngine?.mouseReportingActive == true &&
+            !touchState.selectionArmed && !touchState.selectionActive
+        ) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    releaseTouchMouse(event)
+                    touchState.beginTwoFingerScroll()
+                    twoFingerLastY = averageY(event)
+                }
+                MotionEvent.ACTION_MOVE -> if (touchState.twoFingerScrolling && event.pointerCount >= 2) {
+                    val y = averageY(event)
+                    scrollAccum += twoFingerLastY - y
+                    twoFingerLastY = y
+                    val delta = (scrollAccum / cellHeightPx).toInt()
+                    if (delta != 0) {
+                        scrollAccum -= delta * cellHeightPx
+                        // Mouse-reporting applications (e.g. tmux with mouse on) own the
+                        // screen, so two-finger drag must be delivered as wheel clicks.
+                        // A plain viewport scroll is a no-op inside their alternate screen.
+                        val current = engine
+                        if (current?.mouseReportingActive == true) {
+                            sendWheelClicks(
+                                current,
+                                // Finger up == scroll down == wheel down (button 5);
+                                // finger down == scroll up == wheel up (button 4).
+                                if (delta > 0) MOUSE_BUTTON_FIVE else MOUSE_BUTTON_FOUR,
+                                abs(delta),
+                                event.x,
+                                event.y,
+                            )
+                        } else {
+                            onScrollLines?.invoke(delta)
+                        }
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (touchState.finishTwoFingerScroll()) {
+                        pointerDown = false
+                        return true
+                    }
+                }
+            }
+        }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
 
         // 长按进入选择后，扩选由这里直接处理；不依赖 GestureDetector 的 onScroll。
-        if (event.actionMasked == MotionEvent.ACTION_MOVE && selectionActive) {
+        if (event.actionMasked == MotionEvent.ACTION_MOVE && touchState.selectionActive) {
+            lastSelectionX = event.x
+            lastSelectionY = event.y
             cellAt(event.x, event.y)?.let { (col, row) ->
                 onSelectionDrag?.invoke(col, row)
             }
+            scheduleSelectionAutoScroll()
             return true
         }
 
         val handled = scrollDetector.onTouchEvent(event) || super.onTouchEvent(event)
+        val mouseHandled = !touchState.twoFingerScrolling && dispatchMouseEvent(event, allowTouch = true)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestFocus()
             }
             MotionEvent.ACTION_UP -> {
                 pointerDown = false
-                if (selectionActive) {
+                removeCallbacks(selectionAutoScrollRunnable)
+                if (touchState.selectionActive) {
                     cellAt(event.x, event.y)?.let { (col, row) ->
                         onSelectionRelease?.invoke(col, row)
                     } ?: onSelectionRelease?.invoke(-1, -1)
-                    selectionActive = false
+                    touchState.finishSelection()
+                } else {
+                    performClick()
                 }
             }
             MotionEvent.ACTION_CANCEL -> {
                 pointerDown = false
-                if (selectionActive) {
+                removeCallbacks(selectionAutoScrollRunnable)
+                if (touchState.selectionActive) {
                     onSelectionRelease?.invoke(-1, -1)
-                    selectionActive = false
+                    touchState.finishSelection()
                 }
             }
         }
-        return handled
+        return handled || mouseHandled
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -350,28 +497,30 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
         return object : BaseInputConnection(this, true) {
-            private var composing = false
-
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                composing = text != null
-                return super.setComposingText(text, newCursorPosition)
+                imeState.setComposing(text)
+                postInvalidateOnAnimation()
+                return true
             }
 
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                composing = false
-                if (!text.isNullOrEmpty()) sendInput(normalizeTerminalInput(text.toString()))
+                imeState.commit(text)?.let(::sendInput)
+                postInvalidateOnAnimation()
                 return true
             }
 
             override fun finishComposingText(): Boolean {
-                composing = false
-                return super.finishComposingText()
+                clearComposingText()
+                return true
             }
 
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 // 组合输入过程中由 IME 管理的删除不应直接发给远端；
                 // 只有真正编辑已上屏内容时才发送退格。
-                if (!composing && beforeLength > 0) sendInput("\u007f")
+                val count = imeState.deleteCount(beforeLength, MAX_IME_DELETE)
+                if (count > 0) {
+                    sendInput("\u007f".repeat(count))
+                }
                 return true
             }
 
@@ -483,29 +632,49 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     ) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
         hasFocus = gainFocus
+        if (!gainFocus) clearComposingText()
+        onTerminalFocusChange?.invoke(gainFocus)
         syncCursorBlink()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         hasFocus = hasFocus()
-        frameStore?.currentFrame()?.snapshot?.let { updateCursorBlink(shouldBlink(it)) }
+        onTerminalFocusChange?.invoke(hasFocus)
+        frameStore?.currentFrame()?.let {
+            updateCursorBlink(shouldBlink(it.snapshot))
+            updateTextBlink(it.rows.any { row -> row.any { cell -> cell?.blink == true } })
+        }
     }
 
     override fun onDetachedFromWindow() {
         cursorBlinking = false
+        textBlinking = false
+        if (touchState.releaseMouse()) {
+            engine?.requestMouseEvent(
+                MOUSE_ACTION_RELEASE,
+                MOUSE_BUTTON_LEFT,
+                0,
+                0f,
+                0f,
+                false,
+            )
+        }
         flingScroller.forceFinished(true)
         removeCallbacks(cursorBlinkRunnable)
         removeCallbacks(flingRunnable)
+        removeCallbacks(selectionAutoScrollRunnable)
+        clearComposingText()
+        onTerminalFocusChange?.invoke(false)
         super.onDetachedFromWindow()
     }
 
-    private fun dispatchMouseEvent(event: MotionEvent): Boolean {
+    private fun dispatchMouseEvent(event: MotionEvent, allowTouch: Boolean = false): Boolean {
         val currentEngine = engine ?: return false
-        // A finger drag is terminal viewport navigation even when vim/tmux has
-        // enabled mouse tracking. Only an actual pointer device is forwarded.
-        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
-        if (selectionModeArmed || selectionActive) return false
+        val physicalMouse = event.isFromSource(InputDevice.SOURCE_MOUSE)
+        if (!physicalMouse && !allowTouch) return false
+        if (!physicalMouse && (event.pointerCount != 1 || touchState.twoFingerScrolling)) return false
+        if (touchState.selectionArmed || touchState.selectionActive) return false
         if (!currentEngine.mouseReportingActive) return false
         val action = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> MOUSE_ACTION_PRESS
@@ -514,10 +683,17 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             MotionEvent.ACTION_MOVE, MotionEvent.ACTION_HOVER_MOVE -> MOUSE_ACTION_MOTION
             else -> return false
         }
+        if (!physicalMouse && action != MOUSE_ACTION_PRESS && !touchState.mousePressed) return false
         val button = if (action == MOUSE_ACTION_MOTION) {
             0
         } else {
             mouseButton(event).also { pressedMouseButton = it }
+        }
+        if (!physicalMouse) {
+            when (action) {
+                MOUSE_ACTION_PRESS -> touchState.beginMouse()
+                MOUSE_ACTION_RELEASE -> touchState.releaseMouse()
+            }
         }
         currentEngine.requestMouseEvent(
             action = action,
@@ -525,9 +701,41 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             mods = mouseModifiers(event),
             x = event.x,
             y = event.y,
-            anyButtonPressed = event.buttonState != 0,
+            anyButtonPressed = if (physicalMouse) event.buttonState != 0 else touchState.mousePressed,
         )
         return true
+    }
+
+    private fun releaseTouchMouse(event: MotionEvent) {
+        if (!touchState.releaseMouse()) return
+        engine?.requestMouseEvent(
+            action = MOUSE_ACTION_RELEASE,
+            button = MOUSE_BUTTON_LEFT,
+            mods = mouseModifiers(event),
+            x = event.x,
+            y = event.y,
+            anyButtonPressed = false,
+        )
+    }
+
+    private fun averageY(event: MotionEvent): Float {
+        if (event.pointerCount == 0) return event.y
+        var total = 0f
+        for (index in 0 until event.pointerCount) total += event.getY(index)
+        return total / event.pointerCount
+    }
+
+    private fun edgeScrollSpeed(distance: Float, edge: Float): Int = when {
+        distance <= edge / 3f -> 3
+        distance <= edge * 2f / 3f -> 2
+        else -> 1
+    }
+
+    private fun scheduleSelectionAutoScroll() {
+        removeCallbacks(selectionAutoScrollRunnable)
+        if (lastSelectionY < cellHeightPx || lastSelectionY > height - cellHeightPx) {
+            postDelayed(selectionAutoScrollRunnable, SELECTION_AUTO_SCROLL_INTERVAL_MS)
+        }
     }
 
     private fun mouseButton(event: MotionEvent): Int {
@@ -549,6 +757,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         if (event.metaState and KeyEvent.META_ALT_ON != 0) mods = mods or KEY_MOD_ALT
         if (event.metaState and KeyEvent.META_META_ON != 0) mods = mods or KEY_MOD_SUPER
         return mods
+    }
+
+    private fun sendWheelClicks(
+        currentEngine: GhosttyNativeEngine,
+        button: Int,
+        count: Int,
+        x: Float,
+        y: Float,
+    ) {
+        repeat(count.coerceIn(1, 10)) {
+            currentEngine.requestMouseEvent(
+                action = MOUSE_ACTION_PRESS,
+                button = button,
+                mods = 0,
+                x = x,
+                y = y,
+                anyButtonPressed = false,
+            )
+        }
     }
 
     private fun sendReportedWheel(
@@ -623,6 +850,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         change: GhosttyRenderFrameStore.Change,
     ) {
         updateCursorBlink(shouldBlink(snapshot))
+        updateTextBlink(
+            frameStore?.currentFrame()?.rows?.any { row -> row.any { cell -> cell?.blink == true } } == true,
+        )
         if (change.fullRedraw || height <= 0 || width <= 0) {
             invalidate()
             return
@@ -645,10 +875,20 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private fun updateCursorBlink(enabled: Boolean) {
         if (enabled == cursorBlinking) return
         cursorBlinking = enabled
+        syncBlinkTimer()
+    }
+
+    private fun updateTextBlink(enabled: Boolean) {
+        if (enabled == textBlinking) return
+        textBlinking = enabled
+        syncBlinkTimer()
+    }
+
+    private fun syncBlinkTimer() {
         removeCallbacks(cursorBlinkRunnable)
         cursorBlinkOn = true
         postInvalidateOnAnimation()
-        if (enabled && isAttachedToWindow) {
+        if ((cursorBlinking || textBlinking) && isAttachedToWindow) {
             postDelayed(cursorBlinkRunnable, CURSOR_BLINK_INTERVAL_MS)
         }
     }
@@ -661,7 +901,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         width: Float,
     ) {
         val lineColor = textPaint.color
-        textPaint.color = lineColor
+        textPaint.color = cell.underlineArgb
         textPaint.strokeWidth = max(1f, resources.displayMetrics.density * 0.75f)
         textPaint.style = Paint.Style.STROKE
 
@@ -704,6 +944,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         textPaint.pathEffect = null
         textPaint.style = Paint.Style.FILL
         textPaint.strokeWidth = 0f
+        textPaint.color = lineColor
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -721,11 +962,15 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         canvas.drawColor(applyOpacityToArgb(backgroundArgb, backgroundOpacity))
 
         val target = frame.rows
-        for (rowIndex in target.indices) {
+        canvas.getClipBounds(drawClip)
+        val firstVisibleRow = (drawClip.top / cellHeightPx).toInt().coerceIn(0, target.lastIndex)
+        val lastVisibleRow = (drawClip.bottom / cellHeightPx).toInt().coerceIn(firstVisibleRow, target.lastIndex)
+        for (rowIndex in firstVisibleRow..lastVisibleRow) {
             val rowCells = target[rowIndex]
+            val searchRanges = frame.rowMetadata.getOrNull(rowIndex)?.searchRanges.orEmpty()
             val y = rowIndex * cellHeightPx
             var x = 0f
-            for (cell in rowCells) {
+            for ((column, cell) in rowCells.withIndex()) {
                 if (cell == null || cell.wideTail) {
                     // The leading wide cell already advanced x by two columns;
                     // the tail is a spacer and must not advance again.
@@ -734,7 +979,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     continue
                 }
                 val effectiveBg = when {
-                    cell.selected -> SELECTION_BG_ARGB
+                    cell.selected -> selectionArgb
+                    searchRanges.any { it.active && column in it.startCol..it.endCol } -> SEARCH_ACTIVE_BG_ARGB
+                    searchRanges.any { column in it.startCol..it.endCol } -> SEARCH_BG_ARGB
                     cell.inverse -> cell.fgArgb
                     else -> cell.bgArgb
                 }
@@ -748,15 +995,21 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     fillPaint.color = effectiveBg
                     canvas.drawRect(x, y, x + cellWidth, y + cellHeightPx, fillPaint)
                 }
-                if (cell.text.isNotEmpty() && !cell.invisible && !cell.wideTail) {
+                if (cell.text.isNotEmpty() && !cell.invisible && !cell.wideTail &&
+                    (!cell.blink || cursorBlinkOn)
+                ) {
                     textPaint.color = effectiveFg
                     textPaint.alpha = if (cell.faint) FAINT_ALPHA else 255
                     textPaint.isFakeBoldText = cell.bold
                     textPaint.textSkewX = if (cell.italic) ITALIC_SKEW_X else 0f
                     textPaint.isStrikeThruText = cell.strikethrough
                     textPaint.isUnderlineText = false
+                    textPaint.typeface = typefaceFor(cell.text)
+                    val saveCount = canvas.save()
+                    canvas.clipRect(x, y, x + cellWidth, y + cellHeightPx)
                     canvas.drawText(cell.text, x, y + baselinePx, textPaint)
                     drawCellDecorations(canvas, cell, x, y, cellWidth)
+                    canvas.restoreToCount(saveCount)
                 }
                 textPaint.color = foregroundArgb
                 textPaint.alpha = 255
@@ -764,8 +1017,26 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 textPaint.textSkewX = 0f
                 textPaint.isStrikeThruText = false
                 textPaint.pathEffect = null
+                textPaint.typeface = Typeface.MONOSPACE
                 x += cellWidth
             }
+        }
+
+        if (imeState.isComposing && snapshot.cursorX >= 0 && snapshot.cursorY >= 0) {
+            val composingText = imeState.composingText
+            val left = snapshot.cursorX * cellWidthPx
+            val top = snapshot.cursorY * cellHeightPx
+            textPaint.color = foregroundArgb
+            textPaint.typeface = typefaceFor(composingText)
+            canvas.drawText(composingText, left, top + baselinePx, textPaint)
+            canvas.drawLine(
+                left,
+                top + baselinePx + UNDERLINE_Y_OFFSET,
+                minOf(width.toFloat(), left + textPaint.measureText(composingText)),
+                top + baselinePx + UNDERLINE_Y_OFFSET,
+                textPaint,
+            )
+            textPaint.typeface = Typeface.MONOSPACE
         }
 
         if (cursorBlinkOn &&
@@ -817,7 +1088,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     val cell = frame.rows.getOrNull(snapshot.cursorY)
                         ?.getOrNull(snapshot.cursorX)
                     if (cell != null && cell.text.isNotEmpty() && !cell.invisible && !cell.wideTail) {
-                        textPaint.color = snapshot.backgroundArgb
+                        textPaint.color = cursorAccentArgb
                         textPaint.alpha = 255
                         textPaint.isFakeBoldText = cell.bold
                         textPaint.textSkewX = if (cell.italic) ITALIC_SKEW_X else 0f
@@ -831,6 +1102,24 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         }
     }
 
+    private fun typefaceFor(text: String): Typeface {
+        glyphTypefaceCache[text]?.let { return it }
+        val selected = when {
+            textPaint.hasGlyph(text) -> Typeface.MONOSPACE
+            text.codePoints().anyMatch { Character.getType(it) == Character.OTHER_SYMBOL.toInt() } -> emojiTypeface
+            else -> fallbackTypeface
+        }
+        if (glyphTypefaceCache.size >= GLYPH_CACHE_SIZE) {
+            val oldest = glyphTypefaceCache.entries.iterator()
+            if (oldest.hasNext()) {
+                oldest.next()
+                oldest.remove()
+            }
+        }
+        glyphTypefaceCache[text] = selected
+        return selected
+    }
+
     private companion object {
         const val DEFAULT_FONT_SIZE_SP = 14f
         const val INITIAL_BUFFER_BYTES = 1 shl 20
@@ -840,7 +1129,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val UNDERLINE_Y_OFFSET = 3f
         const val CURSOR_BLINK_INTERVAL_MS = 500L
         const val FLING_POSITION_LIMIT = 1_000_000
-        const val SELECTION_BG_ARGB = 0xFF155E75.toInt()
+        const val SEARCH_BG_ARGB = 0x997A5B00.toInt()
+        const val SEARCH_ACTIVE_BG_ARGB = 0xFFE0A800.toInt()
+        const val GLYPH_CACHE_SIZE = 512
+        const val MAX_IME_DELETE = 64
+        const val SELECTION_AUTO_SCROLL_INTERVAL_MS = 50L
+        const val BELL_RATE_LIMIT_MS = 100L
         const val MOUSE_ACTION_PRESS = 0
         const val MOUSE_ACTION_RELEASE = 1
         const val MOUSE_ACTION_MOTION = 2

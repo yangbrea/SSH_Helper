@@ -3,11 +3,30 @@ package com.yang136.sshhelper.terminal
 /**
  * Managed JNI bridge to libghostty-vt.
  *
- * A handle points to a C++ [NativeTerminal] wrapper that owns the Ghostty
- * terminal, render state, row iterators and WRITE_PTY response buffer. All
- * methods for the same handle must be called from a single thread.
+ * Handles are opaque registry IDs rather than native pointers. The engine
+ * serializes terminal access; clipboard resolve/cancel and repeated close are
+ * additionally safe while a synchronous native callback is pending.
  */
 object GhosttyNativeBridge {
+    const val PASTE_RESULT_WRITTEN = 0
+    const val PASTE_RESULT_EMPTY = 1
+    const val PASTE_RESULT_REJECTED = 2
+    const val PASTE_RESULT_ERROR = 3
+    const val PASTE_SOURCE_CLIPBOARD = 0
+    const val PASTE_SOURCE_TEXT = 1
+
+    data class ClipboardWriteRequest(
+        val handle: Long,
+        val requestId: Long,
+        val text: String,
+        val programName: String,
+    )
+
+    private val clipboardListeners = java.util.concurrent.ConcurrentHashMap<
+        Long,
+        (ClipboardWriteRequest) -> Unit
+    >()
+
     init {
         System.loadLibrary("sshhelper_terminal")
     }
@@ -28,10 +47,18 @@ object GhosttyNativeBridge {
     external fun nativeWrite(handle: Long, data: ByteArray)
 
     /** Pastes text into the terminal according to current bracketed-paste mode. */
-    external fun nativePasteText(handle: Long, data: ByteArray)
+    external fun nativePasteText(
+        handle: Long,
+        data: ByteArray,
+        source: Int,
+        allowUnsafe: Boolean,
+    ): Int
 
     /** Scrolls the viewport by a signed row delta (negative scrolls up). */
     external fun nativeScrollViewport(handle: Long, deltaRows: Int)
+
+    /** Returns the viewport to the active screen before user input. */
+    external fun nativeScrollViewportToBottom(handle: Long)
 
     /** Selects all terminal content and installs it as the active selection. */
     external fun nativeSelectAll(handle: Long): Boolean
@@ -67,12 +94,52 @@ object GhosttyNativeBridge {
     )
 
     /** Sets native default colors so render snapshots use the app palette. */
-    external fun nativeSetDefaultColors(
+    external fun nativeSetAppearance(
         handle: Long,
         backgroundArgb: Int,
         foregroundArgb: Int,
         cursorArgb: Int,
+        paletteArgb: IntArray,
+        dark: Boolean,
     )
+
+    /** Encodes focus state only when DEC mode 1004 is enabled. */
+    external fun nativeEncodeFocus(handle: Long, focused: Boolean): ByteArray?
+    external fun nativeFocusReportingActive(handle: Long): Boolean
+
+    /** Thread-safe reply/cancel operations; these never call into Ghostty. */
+    external fun nativeResolveClipboardWrite(handle: Long, requestId: Long, allowed: Boolean)
+    external fun nativeCancelClipboardWrites(handle: Long)
+
+    fun registerClipboardListener(handle: Long, listener: (ClipboardWriteRequest) -> Unit) {
+        clipboardListeners[handle] = listener
+    }
+
+    fun unregisterClipboardListener(handle: Long) {
+        clipboardListeners.remove(handle)
+    }
+
+    @JvmStatic
+    private fun onNativeClipboardWrite(
+        handle: Long,
+        requestId: Long,
+        data: ByteArray,
+        programName: ByteArray,
+    ) {
+        val listener = clipboardListeners[handle]
+        if (listener == null) {
+            nativeResolveClipboardWrite(handle, requestId, false)
+            return
+        }
+        listener(
+            ClipboardWriteRequest(
+                handle = handle,
+                requestId = requestId,
+                text = data.decodeToString(),
+                programName = programName.decodeToString(),
+            ),
+        )
+    }
 
     /** Drains bytes libghostty asked to write back to the PTY. */
     external fun nativeDrainPtyWrites(handle: Long): ByteArray?
@@ -86,11 +153,17 @@ object GhosttyNativeBridge {
     /** Returns current OSC working directory as UTF-8, or null. */
     external fun nativeGetPwd(handle: Long): ByteArray?
 
-    /** Sets search needle and returns total match count. */
-    external fun nativeSearchSet(handle: Long, query: ByteArray?): Int
+    /** Sets the search needle and restarts incremental search work. */
+    external fun nativeSearchSet(handle: Long, query: ByteArray?, caseSensitive: Boolean)
+
+    /** Performs at most roughly 4 ms of search work; true when caught up. */
+    external fun nativeSearchStep(handle: Long): Boolean
 
     /** Selects next/previous search match; returns selected index or -1. */
     external fun nativeSearchSelect(handle: Long, backwards: Boolean): Int
+
+    /** Returns the selected match index without moving it. */
+    external fun nativeSearchSelectedIndex(handle: Long): Int
 
     /** Returns current total search match count. */
     external fun nativeSearchTotal(handle: Long): Int

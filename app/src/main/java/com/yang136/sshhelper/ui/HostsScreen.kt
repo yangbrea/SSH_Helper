@@ -38,7 +38,7 @@ fun HostsScreen(
     onOpenHost: (HostProfile) -> Unit,
     onQuickNewSession: (HostProfile) -> Unit,
     onForwards: (Long) -> Unit,
-    onNewSession: (HostProfile) -> SessionId?,
+    onNewSession: (HostProfile, SessionKind) -> SessionId?,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
     onRenameSession: (SessionId, String) -> Unit,

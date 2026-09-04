@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.IOException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -171,6 +172,58 @@ class AppDatabaseMigrationTest {
                     cursor.moveToFirst()
                     assertEquals(label, if (label.startsWith("document")) 0 else 1, cursor.getInt(0))
                 }
+            }
+        }
+    }
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate8To9_preservesHostsAndRemovesHostLevelMultiplexer() {
+        val name = "$databaseName-8-9"
+        helper.createDatabase(name, 8).apply {
+            execSQL(
+                """INSERT INTO hosts
+                    (id,name,hostname,port,username,authType,rememberCredential,privateKeyName,autoReconnect,jumpHostId,proxyType,proxyHost,proxyPort,proxyUsername,multiplexer,createdAt,updatedAt,lastConnectedAt)
+                    VALUES (1,'旧主机','example.test',22,'root','PASSWORD',1,NULL,1,NULL,NULL,NULL,NULL,NULL,'TMUX',1,2,NULL)
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(name, 9, true, AppDatabase.MIGRATION_8_9).use { database ->
+            database.query("SELECT name FROM hosts WHERE id = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("旧主机", cursor.getString(0))
+            }
+            database.query("PRAGMA table_info(hosts)").use { cursor ->
+                var hasMultiplexer = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "multiplexer") hasMultiplexer = true
+                }
+                assertFalse("hosts.multiplexer must be removed in v9", hasMultiplexer)
+            }
+        }
+    }
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate7To8_preservesHostsAndDefaultsMultiplexerToNone() {
+        val name = "$databaseName-7-8"
+        helper.createDatabase(name, 7).apply {
+            execSQL("INSERT INTO hosts (id,name,hostname,port,username,authType,rememberCredential,privateKeyName,autoReconnect,jumpHostId,proxyType,proxyHost,proxyPort,proxyUsername,createdAt,updatedAt,lastConnectedAt) VALUES (1,'旧主机','example.test',22,'root','PASSWORD',1,NULL,1,NULL,NULL,NULL,NULL,NULL,1,2,NULL)")
+            execSQL("INSERT INTO command_snippets (id,title,command,groupName,hostId,executeImmediately,sortOrder,createdAt,updatedAt) VALUES (1,'检查','uptime','常用',1,0,0,1,1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate(name, 8, true, AppDatabase.MIGRATION_7_8).use { database ->
+            database.query("SELECT name, multiplexer FROM hosts WHERE id = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("旧主机", cursor.getString(0))
+                assertEquals("NONE", cursor.getString(1))
+            }
+            database.query("SELECT COUNT(*) FROM command_snippets WHERE hostId = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
             }
         }
     }

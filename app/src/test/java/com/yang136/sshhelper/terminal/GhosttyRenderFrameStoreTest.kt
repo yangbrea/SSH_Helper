@@ -131,6 +131,22 @@ class GhosttyRenderFrameStoreTest {
         assertEquals("old", store.textAt(0))
     }
 
+    @Test
+    fun partialFramePreservesWrapAndSearchMetadata() {
+        val store = GhosttyRenderFrameStore()
+        val initial = snapshot(SNAPSHOT_DIRTY_FULL, rows = 2, textByRow = mapOf(0 to "url", 1 to "tail"))
+        store.apply(
+            initial.copy(
+                rowsData = initial.rowsData.map {
+                    if (it.rowIndex == 0) it.copy(wrap = true) else it.copy(wrapContinuation = true)
+                },
+            ),
+        )
+        store.apply(snapshot(SNAPSHOT_DIRTY_PARTIAL, rows = 2, textByRow = mapOf(1 to "next")))
+
+        assertTrue(store.currentFrame()?.rowMetadata?.get(0)?.wrap == true)
+    }
+
     private fun GhosttyRenderFrameStore.textAt(row: Int): String =
         currentFrame()?.rows?.get(row)?.filterNotNull()?.joinToString("") { it.text }.orEmpty()
 

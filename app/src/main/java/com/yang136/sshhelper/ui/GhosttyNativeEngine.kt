@@ -6,12 +6,14 @@ import com.yang136.sshhelper.terminal.RenderSnapshotDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 /**
  * Owns all native Ghostty calls on a dedicated single-thread executor.
@@ -25,6 +27,8 @@ internal class GhosttyNativeEngine(
     var onBell: (() -> Unit)? = null
     var onTitleChange: ((String) -> Unit)? = null
     var onPwdChange: ((String) -> Unit)? = null
+    var onClipboardWrite: ((GhosttyNativeBridge.ClipboardWriteRequest) -> Unit)? = null
+    var onSearchUpdated: ((Int, Int) -> Unit)? = null
     @Volatile
     var onSnapshotReady: ((GhosttyRenderSnapshot) -> Unit)? = null
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -39,6 +43,12 @@ internal class GhosttyNativeEngine(
 
     @Volatile
     private var handle: Long = 0L
+    @Volatile
+    private var viewFocused = false
+    private var lastReportedFocus: Boolean? = null
+    private val searchGeneration = AtomicLong()
+    @Volatile
+    private var searchActive = false
 
     /** Whether the active terminal app has enabled any mouse reporting mode. */
     @Volatile
@@ -57,6 +67,9 @@ internal class GhosttyNativeEngine(
         scope.launch {
             if (handle == 0L) {
                 handle = GhosttyNativeBridge.nativeCreateManaged(cols, rows)
+                GhosttyNativeBridge.registerClipboardListener(handle) { request ->
+                    onClipboardWrite?.invoke(request)
+                }
                 updateMouseReportingState()
                 pendingResize?.let { resize ->
                     pendingResize = null
@@ -67,15 +80,29 @@ internal class GhosttyNativeEngine(
         }
     }
 
-    suspend fun write(data: ByteArray) {
+    suspend fun write(data: ByteArray, emitProtocolReplies: Boolean = true) {
         if (data.isEmpty()) return
         withContext(dispatcher) {
             if (handle == 0L) return@withContext
-            GhosttyNativeBridge.nativeWrite(handle, data)
+            var offset = 0
+            while (offset < data.size) {
+                val end = minOf(data.size, offset + MAX_WRITE_BYTES)
+                GhosttyNativeBridge.nativeWrite(handle, data.copyOfRange(offset, end))
+                offset = end
+            }
             updateMouseReportingState()
-            drainPtyWrites()
-            drainEvents()
+            if (emitProtocolReplies) {
+                syncFocusReporting()
+                drainPtyWrites()
+            } else {
+                // A SessionManager Snapshot is historical output used only to
+                // reconstruct terminal state. Queries inside it may have been
+                // answered long ago; never inject those replies into the live shell.
+                GhosttyNativeBridge.nativeDrainPtyWrites(handle)
+            }
+            drainEvents(emitBell = emitProtocolReplies)
             refreshSnapshot()
+            refreshActiveSearch()
         }
     }
 
@@ -83,7 +110,9 @@ internal class GhosttyNativeEngine(
         withContext(dispatcher) {
             if (handle == 0L) return@withContext
             GhosttyNativeBridge.nativeReset(handle)
+            lastReportedFocus = null
             updateMouseReportingState()
+            refreshActiveSearch()
             refreshSnapshot()
         }
     }
@@ -96,22 +125,28 @@ internal class GhosttyNativeEngine(
             val resize = pendingResize ?: return@launch
             pendingResize = null
             applyResize(resize)
+            refreshActiveSearch()
             refreshSnapshot()
         }
     }
 
-    fun requestSearchSet(query: String, backwards: Boolean, onResult: (Int, Int) -> Unit) {
-        if (handle == 0L) {
-            onResult(-1, 0)
-            return
-        }
+    fun requestSearchSet(
+        query: String,
+        backwards: Boolean,
+        caseSensitive: Boolean,
+        onResult: (Int, Int) -> Unit,
+    ) {
+        val generation = searchGeneration.incrementAndGet()
+        searchActive = query.isNotEmpty()
         scope.launch {
             if (handle == 0L) {
                 onResult(-1, 0)
                 return@launch
             }
             val bytes = query.takeIf { it.isNotEmpty() }?.encodeToByteArray()
-            val total = GhosttyNativeBridge.nativeSearchSet(handle, bytes)
+            GhosttyNativeBridge.nativeSearchSet(handle, bytes, caseSensitive)
+            if (!completeSearch(generation)) return@launch
+            val total = GhosttyNativeBridge.nativeSearchTotal(handle)
             val index = if (total > 0) {
                 GhosttyNativeBridge.nativeSearchSelect(handle, backwards)
             } else {
@@ -148,10 +183,12 @@ internal class GhosttyNativeEngine(
     ) {
         scope.launch {
             if (handle == 0L) return@launch
+            GhosttyNativeBridge.nativeScrollViewportToBottom(handle)
             val bytes = GhosttyNativeBridge.nativeEncodeKey(
                 handle, action, keyCode, mods, unshiftedCodepoint, utf8,
             )
             if (bytes != null && bytes.isNotEmpty()) onPtyWrite(bytes)
+            refreshSnapshot()
         }
     }
 
@@ -173,6 +210,8 @@ internal class GhosttyNativeEngine(
     }
 
     fun requestSearchClear() {
+        searchActive = false
+        searchGeneration.incrementAndGet()
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeSearchClear(handle)
@@ -251,37 +290,94 @@ internal class GhosttyNativeEngine(
         scope.launch {
             if (handle == 0L) return@launch
             GhosttyNativeBridge.nativeScrollViewport(handle, deltaRows)
+            refreshActiveSearch()
             refreshSnapshot()
         }
     }
 
-    fun requestPasteText(text: String) {
-        if (text.isEmpty()) return
+    fun requestRawUserInput(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
         scope.launch {
             if (handle == 0L) return@launch
-            GhosttyNativeBridge.nativePasteText(handle, text.encodeToByteArray())
+            GhosttyNativeBridge.nativeScrollViewportToBottom(handle)
+            onPtyWrite(bytes)
+            refreshSnapshot()
+        }
+    }
+
+    fun requestPasteText(
+        text: String,
+        source: Int,
+        allowUnsafe: Boolean,
+        onResult: (Int) -> Unit = {},
+    ) {
+        if (text.isEmpty()) {
+            onResult(GhosttyNativeBridge.PASTE_RESULT_EMPTY)
+            return
+        }
+        scope.launch {
+            if (handle == 0L) {
+                onResult(GhosttyNativeBridge.PASTE_RESULT_ERROR)
+                return@launch
+            }
+            GhosttyNativeBridge.nativeScrollViewportToBottom(handle)
+            val result = GhosttyNativeBridge.nativePasteText(
+                handle,
+                text.encodeToByteArray(),
+                source,
+                allowUnsafe,
+            )
             drainPtyWrites()
             drainEvents()
             refreshSnapshot()
+            onResult(result)
         }
     }
 
-    fun requestSetDefaultColors(backgroundArgb: Int, foregroundArgb: Int, cursorArgb: Int) {
+    fun requestSetAppearance(
+        backgroundArgb: Int,
+        foregroundArgb: Int,
+        cursorArgb: Int,
+        paletteArgb: IntArray,
+        dark: Boolean,
+    ) {
         scope.launch {
             if (handle == 0L) return@launch
-            GhosttyNativeBridge.nativeSetDefaultColors(
+            GhosttyNativeBridge.nativeSetAppearance(
                 handle,
                 backgroundArgb,
                 foregroundArgb,
                 cursorArgb,
+                paletteArgb,
+                dark,
             )
             refreshSnapshot()
+        }
+    }
+
+    fun requestFocus(focused: Boolean) {
+        viewFocused = focused
+        scope.launch {
+            if (handle == 0L) return@launch
+            syncFocusReporting()
+        }
+    }
+
+    fun resolveClipboardWrite(requestId: Long, allowed: Boolean) {
+        val currentHandle = handle
+        if (currentHandle != 0L) {
+            GhosttyNativeBridge.nativeResolveClipboardWrite(currentHandle, requestId, allowed)
         }
     }
 
     fun close() {
         if (closing) return
         closing = true
+        val currentHandle = handle
+        if (currentHandle != 0L) {
+            GhosttyNativeBridge.unregisterClipboardListener(currentHandle)
+            GhosttyNativeBridge.nativeCancelClipboardWrites(currentHandle)
+        }
         scope.launch {
             if (handle != 0L) {
                 GhosttyNativeBridge.nativeFreeManaged(handle)
@@ -296,6 +392,18 @@ internal class GhosttyNativeEngine(
 
     private fun updateMouseReportingState() {
         mouseReportingActive = handle != 0L && GhosttyNativeBridge.nativeMouseReportingActive(handle)
+    }
+
+    private fun syncFocusReporting() {
+        if (!GhosttyNativeBridge.nativeFocusReportingActive(handle)) {
+            lastReportedFocus = null
+            return
+        }
+        if (lastReportedFocus == viewFocused) return
+        GhosttyNativeBridge.nativeEncodeFocus(handle, viewFocused)
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(onPtyWrite)
+        lastReportedFocus = viewFocused
     }
 
     private fun drainPtyWrites() {
@@ -333,10 +441,31 @@ internal class GhosttyNativeEngine(
         )
     }
 
-    private fun drainEvents() {
+    private suspend fun completeSearch(generation: Long): Boolean {
+        while (handle != 0L && searchActive && searchGeneration.get() == generation) {
+            if (GhosttyNativeBridge.nativeSearchStep(handle)) return true
+            // Each JNI step has an approximately 4 ms budget. Yielding here lets a
+            // new generation or terminal I/O cancel a long scrollback search.
+            yield()
+        }
+        return false
+    }
+
+    private suspend fun refreshActiveSearch() {
+        if (!searchActive || handle == 0L) return
+        val generation = searchGeneration.get()
+        if (!completeSearch(generation) || searchGeneration.get() != generation) return
+        onSearchUpdated?.invoke(
+            GhosttyNativeBridge.nativeSearchSelectedIndex(handle),
+            GhosttyNativeBridge.nativeSearchTotal(handle),
+        )
+        refreshSnapshot()
+    }
+
+    private fun drainEvents(emitBell: Boolean = true) {
         val flags = GhosttyNativeBridge.nativeTakeEventFlags(handle)
         if (flags == 0) return
-        if (flags and EVENT_BELL != 0) onBell?.invoke()
+        if (emitBell && flags and EVENT_BELL != 0) onBell?.invoke()
         if (flags and EVENT_TITLE != 0) {
             val title = GhosttyNativeBridge.nativeGetTitle(handle)?.decodeToString()
             if (!title.isNullOrEmpty()) onTitleChange?.invoke(title)
@@ -354,6 +483,7 @@ internal class GhosttyNativeEngine(
 
         const val INITIAL_BUFFER_BYTES = 1 shl 20
         const val MAX_BUFFER_BYTES = 64 shl 20
+        const val MAX_WRITE_BYTES = 48 * 1024
     }
 
     private data class ResizeRequest(

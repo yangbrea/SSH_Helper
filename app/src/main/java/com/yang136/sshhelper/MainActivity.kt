@@ -190,7 +190,7 @@ class MainActivity : FragmentActivity() {
                                 onOpenHost = { navController.navigate("host/${it.id}") },
                                 onQuickNewSession = { host -> navController.navigate("host/${host.id}?createSession=1") },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
-                                onNewSession = { profile -> sessionsViewModel.create(profile, SessionFeature.SHELL) },
+                                onNewSession = { profile, kind -> sessionsViewModel.create(profile, SessionFeature.SHELL, kind) },
                                 onOpenTerminal = { id ->
                                     sessions.firstOrNull { it.id == id }?.let { session ->
                                         navController.navigate("terminal/${session.profile.id}/${id.value}")
@@ -450,7 +450,7 @@ class MainActivity : FragmentActivity() {
                                     host = host,
                                     sessions = sessions,
                                     createSession = createSession,
-                                    onNewSession = { profile -> sessionsViewModel.create(profile, SessionFeature.SHELL) },
+                                    onNewSession = { profile, kind -> sessionsViewModel.create(profile, SessionFeature.SHELL, kind) },
                                     onOpenTerminal = { id ->
                                         sessions.firstOrNull { it.id == id }?.let { session ->
                                             navController.navigate("terminal/${session.profile.id}/${id.value}")

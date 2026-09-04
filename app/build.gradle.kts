@@ -90,6 +90,11 @@ android {
         "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
     )
     testOptions.unitTests.isIncludeAndroidResources = true
+    lint {
+        // The existing non-terminal debt is tracked separately. New lint
+        // findings still fail CI and must not grow this baseline.
+        baseline = file("lint-baseline.xml")
+    }
 }
 
 kotlin {

@@ -19,14 +19,20 @@ internal interface TerminalFrontend {
     var onOpenLink: ((String) -> Unit)?
     var onCtrlArmed: ((Boolean) -> Unit)?
     var onRenderingDelayed: ((Boolean) -> Unit)?
+    var onBell: (() -> Unit)?
+    var onTitleChange: ((String) -> Unit)?
+    var onPwdChange: ((String) -> Unit)?
 
     suspend fun write(bytes: ByteArray)
+    /** Replays buffered output without sending historical terminal replies to the live PTY. */
+    suspend fun restore(bytes: ByteArray) = write(bytes)
     suspend fun reset()
     fun setAppearance(palette: TerminalPalette, fontSize: Int)
     fun setImeVisible(visible: Boolean)
 
     fun paste(context: Context)
     fun pasteText(text: String)
+    fun sendInput(bytes: ByteArray)
 
     fun enterSelectionMode()
     fun selectAll()

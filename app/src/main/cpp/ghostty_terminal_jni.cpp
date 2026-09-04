@@ -1,9 +1,8 @@
 // Managed JNI bridge for libghostty-vt.
 //
-// A jlong handle points to a NativeTerminal wrapper rather than a bare
-// GhosttyTerminal. The wrapper owns terminal + render state handles and
-// buffers side effects (WRITE_PTY responses) so Kotlin never handles raw
-// Ghostty pointers directly.
+// A jlong is an opaque registry id for a shared NativeTerminal owner rather
+// than a native pointer. This keeps in-flight calls alive while making close
+// idempotent and safe against concurrent lookup/removal.
 //
 // Threading contract: all native methods for one handle must be called from
 // the same thread / serialized executor. libghostty-vt creates no threads.
@@ -11,11 +10,20 @@
 #include <jni.h>
 #include <android/keycodes.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <condition_variable>
+#include <chrono>
+#include <memory>
+#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
+
+#include "handle_registry.h"
+#include "terminal_native_policy.h"
 
 // GHOSTTY_STATIC is provided by CMake target_compile_definitions.
 #include <ghostty/vt.h>
@@ -40,6 +48,16 @@ struct NativeTerminal {
     GhosttyKeyEncoder key_encoder = nullptr;
     GhosttyKeyEvent key_event = nullptr;
     GhosttySelectionGesture selection_gesture = nullptr;
+    bool search_active = false;
+    bool force_full_snapshot = true;
+    bool search_case_sensitive = false;
+    std::vector<uint8_t> search_query;
+    std::vector<GhosttySelection> case_sensitive_matches;
+    std::vector<GhosttySelection> case_sensitive_candidates;
+    size_t case_sensitive_filter_cursor = 0;
+    bool case_sensitive_filter_started = false;
+    int32_t case_sensitive_selected = -1;
+    bool dark_color_scheme = true;
 
     // Last grid size/cell geometry passed by the View. Used by selection
     // gesture drag events which require display geometry for edge behavior.
@@ -55,13 +73,30 @@ struct NativeTerminal {
     uint32_t pending_events = 0;
 
     // Incremented on reset; Kotlin can discard stale output generations.
-    uint64_t generation = 0;
+    GenerationCounter generation;
 
-    bool closed = false;
+    // Opaque registry id exposed to Kotlin. Never expose this object's address
+    // across JNI: an id can be looked up safely and duplicate free is a no-op.
+    jlong handle_id = 0;
+
+    // A clipboard callback blocks VT parsing while the UI asks the user. The
+    // resolver/canceller only touches this small synchronization object and
+    // never re-enters libghostty.
+    std::mutex clipboard_mutex;
+    std::condition_variable clipboard_cv;
+    uint64_t clipboard_request_id = 0;
+    bool clipboard_waiting = false;
+    bool clipboard_resolved = false;
+    bool clipboard_allowed = false;
+
+    std::atomic<bool> closed{false};
 };
 
-NativeTerminal* fromHandle(jlong handle) {
-    return reinterpret_cast<NativeTerminal*>(handle);
+HandleRegistry<NativeTerminal> gRegistry;
+JavaVM* gJavaVm = nullptr;
+
+std::shared_ptr<NativeTerminal> fromHandle(jlong handle) {
+    return gRegistry.get(handle);
 }
 
 void writePtyCallback(
@@ -96,6 +131,152 @@ void pwdChangedCallback(
     if (native != nullptr) native->pending_events |= kEventPwd;
 }
 
+bool sizeCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata,
+    GhosttySizeReportSize* out_size) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native == nullptr || out_size == nullptr || native->closed.load()) return false;
+    out_size->rows = static_cast<uint16_t>(native->rows);
+    out_size->columns = static_cast<uint16_t>(native->cols);
+    out_size->cell_width = native->cell_width_px;
+    out_size->cell_height = native->cell_height_px;
+    return true;
+}
+
+bool colorSchemeCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata,
+    GhosttyColorScheme* out_scheme) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native == nullptr || out_scheme == nullptr || native->closed.load()) return false;
+    *out_scheme = native->dark_color_scheme
+        ? GHOSTTY_COLOR_SCHEME_DARK
+        : GHOSTTY_COLOR_SCHEME_LIGHT;
+    return true;
+}
+
+bool isUtf8(const uint8_t* data, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        const uint8_t first = data[i++];
+        if (first < 0x80) continue;
+        int continuation = 0;
+        uint32_t value = 0;
+        if ((first & 0xE0) == 0xC0) { continuation = 1; value = first & 0x1F; }
+        else if ((first & 0xF0) == 0xE0) { continuation = 2; value = first & 0x0F; }
+        else if ((first & 0xF8) == 0xF0) { continuation = 3; value = first & 0x07; }
+        else return false;
+        if (i + continuation > len) return false;
+        for (int j = 0; j < continuation; ++j) {
+            const uint8_t next = data[i++];
+            if ((next & 0xC0) != 0x80) return false;
+            value = (value << 6) | (next & 0x3F);
+        }
+        if ((continuation == 1 && value < 0x80) ||
+            (continuation == 2 && value < 0x800) ||
+            (continuation == 3 && value < 0x10000) ||
+            value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) return false;
+    }
+    return true;
+}
+
+bool isTextMime(const GhosttyString& mime) {
+    static constexpr char kTextPlain[] = "text/plain";
+    return mime.ptr != nullptr && mime.len >= sizeof(kTextPlain) - 1 &&
+        std::memcmp(mime.ptr, kTextPlain, sizeof(kTextPlain) - 1) == 0;
+}
+
+void clipboardWriteCallback(
+    GhosttyTerminal /* terminal */,
+    void* userdata,
+    const GhosttyClipboardWrite* write) {
+    auto* native = static_cast<NativeTerminal*>(userdata);
+    if (native == nullptr || write == nullptr || write->reply == nullptr) return;
+
+    GhosttyClipboardWriteResult outcome = GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED;
+    const GhosttyString* text = nullptr;
+    if (write->contents_len == 0) {
+        static const GhosttyString empty{nullptr, 0};
+        text = &empty;
+    } else {
+        for (size_t i = 0; i < write->contents_len; ++i) {
+            if (isTextMime(write->contents[i].mime)) {
+                text = &write->contents[i].data;
+                break;
+            }
+        }
+    }
+    if (text != nullptr && text->len <= (1u << 20) &&
+        (text->len == 0 || (text->ptr != nullptr && isUtf8(text->ptr, text->len)))) {
+        JNIEnv* env = nullptr;
+        if (gJavaVm != nullptr &&
+            gJavaVm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
+            uint64_t request_id = 0;
+            {
+                std::lock_guard<std::mutex> lock(native->clipboard_mutex);
+                request_id = ++native->clipboard_request_id;
+                native->clipboard_waiting = true;
+                native->clipboard_resolved = false;
+                native->clipboard_allowed = false;
+            }
+            jclass bridge = env->FindClass(kClassName);
+            jmethodID method = bridge == nullptr ? nullptr : env->GetStaticMethodID(
+                bridge, "onNativeClipboardWrite", "(JJ[B[B)V");
+            jbyteArray data = env->NewByteArray(static_cast<jsize>(text->len));
+            if (data != nullptr && text->len > 0) {
+                env->SetByteArrayRegion(
+                    data, 0, static_cast<jsize>(text->len),
+                    reinterpret_cast<const jbyte*>(text->ptr));
+            }
+            const size_t name_len = std::min<size_t>(write->name.len, 256);
+            jbyteArray name = env->NewByteArray(static_cast<jsize>(name_len));
+            if (name != nullptr && write->name.ptr != nullptr && name_len > 0) {
+                env->SetByteArrayRegion(
+                    name, 0, static_cast<jsize>(name_len),
+                    reinterpret_cast<const jbyte*>(write->name.ptr));
+            }
+            if (method != nullptr && data != nullptr && name != nullptr && !env->ExceptionCheck()) {
+                env->CallStaticVoidMethod(
+                    bridge, method, native->handle_id, static_cast<jlong>(request_id), data, name);
+                if (env->ExceptionCheck()) env->ExceptionClear();
+                std::unique_lock<std::mutex> lock(native->clipboard_mutex);
+                native->clipboard_cv.wait_for(lock, std::chrono::seconds(30), [&] {
+                    return native->clipboard_resolved || native->closed.load();
+                });
+                outcome = native->clipboard_resolved && native->clipboard_allowed &&
+                    !native->closed.load()
+                    ? GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+                    : GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED;
+                native->clipboard_waiting = false;
+            } else {
+                std::lock_guard<std::mutex> lock(native->clipboard_mutex);
+                native->clipboard_waiting = false;
+            }
+            if (data != nullptr) env->DeleteLocalRef(data);
+            if (name != nullptr) env->DeleteLocalRef(name);
+            if (bridge != nullptr) env->DeleteLocalRef(bridge);
+        } else {
+            outcome = GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED;
+        }
+    }
+
+    GhosttyClipboardWriteReply reply = GHOSTTY_INIT_SIZED(GhosttyClipboardWriteReply);
+    reply.result = outcome;
+    reply.remember = false;
+    write->reply(write, &reply);
+}
+
+void clipboardReadCallback(
+    GhosttyTerminal /* terminal */,
+    void* /* userdata */,
+    const GhosttyClipboardRead* read) {
+    if (read == nullptr || read->reply == nullptr) return;
+    GhosttyClipboardReadReply reply = GHOSTTY_INIT_SIZED(GhosttyClipboardReadReply);
+    reply.result = GHOSTTY_CLIPBOARD_READ_RESULT_DENIED;
+    read->reply(read, &reply);
+}
+
 jbyteArray terminalStringData(
     JNIEnv* env,
     NativeTerminal* native,
@@ -116,11 +297,6 @@ jbyteArray terminalStringData(
 
 void freeNativeTerminal(NativeTerminal* native) {
     if (native == nullptr) return;
-    if (native->closed) {
-        // Safety net for accidental double free through a stale Kotlin handle.
-        // Kotlin owners should still null/clear their handles after close.
-        return;
-    }
     native->closed = true;
     if (native->search != nullptr) {
         ghostty_search_free(native->search);
@@ -163,7 +339,6 @@ void freeNativeTerminal(NativeTerminal* native) {
         native->terminal = nullptr;
     }
     native->pending_pty_writes.clear();
-    delete native;
 }
 
 jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
@@ -177,10 +352,10 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
     return out;
 }
 
-// Snapshot binary format v3 (little-endian).
+// Snapshot binary format v4 (little-endian).
 //
 // Header (14 * int32):
-//   [0]  version = 3
+//   [0]  version = 4
 //   [1]  dirty_kind (0 none, 1 partial, 2 full)
 //   [2]  cols
 //   [3]  rows
@@ -199,15 +374,20 @@ jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& bytes) {
 //   int32 row_index
 //   int32 selection_start_x (-1 when no selection on this row)
 //   int32 selection_end_x (-1 when no selection on this row)
+//   int32 wrap
+//   int32 wrap_continuation
+//   int32 search_range_count
 //   int32 cell_count
+//   repeated search range: int32 start_x, int32 end_x, int32 active
 //   repeated cell:
 //     int32 fg ARGB
 //     int32 bg ARGB
+//     int32 underline ARGB
 //     uint16 flags
 //     uint16 text_len
 //     uint8  text[text_len]
 
-constexpr uint16_t kSnapshotVersion = 3;
+constexpr uint16_t kSnapshotVersion = 4;
 constexpr uint16_t kCellFlagBold = 1 << 0;
 constexpr uint16_t kCellFlagItalic = 1 << 1;
 constexpr uint16_t kCellFlagFaint = 1 << 2;
@@ -220,6 +400,191 @@ constexpr uint16_t kCellFlagOverline = 1 << 6;
 constexpr uint16_t kCellFlagInvisible = 1 << 7;
 constexpr uint16_t kCellFlagWide = 1 << 8;
 constexpr uint16_t kCellFlagWideTail = 1 << 9;
+constexpr uint16_t kCellFlagBlink = 1 << 13;
+
+struct SearchRange {
+    int32_t start_x;
+    int32_t end_x;
+    bool active;
+};
+
+using SearchRangesByRow = std::vector<std::vector<SearchRange>>;
+
+inline int32_t argb(GhosttyColorRgb color);
+
+bool selectionViewportBounds(
+    NativeTerminal* native,
+    const GhosttySelection& selection,
+    GhosttyPointCoordinate* start,
+    GhosttyPointCoordinate* end) {
+    if (ghostty_terminal_point_from_grid_ref(
+            native->terminal, &selection.start, GHOSTTY_POINT_TAG_VIEWPORT, start) !=
+            GHOSTTY_SUCCESS ||
+        ghostty_terminal_point_from_grid_ref(
+            native->terminal, &selection.end, GHOSTTY_POINT_TAG_VIEWPORT, end) !=
+            GHOSTTY_SUCCESS) {
+        return false;
+    }
+    if (start->y > end->y || (start->y == end->y && start->x > end->x)) {
+        std::swap(*start, *end);
+    }
+    return true;
+}
+
+SearchRangesByRow searchRangesForViewport(NativeTerminal* native, uint16_t cols, uint16_t rows) {
+    SearchRangesByRow ranges(rows);
+    if (!native->search_active || native->search == nullptr || rows == 0 || cols == 0) {
+        return ranges;
+    }
+
+    GhosttyPointCoordinate selected_start{};
+    GhosttyPointCoordinate selected_end{};
+    bool has_selected = false;
+    GhosttySelection selected = GHOSTTY_INIT_SIZED(GhosttySelection);
+    if (native->search_case_sensitive) {
+        if (native->case_sensitive_selected >= 0 &&
+            native->case_sensitive_selected < static_cast<int32_t>(native->case_sensitive_matches.size())) {
+            selected = native->case_sensitive_matches[native->case_sensitive_selected];
+            has_selected = selectionViewportBounds(native, selected, &selected_start, &selected_end);
+        }
+    } else if (ghostty_search_get(
+            native->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &selected) == GHOSTTY_SUCCESS) {
+        has_selected = selectionViewportBounds(native, selected, &selected_start, &selected_end);
+    }
+
+    std::vector<GhosttySelection> matches;
+    if (native->search_case_sensitive) {
+        matches = native->case_sensitive_matches;
+    } else {
+        GhosttySelectionBuffer query{};
+        GhosttyResult result = ghostty_search_get(
+            native->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &query);
+        if ((result != GHOSTTY_OUT_OF_SPACE && result != GHOSTTY_SUCCESS) || query.len == 0) {
+            return ranges;
+        }
+        matches.resize(query.len);
+        GhosttySelectionBuffer output{matches.data(), matches.size(), 0};
+        if (ghostty_search_get(
+                native->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &output) != GHOSTTY_SUCCESS) {
+            return ranges;
+        }
+        matches.resize(output.len);
+    }
+
+    for (size_t i = 0; i < matches.size(); ++i) {
+        GhosttyPointCoordinate start{};
+        GhosttyPointCoordinate end{};
+        if (!selectionViewportBounds(native, matches[i], &start, &end)) continue;
+        const bool active = has_selected &&
+            start.x == selected_start.x && start.y == selected_start.y &&
+            end.x == selected_end.x && end.y == selected_end.y;
+        const uint32_t first_row = std::min<uint32_t>(start.y, rows - 1);
+        const uint32_t last_row = std::min<uint32_t>(end.y, rows - 1);
+        for (uint32_t y = first_row; y <= last_row; ++y) {
+            const int32_t first_x = y == start.y ? start.x : 0;
+            const int32_t last_x = y == end.y ? end.x : cols - 1;
+            if (first_x < static_cast<int32_t>(cols) && last_x >= 0) {
+                ranges[y].push_back(SearchRange{
+                    std::max<int32_t>(0, first_x),
+                    std::min<int32_t>(cols - 1, last_x),
+                    active,
+                });
+            }
+        }
+    }
+    return ranges;
+}
+
+void resetCaseSensitiveFilter(NativeTerminal* native) {
+    native->case_sensitive_matches.clear();
+    native->case_sensitive_candidates.clear();
+    native->case_sensitive_filter_cursor = 0;
+    native->case_sensitive_filter_started = false;
+    native->case_sensitive_selected = -1;
+}
+
+bool loadCaseSensitiveCandidates(NativeTerminal* native) {
+    native->case_sensitive_candidates.clear();
+    native->case_sensitive_filter_cursor = 0;
+    native->case_sensitive_filter_started = true;
+
+    GhosttySelectionBuffer query{};
+    const GhosttyResult query_result = ghostty_search_get(
+        native->search, GHOSTTY_SEARCH_DATA_MATCHES, &query);
+    if ((query_result != GHOSTTY_OUT_OF_SPACE && query_result != GHOSTTY_SUCCESS) ||
+        query.len == 0) return true;
+    native->case_sensitive_candidates.resize(query.len);
+    GhosttySelectionBuffer output{
+        native->case_sensitive_candidates.data(),
+        native->case_sensitive_candidates.size(),
+        0,
+    };
+    if (ghostty_search_get(native->search, GHOSTTY_SEARCH_DATA_MATCHES, &output) !=
+        GHOSTTY_SUCCESS) {
+        native->case_sensitive_candidates.clear();
+        return false;
+    }
+    native->case_sensitive_candidates.resize(output.len);
+    return true;
+}
+
+bool stepSearch(NativeTerminal* native, std::chrono::milliseconds budget) {
+    if (!native->search_active || native->search == nullptr) return true;
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    do {
+        GhosttySearchStatus status = GHOSTTY_SEARCH_STATUS_RUNNING;
+        if (ghostty_search_get(native->search, GHOSTTY_SEARCH_DATA_STATUS, &status) !=
+            GHOSTTY_SUCCESS) return true;
+        if (status == GHOSTTY_SEARCH_STATUS_FEED_REQUIRED) {
+            if (ghostty_search_feed(native->search) != GHOSTTY_SUCCESS) return true;
+            continue;
+        }
+        if (status == GHOSTTY_SEARCH_STATUS_RUNNING) {
+            if (ghostty_search_tick(native->search, &status) != GHOSTTY_SUCCESS) return true;
+            continue;
+        }
+        if (!native->search_case_sensitive) return true;
+        if (!native->case_sensitive_filter_started && !loadCaseSensitiveCandidates(native)) {
+            return true;
+        }
+        if (native->case_sensitive_filter_cursor >=
+            native->case_sensitive_candidates.size()) return true;
+
+        GhosttyTerminalSelectionFormatOptions options =
+            GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
+        options.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
+        options.unwrap = true;
+        options.trim = false;
+        options.selection = &native->case_sensitive_candidates[
+            native->case_sensitive_filter_cursor];
+        uint8_t* data = nullptr;
+        size_t len = 0;
+        const GhosttyResult result = ghostty_terminal_selection_format_alloc(
+            native->terminal, nullptr, options, &data, &len);
+        const bool exact = result == GHOSTTY_SUCCESS && len == native->search_query.size() &&
+            (len == 0 || std::memcmp(data, native->search_query.data(), len) == 0);
+        if (exact) {
+            native->case_sensitive_matches.push_back(
+                native->case_sensitive_candidates[native->case_sensitive_filter_cursor]);
+        }
+        if (data != nullptr) ghostty_free(nullptr, data, len);
+        native->case_sensitive_filter_cursor += 1;
+    } while (std::chrono::steady_clock::now() < deadline);
+    return native->case_sensitive_filter_started &&
+        native->case_sensitive_filter_cursor >= native->case_sensitive_candidates.size();
+}
+
+int32_t styleColorArgb(
+    const GhosttyStyleColor& color,
+    const GhosttyRenderStateColors& colors,
+    GhosttyColorRgb fallback) {
+    switch (color.tag) {
+        case GHOSTTY_STYLE_COLOR_RGB: return argb(color.value.rgb);
+        case GHOSTTY_STYLE_COLOR_PALETTE:
+            return argb(colors.palette[static_cast<uint8_t>(color.value.palette)]);
+        default: return argb(fallback);
+    }
+}
 
 inline void putI32(std::vector<uint8_t>& out, int32_t value) {
     const uint8_t bytes[4] = {
@@ -260,6 +625,11 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     GhosttyResult result = ghostty_render_state_update(
         native->render_state, native->terminal);
     if (result != GHOSTTY_SUCCESS) return false;
+    if (native->search_active || native->force_full_snapshot) {
+        const GhosttyRenderStateDirty full = GHOSTTY_RENDER_STATE_DIRTY_FULL;
+        ghostty_render_state_set(
+            native->render_state, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &full);
+    }
 
     GhosttyRenderStateDirty dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
     uint16_t cols = 0;
@@ -309,10 +679,12 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
         putI32(out, cursor.visible ? 1 : 0);
         putI32(out, cursor.blinking ? 1 : 0);
         putI32(out, 0);
-        putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+        putI32(out, static_cast<int32_t>(native->generation.current() & 0xFFFFFFFFu));
         putI32(out, argb(cursor_color));
         return true;
     }
+
+    const SearchRangesByRow search_ranges = searchRangesForViewport(native, cols, rows);
 
     // Header placeholder; row count patched after iteration.
     putI32(out, kSnapshotVersion);
@@ -336,7 +708,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
     putI32(out, cursor.blinking ? 1 : 0);
     const size_t row_count_offset = out.size();
     putI32(out, 0); // row count placeholder
-    putI32(out, static_cast<int32_t>(native->generation & 0xFFFFFFFFu));
+    putI32(out, static_cast<int32_t>(native->generation.current() & 0xFFFFFFFFu));
     putI32(out, argb(cursor_color));
 
     if (ghostty_render_state_get(
@@ -378,10 +750,29 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
             selection_end_x = row_selection.end_x;
         }
 
+        GhosttyRow raw_row = 0;
+        bool wrap = false;
+        bool wrap_continuation = false;
+        if (ghostty_render_state_row_get(
+                native->row_iter, GHOSTTY_RENDER_STATE_ROW_DATA_RAW, &raw_row) == GHOSTTY_SUCCESS &&
+            raw_row != 0) {
+            ghostty_row_get(raw_row, GHOSTTY_ROW_DATA_WRAP, &wrap);
+            ghostty_row_get(raw_row, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &wrap_continuation);
+        }
+
         putI32(out, row_y);
         putI32(out, selection_start_x);
         putI32(out, selection_end_x);
+        putI32(out, wrap ? 1 : 0);
+        putI32(out, wrap_continuation ? 1 : 0);
+        const auto& row_search_ranges = search_ranges[row_y];
+        putI32(out, static_cast<int32_t>(row_search_ranges.size()));
         putI32(out, cell_count);
+        for (const SearchRange& range : row_search_ranges) {
+            putI32(out, range.start_x);
+            putI32(out, range.end_x);
+            putI32(out, range.active ? 1 : 0);
+        }
 
         for (uint16_t x = 0; x < cell_count; ++x) {
             GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
@@ -414,6 +805,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
             if (style.bold) flags |= kCellFlagBold;
             if (style.italic) flags |= kCellFlagItalic;
             if (style.faint) flags |= kCellFlagFaint;
+            if (style.blink) flags |= kCellFlagBlink;
             if (style.inverse) flags |= kCellFlagInverse;
             if (style.underline != 0) {
                 flags |= kCellFlagUnderline;
@@ -459,6 +851,7 @@ bool buildRenderSnapshot(NativeTerminal* native, std::vector<uint8_t>& out) {
 
             putI32(out, argb(fg));
             putI32(out, argb(bg));
+            putI32(out, styleColorArgb(style.underline_color, colors, fg));
             putU16(out, flags);
             putU16(out, static_cast<uint16_t>(text_out.len));
             putBytes(out, text_out.ptr, text_out.len);
@@ -576,6 +969,11 @@ bool applySelectionEvent(
 
 } // namespace
 
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /* reserved */) {
+    gJavaVm = vm;
+    return JNI_VERSION_1_6;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
     JNIEnv* env,
@@ -661,18 +1059,55 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCreateManaged(
         ghostty_terminal_set(
             native->terminal, GHOSTTY_TERMINAL_OPT_PWD_CHANGED,
             (const void*)pwdChangedCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_SIZE,
+            (const void*)sizeCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
+            (const void*)colorSchemeCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE,
+            (const void*)clipboardWriteCallback);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ,
+            (const void*)clipboardReadCallback);
+
+        const size_t scrollback_max_bytes = 16u << 20;
+        const size_t scrollback_max_lines = 10000;
+        const size_t clipboard_max_bytes = 1u << 20;
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+            &scrollback_max_bytes);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+            &scrollback_max_lines);
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE_MAX_BYTES,
+            &clipboard_max_bytes);
+        static constexpr char kTerminfo[] = "xterm-256color";
+        const GhosttyString terminfo{
+            reinterpret_cast<const uint8_t*>(kTerminfo), sizeof(kTerminfo) - 1};
+        ghostty_terminal_set(
+            native->terminal, GHOSTTY_TERMINAL_OPT_TERMINFO_NAME, &terminfo);
 
         ok = true;
     } while (false);
 
     if (!ok) {
         freeNativeTerminal(native);
+        delete native;
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "failed to create managed ghostty terminal");
         return 0;
     }
 
-    return reinterpret_cast<jlong>(native);
+    std::shared_ptr<NativeTerminal> owned(native, [](NativeTerminal* value) {
+        freeNativeTerminal(value);
+        delete value;
+    });
+    const jlong id = gRegistry.insert(std::move(owned));
+    native->handle_id = id;
+    return id;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -681,7 +1116,15 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeFreeManaged(
     jobject /* thiz */,
     jlong handle) {
     if (handle == 0) return;
-    freeNativeTerminal(fromHandle(handle));
+    std::shared_ptr<NativeTerminal> removed = gRegistry.remove(handle);
+    if (removed == nullptr) return;
+    {
+        std::lock_guard<std::mutex> lock(removed->clipboard_mutex);
+        removed->closed = true;
+        removed->clipboard_resolved = true;
+        removed->clipboard_allowed = false;
+    }
+    removed->clipboard_cv.notify_all();
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -704,18 +1147,23 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeReset(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return;
     }
-    native->generation += 1;
+    native->generation.advance();
+    native->force_full_snapshot = true;
     native->pending_pty_writes.clear();
     if (native->selection_gesture != nullptr) {
         ghostty_selection_gesture_reset(native->selection_gesture, native->terminal);
     }
     ghostty_terminal_reset(native->terminal);
+    if (native->search_active) {
+        if (native->search_case_sensitive) resetCaseSensitiveFilter(native.get());
+        ghostty_search_feed(native->search);
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -724,7 +1172,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeWrite(
     jobject /* thiz */,
     jlong handle,
     jbyteArray data) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -746,6 +1194,10 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeWrite(
         native->terminal,
         reinterpret_cast<const uint8_t*>(buffer.data()),
         static_cast<size_t>(len));
+    if (native->search_active && native->search != nullptr) {
+        if (native->search_case_sensitive) resetCaseSensitiveFilter(native.get());
+        ghostty_search_feed(native->search);
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -757,7 +1209,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResize(
     jint rows,
     jint cell_width_px,
     jint cell_height_px) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -772,12 +1224,17 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResize(
     native->rows = static_cast<uint32_t>(rows);
     native->cell_width_px = static_cast<uint32_t>(cell_width_px);
     native->cell_height_px = static_cast<uint32_t>(cell_height_px);
+    native->force_full_snapshot = true;
     ghostty_terminal_resize(
         native->terminal,
         static_cast<uint16_t>(cols),
         static_cast<uint16_t>(rows),
         static_cast<uint32_t>(cell_width_px),
         static_cast<uint32_t>(cell_height_px));
+    if (native->search_active && native->search != nullptr) {
+        if (native->search_case_sensitive) resetCaseSensitiveFilter(native.get());
+        ghostty_search_feed(native->search);
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -786,7 +1243,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeScrollViewport(
     jobject /* thiz */,
     jlong handle,
     jint delta_rows) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -796,6 +1253,26 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeScrollViewport(
     behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA;
     behavior.value.delta = delta_rows;
     ghostty_terminal_scroll_viewport(native->terminal, behavior);
+    if (native->search_active && native->search != nullptr &&
+        !native->search_case_sensitive) {
+        ghostty_search_feed(native->search);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeScrollViewportToBottom(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto native = fromHandle(handle);
+    if (native == nullptr || native->closed) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return;
+    }
+    GhosttyTerminalScrollViewport behavior{};
+    behavior.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM;
+    ghostty_terminal_scroll_viewport(native->terminal, behavior);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -803,7 +1280,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectAll(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -825,7 +1302,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCopySelection(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -864,14 +1341,14 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionPress(
     jlong handle,
     jint col,
     jint row) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return JNI_FALSE;
     }
     return applySelectionEvent(
-        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, col, row)
+        native.get(), GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, col, row)
         ? JNI_TRUE
         : JNI_FALSE;
 }
@@ -883,14 +1360,14 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionDrag(
     jlong handle,
     jint col,
     jint row) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return JNI_FALSE;
     }
     return applySelectionEvent(
-        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, col, row)
+        native.get(), GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, col, row)
         ? JNI_TRUE
         : JNI_FALSE;
 }
@@ -902,14 +1379,14 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionRelease(
     jlong handle,
     jint col,
     jint row) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return JNI_FALSE;
     }
     return applySelectionEvent(
-        native, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE, col, row)
+        native.get(), GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE, col, row)
         ? JNI_TRUE
         : JNI_FALSE;
 }
@@ -919,7 +1396,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSelectionClear(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -936,13 +1413,13 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeMouseReportingActi
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return JNI_FALSE;
     }
-    return isMouseReportingActive(native) ? JNI_TRUE : JNI_FALSE;
+    return isMouseReportingActive(native.get()) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -952,7 +1429,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeLinkUriAt(
     jlong handle,
     jint col,
     jint row) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -960,7 +1437,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeLinkUriAt(
     }
 
     GhosttyGridRef ref{};
-    if (!gridRefAtViewport(native, col, row, &ref)) return nullptr;
+    if (!gridRefAtViewport(native.get(), col, row, &ref)) return nullptr;
 
     size_t len = 0;
     const GhosttyResult query_result =
@@ -1007,29 +1484,31 @@ bool pasteTextReader(
 
 } // namespace
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativePasteText(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle,
-    jbyteArray data) {
-    auto* native = fromHandle(handle);
+    jbyteArray data,
+    jint source,
+    jboolean allow_unsafe) {
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
-        return;
+        return static_cast<jint>(NativePasteResult::Error);
     }
-    if (data == nullptr) return;
+    if (data == nullptr) return static_cast<jint>(NativePasteResult::Empty);
 
     const jsize len = env->GetArrayLength(data);
-    if (len == 0) return;
+    if (len == 0) return static_cast<jint>(NativePasteResult::Empty);
 
     std::vector<uint8_t> buffer(static_cast<size_t>(len));
     env->GetByteArrayRegion(
         data, 0, len, reinterpret_cast<jbyte*>(buffer.data()));
-    if (env->ExceptionCheck()) return;
+    if (env->ExceptionCheck()) return static_cast<jint>(NativePasteResult::Error);
 
-    PasteSource source{buffer.data(), buffer.size()};
+    PasteSource paste_source{buffer.data(), buffer.size()};
     static constexpr char kTextPlain[] = "text/plain";
     GhosttyString mime{
         reinterpret_cast<const uint8_t*>(kTextPlain),
@@ -1037,25 +1516,33 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativePasteText(
     };
     GhosttyPaste paste = GHOSTTY_INIT_SIZED(GhosttyPaste);
     paste.location = GHOSTTY_CLIPBOARD_LOCATION_STANDARD;
-    paste.source = GHOSTTY_PASTE_SOURCE_TEXT;
+    paste.source = source == 0
+        ? GHOSTTY_PASTE_SOURCE_CLIPBOARD
+        : GHOSTTY_PASTE_SOURCE_TEXT;
     paste.mimes = &mime;
     paste.mimes_len = 1;
-    paste.reader = GhosttyMimeReader{pasteTextReader, &source};
-    paste.allow_unsafe = false;
+    paste.reader = GhosttyMimeReader{pasteTextReader, &paste_source};
+    paste.allow_unsafe = allow_unsafe == JNI_TRUE;
 
     bool written = false;
-    ghostty_terminal_paste(native->terminal, &paste, &written);
+    const GhosttyResult result = ghostty_terminal_paste(native->terminal, &paste, &written);
+    return static_cast<jint>(pasteResult(
+        true,
+        result == GHOSTTY_SUCCESS,
+        written));
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetDefaultColors(
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetAppearance(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle,
     jint background_argb,
     jint foreground_argb,
-    jint cursor_argb) {
-    auto* native = fromHandle(handle);
+    jint cursor_argb,
+    jintArray palette_argb,
+    jboolean dark) {
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -1071,6 +1558,88 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSetDefaultColors(
         native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &foreground);
     ghostty_terminal_set(
         native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &cursor);
+    if (palette_argb != nullptr && env->GetArrayLength(palette_argb) == 256) {
+        jint raw[256];
+        env->GetIntArrayRegion(palette_argb, 0, 256, raw);
+        if (!env->ExceptionCheck()) {
+            GhosttyColorRgb palette[256];
+            for (size_t i = 0; i < 256; ++i) palette[i] = colorFromArgb(raw[i]);
+            ghostty_terminal_set(
+                native->terminal, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette);
+        }
+    }
+    native->dark_color_scheme = dark == JNI_TRUE;
+    native->force_full_snapshot = true;
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeFocus(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jboolean focused) {
+    auto native = fromHandle(handle);
+    if (native == nullptr || native->closed) return nullptr;
+    GhosttyTerminalModeConfig config{};
+    config.mode = GHOSTTY_MODE_FOCUS_EVENT;
+    if (ghostty_terminal_get(native->terminal, GHOSTTY_TERMINAL_DATA_MODE, &config) !=
+            GHOSTTY_SUCCESS || !config.value) return nullptr;
+    char bytes[8];
+    size_t written = 0;
+    if (ghostty_focus_encode(
+            focused == JNI_TRUE ? GHOSTTY_FOCUS_GAINED : GHOSTTY_FOCUS_LOST,
+            bytes, sizeof(bytes), &written) != GHOSTTY_SUCCESS || written == 0) return nullptr;
+    std::vector<uint8_t> output(bytes, bytes + written);
+    return toJByteArray(env, output);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeFocusReportingActive(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+    auto native = fromHandle(handle);
+    if (native == nullptr || native->closed) return JNI_FALSE;
+    GhosttyTerminalModeConfig config{};
+    config.mode = GHOSTTY_MODE_FOCUS_EVENT;
+    return ghostty_terminal_get(native->terminal, GHOSTTY_TERMINAL_DATA_MODE, &config) ==
+            GHOSTTY_SUCCESS && config.value
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeResolveClipboardWrite(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle,
+    jlong request_id,
+    jboolean allowed) {
+    auto native = fromHandle(handle);
+    if (native == nullptr) return;
+    {
+        std::lock_guard<std::mutex> lock(native->clipboard_mutex);
+        if (!native->clipboard_waiting ||
+            native->clipboard_request_id != static_cast<uint64_t>(request_id)) return;
+        native->clipboard_allowed = allowed == JNI_TRUE;
+        native->clipboard_resolved = true;
+    }
+    native->clipboard_cv.notify_all();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeCancelClipboardWrites(
+    JNIEnv* /* env */,
+    jobject /* thiz */,
+    jlong handle) {
+    auto native = fromHandle(handle);
+    if (native == nullptr) return;
+    {
+        std::lock_guard<std::mutex> lock(native->clipboard_mutex);
+        native->clipboard_allowed = false;
+        native->clipboard_resolved = true;
+    }
+    native->clipboard_cv.notify_all();
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -1078,7 +1647,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeTakeEventFlags(
     JNIEnv* /* env */,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) return 0;
     const uint32_t events = native->pending_events;
     native->pending_events = 0;
@@ -1090,7 +1659,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeGetTitle(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    return terminalStringData(env, fromHandle(handle), GHOSTTY_TERMINAL_DATA_TITLE);
+    return terminalStringData(env, fromHandle(handle).get(), GHOSTTY_TERMINAL_DATA_TITLE);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -1098,7 +1667,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeGetPwd(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    return terminalStringData(env, fromHandle(handle), GHOSTTY_TERMINAL_DATA_PWD);
+    return terminalStringData(env, fromHandle(handle).get(), GHOSTTY_TERMINAL_DATA_PWD);
 }
 
 namespace {
@@ -1113,35 +1682,59 @@ jint searchTotalMatches(GhosttySearch search) {
 
 } // namespace
 
-extern "C" JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT void JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSet(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle,
-    jbyteArray query) {
-    auto* native = fromHandle(handle);
+    jbyteArray query,
+    jboolean case_sensitive) {
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed || native->search == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
-        return 0;
+        return;
     }
 
     if (query == nullptr) {
         ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, nullptr);
-        return 0;
+        native->search_active = false;
+        native->search_query.clear();
+        resetCaseSensitiveFilter(native.get());
+        native->force_full_snapshot = true;
+        return;
     }
 
     const jsize len = env->GetArrayLength(query);
     std::vector<uint8_t> bytes(static_cast<size_t>(len));
     if (len > 0) {
         env->GetByteArrayRegion(query, 0, len, reinterpret_cast<jbyte*>(bytes.data()));
-        if (env->ExceptionCheck()) return 0;
+        if (env->ExceptionCheck()) return;
     }
 
     GhosttyString needle{bytes.data(), bytes.size()};
     ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, &needle);
-    ghostty_search_run(native->search);
-    return searchTotalMatches(native->search);
+    native->search_active = !bytes.empty();
+    native->search_case_sensitive = case_sensitive == JNI_TRUE;
+    native->search_query = bytes;
+    resetCaseSensitiveFilter(native.get());
+    native->force_full_snapshot = true;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchStep(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return JNI_TRUE;
+    }
+    const bool complete = stepSearch(native.get(), std::chrono::milliseconds(4));
+    native->force_full_snapshot = true;
+    return complete ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -1150,7 +1743,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSelect(
     jobject /* thiz */,
     jlong handle,
     jboolean backwards) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed || native->search == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -1160,6 +1753,35 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSelect(
     const GhosttySearchOption option = backwards
         ? GHOSTTY_SEARCH_OPT_SELECT_PREV
         : GHOSTTY_SEARCH_OPT_SELECT_NEXT;
+    native->force_full_snapshot = true;
+    if (native->search_case_sensitive) {
+        const int32_t count = static_cast<int32_t>(native->case_sensitive_matches.size());
+        if (count == 0) return -1;
+        if (native->case_sensitive_selected < 0) {
+            native->case_sensitive_selected = backwards ? count - 1 : 0;
+        } else {
+            native->case_sensitive_selected = backwards
+                ? (native->case_sensitive_selected - 1 + count) % count
+                : (native->case_sensitive_selected + 1) % count;
+        }
+        const GhosttySelection& selected =
+            native->case_sensitive_matches[native->case_sensitive_selected];
+        GhosttyPointCoordinate viewport{};
+        if (ghostty_terminal_point_from_grid_ref(
+                native->terminal, &selected.start, GHOSTTY_POINT_TAG_VIEWPORT, &viewport) !=
+            GHOSTTY_SUCCESS) {
+            GhosttyPointCoordinate screen{};
+            if (ghostty_terminal_point_from_grid_ref(
+                    native->terminal, &selected.start, GHOSTTY_POINT_TAG_SCREEN, &screen) ==
+                GHOSTTY_SUCCESS) {
+                GhosttyTerminalScrollViewport behavior{};
+                behavior.tag = GHOSTTY_SCROLL_VIEWPORT_ROW;
+                behavior.value.row = screen.y;
+                ghostty_terminal_scroll_viewport(native->terminal, behavior);
+            }
+        }
+        return native->case_sensitive_selected;
+    }
     if (ghostty_search_set(native->search, option, nullptr) != GHOSTTY_SUCCESS) {
         return -1;
     }
@@ -1173,17 +1795,38 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSelect(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchSelectedIndex(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    auto native = fromHandle(handle);
+    if (native == nullptr || native->closed || native->search == nullptr) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "native terminal already closed");
+        return -1;
+    }
+    if (native->search_case_sensitive) return native->case_sensitive_selected;
+    size_t selected = 0;
+    return ghostty_search_get(
+               native->search, GHOSTTY_SEARCH_DATA_SELECTED_INDEX, &selected) == GHOSTTY_SUCCESS
+        ? static_cast<jint>(selected)
+        : -1;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchTotal(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed || native->search == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return 0;
     }
-    return searchTotalMatches(native->search);
+    return native->search_case_sensitive
+        ? static_cast<jint>(native->case_sensitive_matches.size())
+        : searchTotalMatches(native->search);
 }
 
 GhosttyKey ghosttyKeyFromAndroidKeyCode(jint key_code) {
@@ -1292,7 +1935,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeKey(
     jint mods,
     jint unshifted_codepoint,
     jbyteArray utf8) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed ||
         native->key_encoder == nullptr || native->key_event == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
@@ -1359,7 +2002,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeEncodeMouse(
     jfloat x,
     jfloat y,
     jboolean any_button_pressed) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed ||
         native->mouse_encoder == nullptr || native->mouse_event == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
@@ -1437,13 +2080,18 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeSearchClear(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed || native->search == nullptr) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
         return;
     }
     ghostty_search_set(native->search, GHOSTTY_SEARCH_OPT_NEEDLE, nullptr);
+    native->search_active = false;
+    native->search_query.clear();
+    native->case_sensitive_matches.clear();
+    native->case_sensitive_selected = -1;
+    native->force_full_snapshot = true;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -1451,7 +2099,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeDrainPtyWrites(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         return nullptr;
     }
@@ -1466,7 +2114,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeRenderSnapshot(
     jobject /* thiz */,
     jlong handle,
     jobject buffer) {
-    auto* native = fromHandle(handle);
+    auto native = fromHandle(handle);
     if (native == nullptr || native->closed) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "native terminal already closed");
@@ -1482,13 +2130,13 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeRenderSnapshot(
     }
 
     std::vector<uint8_t> snapshot;
-    if (!buildRenderSnapshot(native, snapshot)) {
+    if (!buildRenderSnapshot(native.get(), snapshot)) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "failed to build ghostty render snapshot");
         return -1;
     }
 
-    if (snapshot.size() > static_cast<size_t>(capacity)) {
+    if (!snapshotFits(snapshot.size(), static_cast<size_t>(capacity))) {
         // Do not clean render state: the caller can retry with a larger
         // buffer and we must not lose the dirty frame.
         return -1;
@@ -1498,6 +2146,7 @@ Java_com_yang136_sshhelper_terminal_GhosttyNativeBridge_nativeRenderSnapshot(
     }
 
     ghostty_render_state_clean(native->render_state);
+    native->force_full_snapshot = false;
     if (snapshot.size() < 48) return 0;
     int32_t row_count = 0;
     std::memcpy(&row_count, snapshot.data() + 44, sizeof(row_count));

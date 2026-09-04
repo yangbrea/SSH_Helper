@@ -15,6 +15,7 @@ import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.settings.SettingsRepository
 import com.yang136.sshhelper.sftp.SftpClient
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,12 @@ import kotlinx.coroutines.sync.withLock
 @JvmInline
 value class SessionId(val value: String)
 
+enum class SessionKind {
+    SSH,
+    TMUX,
+    ZMX,
+}
+
 data class ManagedSessionState(
     val id: SessionId,
     val profile: HostProfile,
@@ -52,7 +59,26 @@ data class ManagedSessionState(
     val reconnectAttempt: Int? = null,
     val features: Set<SessionFeature> = setOf(SessionFeature.SHELL),
     val needsVaultUnlock: Boolean = false,
+    val kind: SessionKind = SessionKind.SSH,
+    val remoteSessionName: String? = null,
+    val remoteSessions: List<RemoteMultiplexerSession> = emptyList(),
+    val multiplexerState: MultiplexerSessionState = if (kind == SessionKind.SSH) {
+        MultiplexerSessionState.Disabled
+    } else {
+        MultiplexerSessionState.Checking
+    },
 )
+
+sealed interface MultiplexerSessionState {
+    data object Disabled : MultiplexerSessionState
+    data object Checking : MultiplexerSessionState
+    data class AwaitingSelection(val message: String? = null) : MultiplexerSessionState
+    data class Opening(val name: String, val create: Boolean) : MultiplexerSessionState
+    data class Active(val name: String) : MultiplexerSessionState
+    data class RecoveryRequired(val message: String) : MultiplexerSessionState
+    data class FallbackPrompt(val message: String) : MultiplexerSessionState
+    data object PlainShellFallback : MultiplexerSessionState
+}
 
 enum class SessionFeature { SHELL, SFTP, PORT_FORWARD }
 
@@ -61,6 +87,7 @@ sealed interface TerminalOutputEvent {
 
     data class Snapshot(override val sequence: Long, val bytes: ByteArray) : TerminalOutputEvent
     data class Chunk(override val sequence: Long, val bytes: ByteArray) : TerminalOutputEvent
+    data class Reset(override val sequence: Long) : TerminalOutputEvent
 }
 
 fun interface SshSessionFactory {
@@ -70,8 +97,16 @@ fun interface SshSessionFactory {
 interface SessionManager {
     val sessions: StateFlow<List<ManagedSessionState>>
 
-    fun create(hostId: Long, feature: SessionFeature = SessionFeature.SHELL): SessionId?
-    fun create(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId?
+    fun create(
+        hostId: Long,
+        feature: SessionFeature = SessionFeature.SHELL,
+        kind: SessionKind = SessionKind.SSH,
+    ): SessionId?
+    fun create(
+        profile: HostProfile,
+        feature: SessionFeature = SessionFeature.SHELL,
+        kind: SessionKind = SessionKind.SSH,
+    ): SessionId?
     fun state(id: SessionId): StateFlow<ManagedSessionState>?
     fun output(id: SessionId): Flow<TerminalOutputEvent>
 
@@ -79,6 +114,11 @@ interface SessionManager {
     suspend fun write(id: SessionId, data: ByteArray)
     suspend fun resize(id: SessionId, columns: Int, rows: Int)
     suspend fun reconnect(id: SessionId)
+    suspend fun refreshPersistentSessions(id: SessionId)
+    suspend fun attachPersistentSession(id: SessionId, name: String)
+    suspend fun createPersistentSession(id: SessionId)
+    suspend fun deletePersistentSession(id: SessionId, name: String)
+    suspend fun fallbackToPlainShell(id: SessionId)
     suspend fun disconnect(id: SessionId)
     suspend fun cancelReconnect(id: SessionId)
     suspend fun close(id: SessionId)
@@ -209,10 +249,25 @@ class DefaultSessionManager(
         }
     }
 
-    override fun create(hostId: Long, feature: SessionFeature): SessionId? =
-        synchronized(hostCache) { hostCache[hostId] }?.let { create(it, feature) }
+    override fun create(
+        hostId: Long,
+        feature: SessionFeature,
+        kind: SessionKind,
+    ): SessionId? = synchronized(hostCache) { hostCache[hostId] }?.let { create(it, feature, kind) }
 
-    override fun create(profile: HostProfile, feature: SessionFeature): SessionId? {
+    override fun create(
+        profile: HostProfile,
+        feature: SessionFeature,
+        kind: SessionKind,
+    ): SessionId? = createInternal(profile, feature, kind)
+
+    private fun createInternal(
+        profile: HostProfile,
+        requestedFeature: SessionFeature,
+        kind: SessionKind,
+    ): SessionId? {
+        // Persistent multiplexer sessions (tmux/zmx) are terminal-only.
+        val feature = if (kind != SessionKind.SSH) SessionFeature.SHELL else requestedFeature
         val runtime = synchronized(runtimes) {
             if (runtimes.size >= MAX_MANAGED_SESSIONS) return null
             val ordinal = (nextOrdinal[profile.id] ?: 0) + 1
@@ -225,6 +280,7 @@ class DefaultSessionManager(
                     profile = profile,
                     displayName = sessionDisplayName(profile.name, ordinal),
                     features = setOf(feature),
+                    kind = kind,
                 ),
                 ssh = sessionFactory.create(),
             ).also { runtimes[id] = it }
@@ -342,6 +398,8 @@ class DefaultSessionManager(
         runtime.browserSftp = null
         runtime.userDisconnected = false
         runtime.reconnectBlocked = false
+        // “普通 Shell”回退只属于上一条 transport；新连接重新遵循主机配置。
+        runtime.fallbackPlainShell = false
         val routeCredentials = runtime.routeCredentials
         if (routeCredentials == null) {
             update(runtime) {
@@ -353,15 +411,110 @@ class DefaultSessionManager(
             }
             return
         }
-        appendLocal(runtime, "\r\n\u001b[36m—— 正在建立新的 SSH Shell ——\u001b[0m\r\n")
+        val persistent = usesPersistentTerminal(runtime)
+        if (!persistent) appendLocal(runtime, "\r\n\u001b[36m—— 正在建立新的 SSH Shell ——\u001b[0m\r\n")
         runtime.ssh.connect(
             diagnosticRoute(runtime),
             routeCredentials,
-            openShell = openShellFor(runtime),
+            openShell = openShellFor(runtime) && !persistent,
         )
         if (runtime.ssh.state.value is ConnectionState.Connected) {
+            if (persistent) restorePersistentTerminal(runtime) else {
+                runtime.ssh.resize(runtime.columns, runtime.rows)
+                appendLocal(runtime, "\r\n\u001b[33m—— 已重新连接；旧 Shell 上下文已丢失 ——\u001b[0m\r\n")
+            }
+        }
+    }
+
+    override suspend fun refreshPersistentSessions(id: SessionId) {
+        val runtime = runtime(id) ?: return
+        refreshPersistentSessions(runtime, checkAvailability = true, autoOpenEmpty = false)
+    }
+
+    override suspend fun attachPersistentSession(id: SessionId, name: String) {
+        val runtime = runtime(id) ?: return
+        if (runtime.state.value.remoteSessions.none { it.name == name }) {
+            refreshPersistentSessions(runtime, checkAvailability = false, autoOpenEmpty = false)
+            if (runtime.state.value.multiplexerState is MultiplexerSessionState.AwaitingSelection) {
+                update(runtime) {
+                    it.copy(multiplexerState = MultiplexerSessionState.AwaitingSelection("所选远端会话已不存在，请重新选择"))
+                }
+            }
+            return
+        }
+        runtime.fallbackPlainShell = false
+        openPersistentTerminal(runtime, name, create = false)
+    }
+
+    override suspend fun createPersistentSession(id: SessionId) {
+        val runtime = runtime(id) ?: return
+        runtime.fallbackPlainShell = false
+        val query = queryPersistentSessions(runtime, checkAvailability = true) ?: return
+        if (query.generation != runtime.multiplexerGeneration.get()) return
+        val sessions = query.sessions
+        val localNames = synchronized(runtimes) {
+            runtimes.values.asSequence()
+                .filter { it !== runtime && it.state.value.profile.id == runtime.state.value.profile.id }
+                .mapNotNull { it.boundRemoteSessionName }
+                .toList()
+        }
+        val name = nextGeneratedSessionName(sessions, localNames)
+        update(runtime) { it.copy(remoteSessions = sessions) }
+        openPersistentTerminal(runtime, name, create = true)
+    }
+
+    override suspend fun deletePersistentSession(id: SessionId, name: String) {
+        val runtime = runtime(id) ?: return
+        val multiplexer = persistentMultiplexer(runtime) ?: return
+        val generation = runtime.multiplexerGeneration.incrementAndGet()
+        update(runtime) { it.copy(multiplexerState = MultiplexerSessionState.Checking) }
+        try {
+            val result = runtime.ssh.execute(multiplexer.deleteCommand(name))
+            if (generation != runtime.multiplexerGeneration.get()) return
+            if (!result.isSuccess) {
+                update(runtime) {
+                    it.copy(
+                        multiplexerState = MultiplexerSessionState.AwaitingSelection(
+                            "删除 $name 失败：${result.output.ifBlank { "退出码 ${result.exitCode}" }.take(240)}",
+                        ),
+                    )
+                }
+                return
+            }
+            if (runtime.boundRemoteSessionName == name) {
+                runtime.boundRemoteSessionName = null
+                update(runtime) { it.copy(remoteSessionName = null) }
+            }
+            refreshPersistentSessions(runtime, checkAvailability = false, autoOpenEmpty = false)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            if (generation == runtime.multiplexerGeneration.get()) {
+                update(runtime) {
+                    it.copy(multiplexerState = MultiplexerSessionState.AwaitingSelection(error.safeSessionMessage()))
+                }
+            }
+        }
+    }
+
+    override suspend fun fallbackToPlainShell(id: SessionId) {
+        val runtime = runtime(id) ?: return
+        if (runtime.ssh.state.value !is ConnectionState.Connected) return
+        runtime.fallbackPlainShell = true
+        runtime.multiplexerGeneration.incrementAndGet()
+        runtime.boundRemoteSessionName = null
+        resetTerminal(runtime)
+        runCatching {
+            runtime.ssh.openTerminal(TerminalTarget.PlainShell)
             runtime.ssh.resize(runtime.columns, runtime.rows)
-            appendLocal(runtime, "\r\n\u001b[33m—— 已重新连接；旧 Shell 上下文已丢失 ——\u001b[0m\r\n")
+        }.onSuccess {
+            update(runtime) {
+                it.copy(remoteSessionName = null, multiplexerState = MultiplexerSessionState.PlainShellFallback)
+            }
+        }.onFailure { error ->
+            update(runtime) {
+                it.copy(multiplexerState = MultiplexerSessionState.FallbackPrompt(error.safeSessionMessage()))
+            }
         }
     }
 
@@ -493,6 +646,53 @@ class DefaultSessionManager(
                 update(runtime) { it.copy(hostKeyRequest = request) }
             }
         }
+        runtime.scope.launch {
+            runtime.ssh.terminalState.collect { terminal ->
+                when (terminal) {
+                    is TerminalChannelState.Active -> if (terminal.target is TerminalTarget.Persistent) {
+                        val name = terminal.target.name
+                        runtime.boundRemoteSessionName = name
+                        update(runtime) {
+                            it.copy(remoteSessionName = name, multiplexerState = MultiplexerSessionState.Active(name))
+                        }
+                    }
+                    is TerminalChannelState.Ended -> {
+                        if (runtime.boundRemoteSessionName != null && usesPersistentTerminal(runtime)) {
+                            update(runtime) {
+                                it.copy(multiplexerState = MultiplexerSessionState.RecoveryRequired(terminal.reason))
+                            }
+                            val endedImmediately = System.nanoTime() - runtime.persistentOpenedAtNanos <
+                                PERSISTENT_START_FAILURE_WINDOW_NANOS
+                            if (terminal.exitCode != null && terminal.exitCode != 0 || endedImmediately) {
+                                runtime.boundRemoteSessionName = null
+                                runtime.scope.launch {
+                                    refreshPersistentSessions(runtime, checkAvailability = false, autoOpenEmpty = false)
+                                    if (runtime.state.value.multiplexerState is MultiplexerSessionState.AwaitingSelection) {
+                                        update(runtime) {
+                                            it.copy(
+                                                remoteSessionName = null,
+                                                multiplexerState = MultiplexerSessionState.AwaitingSelection(
+                                                    if (runtime.lastPersistentCreate) "新建失败（名称可能刚被占用），列表已刷新"
+                                                    else "原远端会话已不存在，列表已刷新",
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    is TerminalChannelState.Error -> {
+                        if (runtime.boundRemoteSessionName != null && usesPersistentTerminal(runtime)) {
+                            update(runtime) {
+                                it.copy(multiplexerState = MultiplexerSessionState.RecoveryRequired(terminal.message))
+                            }
+                        }
+                    }
+                    TerminalChannelState.Closed, TerminalChannelState.Opening -> Unit
+                }
+            }
+        }
     }
 
     private suspend fun resolveJumpProfile(profile: HostProfile): HostProfile? {
@@ -548,12 +748,156 @@ class DefaultSessionManager(
             runtime.ssh.connect(
                 diagnosticRoute(runtime, jumpSnapshot),
                 stored,
-                openShell = openShellFor(runtime),
+                openShell = openShellFor(runtime) && !usesPersistentTerminal(runtime),
             )
+            if (runtime.ssh.state.value is ConnectionState.Connected && usesPersistentTerminal(runtime)) {
+                preparePersistentTerminal(runtime)
+            }
         } finally {
             clearCredential(targetCredential)
             clearCredential(jumpCredential)
         }
+    }
+
+    private suspend fun preparePersistentTerminal(runtime: RuntimeSession) {
+        if (!usesPersistentTerminal(runtime)) return
+        val query = queryPersistentSessions(runtime, checkAvailability = true) ?: return
+        if (query.generation != runtime.multiplexerGeneration.get()) return
+        update(runtime) { it.copy(remoteSessions = query.sessions) }
+        if (query.sessions.isEmpty()) {
+            openPersistentTerminal(runtime, "shh-1", create = true)
+        } else {
+            update(runtime) {
+                it.copy(multiplexerState = MultiplexerSessionState.AwaitingSelection())
+            }
+        }
+    }
+
+    private suspend fun restorePersistentTerminal(runtime: RuntimeSession) {
+        val bound = runtime.boundRemoteSessionName
+        if (bound == null) {
+            preparePersistentTerminal(runtime)
+            return
+        }
+        val query = queryPersistentSessions(runtime, checkAvailability = true) ?: return
+        if (query.generation != runtime.multiplexerGeneration.get()) return
+        if (query.sessions.none { it.name == bound }) {
+            runtime.boundRemoteSessionName = null
+            update(runtime) {
+                it.copy(
+                    remoteSessionName = null,
+                    remoteSessions = query.sessions,
+                    multiplexerState = MultiplexerSessionState.AwaitingSelection(
+                        "原远端会话 $bound 已不存在，请重新选择或新建",
+                    ),
+                )
+            }
+            return
+        }
+        update(runtime) { it.copy(remoteSessions = query.sessions) }
+        openPersistentTerminal(runtime, bound, create = false)
+    }
+
+    private suspend fun refreshPersistentSessions(
+        runtime: RuntimeSession,
+        checkAvailability: Boolean,
+        autoOpenEmpty: Boolean,
+    ) {
+        val query = queryPersistentSessions(runtime, checkAvailability) ?: return
+        if (query.generation != runtime.multiplexerGeneration.get()) return
+        update(runtime) { it.copy(remoteSessions = query.sessions) }
+        if (autoOpenEmpty && query.sessions.isEmpty()) {
+            openPersistentTerminal(runtime, "shh-1", create = true)
+        } else {
+            update(runtime) { it.copy(multiplexerState = MultiplexerSessionState.AwaitingSelection()) }
+        }
+    }
+
+    private suspend fun queryPersistentSessions(
+        runtime: RuntimeSession,
+        checkAvailability: Boolean,
+    ): PersistentQuery? {
+        val multiplexer = persistentMultiplexer(runtime) ?: return null
+        val generation = runtime.multiplexerGeneration.incrementAndGet()
+        update(runtime) { it.copy(multiplexerState = MultiplexerSessionState.Checking) }
+        try {
+            if (checkAvailability) {
+                val availability = runtime.ssh.execute(multiplexer.availabilityCommand())
+                if (generation != runtime.multiplexerGeneration.get()) return null
+                if (!availability.isSuccess) {
+                    val message = if (availability.exitCode == 127 || availability.output.isBlank()) {
+                        "远端未安装 ${multiplexer.type.name.lowercase()}，请先在服务器安装"
+                    } else {
+                        "无法检查 ${multiplexer.type.name.lowercase()}：${availability.output.take(240)}"
+                    }
+                    update(runtime) { it.copy(multiplexerState = MultiplexerSessionState.FallbackPrompt(message)) }
+                    return null
+                }
+            }
+            val result = runtime.ssh.execute(multiplexer.listSessionsCommand())
+            if (generation != runtime.multiplexerGeneration.get()) return null
+            if (!result.isSuccess) {
+                val message = when (result.exitCode) {
+                    127 -> "远端未安装 ${multiplexer.type.name.lowercase()}，请先在服务器安装"
+                    REMOTE_COMMAND_TIMEOUT_EXIT_CODE -> "列出远端会话超时"
+                    REMOTE_COMMAND_OUTPUT_LIMIT_EXIT_CODE -> "远端会话列表超过 1 MiB 限制"
+                    else -> "无法列出远端会话：${result.output.ifBlank { "退出码 ${result.exitCode}" }.take(240)}"
+                }
+                update(runtime) { it.copy(multiplexerState = MultiplexerSessionState.FallbackPrompt(message)) }
+                return null
+            }
+            return PersistentQuery(generation, multiplexer.parseSessions(result.stdout))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            if (generation == runtime.multiplexerGeneration.get()) {
+                update(runtime) {
+                    it.copy(multiplexerState = MultiplexerSessionState.FallbackPrompt(error.safeSessionMessage()))
+                }
+            }
+            return null
+        }
+    }
+
+    private suspend fun openPersistentTerminal(runtime: RuntimeSession, name: String, create: Boolean) {
+        if (!usesPersistentTerminal(runtime)) return
+        val multiplexer = persistentMultiplexer(runtime) ?: return
+        // Opening is a user-visible state transition; invalidate any older list request.
+        runtime.multiplexerGeneration.incrementAndGet()
+        val type = multiplexer.type
+        runtime.boundRemoteSessionName = name
+        runtime.lastPersistentCreate = create
+        runtime.persistentOpenedAtNanos = System.nanoTime()
+        update(runtime) {
+            it.copy(
+                remoteSessionName = name,
+                multiplexerState = MultiplexerSessionState.Opening(name, create),
+            )
+        }
+        resetTerminal(runtime)
+        try {
+            runtime.ssh.openTerminal(TerminalTarget.Persistent(type, name, create))
+            runtime.ssh.resize(runtime.columns, runtime.rows)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            update(runtime) {
+                it.copy(multiplexerState = MultiplexerSessionState.RecoveryRequired(error.safeSessionMessage()))
+            }
+        }
+    }
+
+    private suspend fun resetTerminal(runtime: RuntimeSession) {
+        runtime.resetOutput()
+    }
+
+    private fun usesPersistentTerminal(runtime: RuntimeSession): Boolean =
+        openShellFor(runtime) && runtime.state.value.kind != SessionKind.SSH && !runtime.fallbackPlainShell
+
+    private fun persistentMultiplexer(runtime: RuntimeSession): Multiplexer? = when (runtime.state.value.kind) {
+        SessionKind.SSH -> null
+        SessionKind.TMUX -> TmuxMultiplexer
+        SessionKind.ZMX -> ZmxMultiplexer
     }
 
     private fun scheduleReconnect(runtime: RuntimeSession) {
@@ -578,16 +922,19 @@ class DefaultSessionManager(
             if (runtime.ssh.state.value is ConnectionState.Connected) return
             while (!networkAvailable()) delay(1_000)
             val routeCredentials = runtime.routeCredentials ?: break
+            // 网络恢复建立的是新 transport，重新尝试配置的持久会话后端。
+            runtime.fallbackPlainShell = false
             runtime.ssh.connect(
                 diagnosticRoute(runtime),
                 routeCredentials,
-                openShell = openShellFor(runtime),
+                openShell = openShellFor(runtime) && !usesPersistentTerminal(runtime),
             )
             if (runtime.ssh.state.value is ConnectionState.Connected) {
-                runtime.ssh.resize(runtime.columns, runtime.rows)
+                if (usesPersistentTerminal(runtime)) restorePersistentTerminal(runtime)
+                else runtime.ssh.resize(runtime.columns, runtime.rows)
                 if (isForward) {
                     appendLocal(runtime, "\r\n\u001b[36m—— 转发隧道已自动重连 ——\u001b[0m\r\n")
-                } else {
+                } else if (!usesPersistentTerminal(runtime)) {
                     appendLocal(runtime, "\r\n\u001b[33m—— 已自动重连；旧 Shell 上下文已丢失 ——\u001b[0m\r\n")
                 }
                 update(runtime) { it.copy(reconnectAttempt = null) }
@@ -756,6 +1103,11 @@ class DefaultSessionManager(
         var columns = 80
         var rows = 24
         var browserSftp: SftpClient? = null
+        var boundRemoteSessionName: String? = null
+        var fallbackPlainShell = false
+        var lastPersistentCreate = false
+        var persistentOpenedAtNanos = Long.MIN_VALUE
+        val multiplexerGeneration = AtomicLong(0)
 
         suspend fun publish(bytes: ByteArray) = outputMutex.withLock {
             mutableOutput.emit(append(bytes))
@@ -769,7 +1121,20 @@ class DefaultSessionManager(
         fun snapshot(): TerminalOutputEvent.Snapshot = synchronized(scrollback) {
             TerminalOutputEvent.Snapshot(outputSequence, scrollback.snapshot())
         }
+
+        suspend fun resetOutput() = outputMutex.withLock {
+            val reset = synchronized(scrollback) {
+                scrollback.clear()
+                TerminalOutputEvent.Reset(++outputSequence)
+            }
+            mutableOutput.emit(reset)
+        }
     }
+
+    private data class PersistentQuery(
+        val generation: Long,
+        val sessions: List<RemoteMultiplexerSession>,
+    )
 
     private sealed interface CredentialLoad {
         data class Loaded(val credential: Credential) : CredentialLoad
@@ -779,6 +1144,7 @@ class DefaultSessionManager(
 
     private companion object {
         const val MAX_SCROLLBACK = 1024 * 1024
+        const val PERSISTENT_START_FAILURE_WINDOW_NANOS = 3_000_000_000L
     }
 }
 
@@ -817,3 +1183,6 @@ internal fun clearCredential(credential: Credential?) {
         null -> Unit
     }
 }
+
+private fun Throwable.safeSessionMessage(): String =
+    message?.takeIf(String::isNotBlank)?.take(240) ?: this::class.java.simpleName

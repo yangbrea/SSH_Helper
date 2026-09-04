@@ -1,6 +1,7 @@
 # Third-party notices
 
 - [xterm.js](https://github.com/xtermjs/xterm.js), copyright The xterm.js authors, MIT License.
+- [Ghostty / libghostty-vt](https://github.com/ghostty-org/ghostty), copyright Mitchell Hashimoto and Ghostty contributors, MIT License. The Android native terminal backend is built from the commit pinned in `toolchains/ghostty.lock`.
 - [mwiede/jsch](https://github.com/mwiede/jsch), BSD-style License.
 - [Bouncy Castle](https://www.bouncycastle.org/), MIT License.
 - [Media3](https://developer.android.com/jetpack/androidx/releases/media3) (ExoPlayer 流式播放与 DataSource 缓存), Apache License 2.0.

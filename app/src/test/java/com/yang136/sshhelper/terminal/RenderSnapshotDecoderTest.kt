@@ -75,18 +75,26 @@ class RenderSnapshotDecoderTest {
         body.putInt(0) // row index
         body.putInt(0) // selection start x
         body.putInt(0) // selection end x
+        body.putInt(1) // soft wrapped
+        body.putInt(0) // not a continuation
+        body.putInt(1) // search range count
         body.putInt(2) // cell count
+        body.putInt(0) // search start
+        body.putInt(1) // search end
+        body.putInt(1) // active search result
 
         // Cell 0: foreground red, background black, bold flag.
         body.putInt(0xFFFF0000.toInt())
         body.putInt(0xFF000000.toInt())
-        body.putShort(CELL_FLAG_BOLD.toShort())
+        body.putInt(0xFF00FF00.toInt())
+        body.putShort((CELL_FLAG_BOLD or CELL_FLAG_BLINK).toShort())
         body.putShort(textBytes.size.toShort())
         body.put(textBytes)
 
         // Cell 1: empty.
         body.putInt(0xFFFFFFFF.toInt())
         body.putInt(0xFF000000.toInt())
+        body.putInt(0xFFFFFFFF.toInt())
         body.putShort(0)
         body.putShort(0)
 
@@ -100,8 +108,13 @@ class RenderSnapshotDecoderTest {
         val row = snapshot.rowsData.single()
         assertEquals(0, row.rowIndex)
         assertEquals(2, row.cells.size)
+        assertTrue(row.wrap)
+        assertEquals(1, row.searchRanges.size)
+        assertTrue(row.searchRanges.single().active)
         assertEquals("hi", row.cells[0].text)
         assertTrue(row.cells[0].bold)
+        assertTrue(row.cells[0].blink)
+        assertEquals(0xFF00FF00.toInt(), row.cells[0].underlineArgb)
         assertFalse(row.cells[1].bold)
         assertEquals("", row.cells[1].text)
         assertTrue(row.cells[0].selected)
@@ -112,5 +125,29 @@ class RenderSnapshotDecoderTest {
     fun truncatedBufferReturnsNull() {
         val buffer = bufferWith(SNAPSHOT_VERSION, 0)
         assertEquals(null, RenderSnapshotDecoder.decode(buffer, buffer.capacity()))
+    }
+
+    @Test
+    fun rejectsImpossibleDimensionsAndOversizedByteCount() {
+        val invalid = bufferWith(
+            SNAPSHOT_VERSION, 2, -1, 24,
+            0, 0, -1, -1, 0, 0, 0, 0, 0, 0,
+        )
+        assertEquals(null, RenderSnapshotDecoder.decode(invalid, invalid.capacity()))
+        assertEquals(null, RenderSnapshotDecoder.decode(invalid, invalid.capacity() + 1))
+    }
+
+    @Test
+    fun rejectsOutOfBoundsSearchRange() {
+        val body = ByteBuffer.allocate(128).order(ByteOrder.LITTLE_ENDIAN)
+        intArrayOf(
+            SNAPSHOT_VERSION, 2, 4, 1,
+            0, 0, -1, -1, 0, 0, 0, 1, 0, 0,
+            0, -1, -1, 0, 0, 1, 0,
+            3, 4, 0,
+        ).forEach(body::putInt)
+        val length = body.position()
+        body.rewind()
+        assertEquals(null, RenderSnapshotDecoder.decode(body, length))
     }
 }

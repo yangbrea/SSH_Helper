@@ -234,7 +234,7 @@ interface DocumentAccessDao {
         DiagnosticTraceEntity::class,
         DiagnosticEventEntity::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -256,7 +256,16 @@ abstract class AppDatabase : RoomDatabase() {
             context.applicationContext,
             AppDatabase::class.java,
             "ssh_helper.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
+        ).addMigrations(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+        ).build()
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -425,6 +434,55 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_diagnostic_events_traceId ON diagnostic_events(traceId)")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_diagnostic_events_traceId_sequence ON diagnostic_events(traceId, sequence)")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE hosts ADD COLUMN multiplexer TEXT NOT NULL DEFAULT 'NONE'")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Remove the host-level tmux default. Room validates the table without
+                // multiplexer, so copy hosts into a new table and drop the old one.
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS hosts_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        hostname TEXT NOT NULL,
+                        port INTEGER NOT NULL,
+                        username TEXT NOT NULL,
+                        authType TEXT NOT NULL,
+                        rememberCredential INTEGER NOT NULL,
+                        privateKeyName TEXT,
+                        autoReconnect INTEGER NOT NULL DEFAULT 0,
+                        jumpHostId INTEGER,
+                        proxyType TEXT,
+                        proxyHost TEXT,
+                        proxyPort INTEGER,
+                        proxyUsername TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        lastConnectedAt INTEGER,
+                        FOREIGN KEY(jumpHostId) REFERENCES hosts(id) ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )""".trimIndent(),
+                )
+                db.execSQL(
+                    """INSERT INTO hosts_new (
+                        id, name, hostname, port, username, authType, rememberCredential,
+                        privateKeyName, autoReconnect, jumpHostId, proxyType, proxyHost,
+                        proxyPort, proxyUsername, createdAt, updatedAt, lastConnectedAt
+                    ) SELECT
+                        id, name, hostname, port, username, authType, rememberCredential,
+                        privateKeyName, autoReconnect, jumpHostId, proxyType, proxyHost,
+                        proxyPort, proxyUsername, createdAt, updatedAt, lastConnectedAt
+                    FROM hosts""".trimIndent(),
+                )
+                db.execSQL("DROP TABLE hosts")
+                db.execSQL("ALTER TABLE hosts_new RENAME TO hosts")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_hosts_jumpHostId ON hosts(jumpHostId)")
             }
         }
     }

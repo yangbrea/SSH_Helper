@@ -48,8 +48,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ssh.MultiplexerSessionState
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
+import com.yang136.sshhelper.ssh.SessionKind
 import com.yang136.sshhelper.ui.design.SshActionTile
 import com.yang136.sshhelper.ui.design.SshCenteredList
 import com.yang136.sshhelper.ui.design.SshEmptyState
@@ -62,7 +64,7 @@ import com.yang136.sshhelper.ui.design.SshTopAppBar
 fun HostWorkspaceScreen(
     host: HostProfile,
     sessions: List<ManagedSessionState>,
-    onNewSession: (HostProfile) -> SessionId?,
+    onNewSession: (HostProfile, SessionKind) -> SessionId?,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
     onRenameSession: (SessionId, String) -> Unit,
@@ -109,7 +111,7 @@ fun HostWorkspaceScreen(
 internal fun HostWorkspacePane(
     host: HostProfile,
     sessions: List<ManagedSessionState>,
-    onNewSession: (HostProfile) -> SessionId?,
+    onNewSession: (HostProfile, SessionKind) -> SessionId?,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
     onRenameSession: (SessionId, String) -> Unit,
@@ -143,8 +145,10 @@ internal fun HostWorkspacePane(
         expandedSessionId = if (expandedSessionId == sessionId.value) null else sessionId.value
     }
 
-    fun performCreateSession() {
-        val id = onNewSession(host)
+    var showNewSessionKindDialog by remember { mutableStateOf(false) }
+
+    fun performCreateSession(kind: SessionKind) {
+        val id = onNewSession(host, kind)
         if (id == null) {
             sessionLimitReached = true
         } else {
@@ -155,7 +159,8 @@ internal fun HostWorkspacePane(
     LaunchedEffect(Unit) {
         if (createSession && !autoCreateConsumed) {
             autoCreateConsumed = true
-            performCreateSession()
+            // 快捷“新建会话”默认直接创建普通 SSH 会话；需要 tmux 时从工作区按钮选择。
+            performCreateSession(SessionKind.SSH)
         }
     }
 
@@ -164,7 +169,7 @@ internal fun HostWorkspacePane(
         state = state,
         expandedSessionId = expandedSessionId,
         onExpandSession = { id -> toggleExpand(id) },
-        onCreateSession = ::performCreateSession,
+        onCreateSession = { showNewSessionKindDialog = true },
         onOpenTerminal = onOpenTerminal,
         onOpenFiles = onOpenFiles,
         onRename = { renameSession = it },
@@ -173,6 +178,16 @@ internal fun HostWorkspacePane(
         onDiagnostics = onDiagnostics,
         modifier = modifier,
     )
+
+    if (showNewSessionKindDialog) {
+        SessionKindPickerDialog(
+            onDismiss = { showNewSessionKindDialog = false },
+            onConfirm = { kind ->
+                showNewSessionKindDialog = false
+                performCreateSession(kind)
+            },
+        )
+    }
 
     if (sessionLimitReached) AlertDialog(
         onDismissRequest = { sessionLimitReached = false },
@@ -300,10 +315,11 @@ private fun SessionCard(
     onClose: () -> Unit,
 ) {
     val pureForward = isPureForward(session)
-    val containerColor = if (pureForward) {
-        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .55f)
-    } else {
-        structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+    val isPersistent = session.kind != SessionKind.SSH
+    val containerColor = when {
+        pureForward -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .55f)
+        isPersistent -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .45f)
+        else -> structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -318,15 +334,33 @@ private fun SessionCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    if (pureForward) Icons.Default.Public else if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal,
+                    when {
+                        pureForward -> Icons.Default.Public
+                        isPersistent -> Icons.Default.Terminal
+                        SessionFeature.SFTP in session.features -> Icons.Default.Folder
+                        else -> Icons.Default.Terminal
+                    },
                     null,
-                    tint = if (pureForward) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                    tint = when {
+                        pureForward -> MaterialTheme.colorScheme.secondary
+                        isPersistent -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    },
                 )
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(session.displayName, fontWeight = FontWeight.Medium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (pureForward) {
                             SshStatusBadge("仅转发", SshStatusTone.CONNECTED)
+                        } else if (isPersistent) {
+                            SshStatusBadge(session.kind.name.lowercase(), SshStatusTone.CONNECTED)
+                            if (session.remoteSessionName != null) {
+                                SshStatusBadge(
+                                    if (session.multiplexerState is MultiplexerSessionState.Active) session.remoteSessionName
+                                    else "${session.remoteSessionName} · 未附加",
+                                    SshStatusTone.WAITING,
+                                )
+                            }
                         } else {
                             if (SessionFeature.SHELL in session.features) SshStatusBadge("终端", SshStatusTone.CONNECTED)
                             if (SessionFeature.SFTP in session.features) SshStatusBadge("文件", SshStatusTone.CONNECTED)
@@ -344,7 +378,25 @@ private fun SessionCard(
             }
             if (expanded) {
                 Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
-                    if (!pureForward) {
+                    if (pureForward) {
+                        Text(
+                            "该会话用于端口转发，不能直接打开终端或文件。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    } else if (isPersistent) {
+                        Text(
+                            "${session.kind.name.uppercase()} 持久会话仅提供终端；文件系统请使用普通 SSH 会话。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                        OutlinedButton(onClick = onOpenTerminal, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Terminal, null, Modifier.size(18.dp))
+                            Text("打开终端", Modifier.padding(start = 6.dp))
+                        }
+                    } else {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(onClick = onOpenFiles, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.Folder, null, Modifier.size(18.dp))
@@ -355,13 +407,6 @@ private fun SessionCard(
                                 Text("终端", Modifier.padding(start = 6.dp))
                             }
                         }
-                    } else {
-                        Text(
-                            "该会话用于端口转发，不能直接打开终端或文件。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 6.dp),
-                        )
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = onRename) { Text("重命名") }

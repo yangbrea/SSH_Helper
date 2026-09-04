@@ -10,6 +10,7 @@ package com.yang136.sshhelper.terminal
 internal class GhosttyRenderFrameStore {
     private var snapshot: GhosttyRenderSnapshot? = null
     private var rows: Array<Array<GhosttyRenderCell?>>? = null
+    private var rowMetadata: Array<GhosttyRenderRow?>? = null
     private var expectedCols: Int? = null
     private var expectedRows: Int? = null
 
@@ -22,6 +23,7 @@ internal class GhosttyRenderFrameStore {
     data class Frame(
         val snapshot: GhosttyRenderSnapshot,
         val rows: Array<Array<GhosttyRenderCell?>>,
+        val rowMetadata: Array<GhosttyRenderRow?>,
     )
 
     fun apply(update: GhosttyRenderSnapshot): Change? {
@@ -65,12 +67,18 @@ internal class GhosttyRenderFrameStore {
         } else {
             previousRows
         }
+        val targetMetadata = if (rowMetadata == null || dimensionsChanged || update.isFullDirty) {
+            arrayOfNulls<GhosttyRenderRow>(update.rows)
+        } else {
+            rowMetadata!!
+        }
 
         var firstDirtyRow = update.rows
         var lastDirtyRow = -1
         for (row in update.rowsData) {
             if (row.rowIndex !in target.indices) continue
             target[row.rowIndex] = Array(update.cols) { column -> row.cells.getOrNull(column) }
+            targetMetadata[row.rowIndex] = row
             firstDirtyRow = minOf(firstDirtyRow, row.rowIndex)
             lastDirtyRow = maxOf(lastDirtyRow, row.rowIndex)
         }
@@ -85,6 +93,7 @@ internal class GhosttyRenderFrameStore {
         }
 
         rows = target
+        rowMetadata = targetMetadata
         snapshot = update
 
         val fullRedraw = previousRows == null || dimensionsChanged || update.isFullDirty
@@ -98,7 +107,8 @@ internal class GhosttyRenderFrameStore {
     fun currentFrame(): Frame? {
         val currentSnapshot = snapshot ?: return null
         val currentRows = rows ?: return null
-        return Frame(currentSnapshot, currentRows)
+        val currentMetadata = rowMetadata ?: return null
+        return Frame(currentSnapshot, currentRows, currentMetadata)
     }
 
     fun expectSize(cols: Int, rows: Int) {
@@ -110,6 +120,7 @@ internal class GhosttyRenderFrameStore {
     fun clear() {
         snapshot = null
         rows = null
+        rowMetadata = null
         expectedCols = null
         expectedRows = null
     }

@@ -17,6 +17,7 @@ import com.yang136.sshhelper.data.TransferStatus
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
+import com.yang136.sshhelper.ssh.SessionKind
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.settings.ThemeMode
@@ -71,13 +72,17 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
     private val manager = container.sessionManager
     val sessions: StateFlow<List<ManagedSessionState>> = manager.sessions
 
-    fun create(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId? =
-        manager.create(profile, feature)
+    fun create(
+        profile: HostProfile,
+        feature: SessionFeature = SessionFeature.SHELL,
+        kind: SessionKind = SessionKind.SSH,
+    ): SessionId? = manager.create(profile, feature, kind)
 
     /**
      * 打开主机功能（终端/文件）：优先复用该主机已有会话，让终端与文件系统共享同一条
      * SSH 连接（多通道多路复用）；没有可复用会话时才新建。SHELL/SFTP 能力由对应
      * 页面按需附加（TerminalScreen 的 enableFeature(SHELL)、SftpViewModel 的 sftp(id)）。
+     * tmux 会话是纯终端会话，不会复用来打开文件系统。
      */
     fun openFor(profile: HostProfile, feature: SessionFeature = SessionFeature.SHELL): SessionId? {
         val reusable = selectReusableSession(sessions.value, profile.id)
@@ -118,6 +123,15 @@ class SessionsViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
     fun reconnect(id: SessionId) = viewModelScope.launch { manager.reconnect(id) }
+    fun refreshPersistentSessions(id: SessionId) = viewModelScope.launch { manager.refreshPersistentSessions(id) }
+    fun attachPersistentSession(id: SessionId, name: String) = viewModelScope.launch {
+        manager.attachPersistentSession(id, name)
+    }
+    fun createPersistentSession(id: SessionId) = viewModelScope.launch { manager.createPersistentSession(id) }
+    fun deletePersistentSession(id: SessionId, name: String) = viewModelScope.launch {
+        manager.deletePersistentSession(id, name)
+    }
+    fun fallbackToPlainShell(id: SessionId) = viewModelScope.launch { manager.fallbackToPlainShell(id) }
     fun disconnect(id: SessionId) = viewModelScope.launch { manager.disconnect(id) }
     fun cancelReconnect(id: SessionId) = viewModelScope.launch { manager.cancelReconnect(id) }
     fun close(id: SessionId, after: (() -> Unit)? = null) = viewModelScope.launch {
@@ -165,7 +179,11 @@ internal fun normalizePtySize(columns: Int, rows: Int): Pair<Int, Int> =
  * UI 功能，避免把界面功能挂到转发生命周期上；带 SHELL/SFTP（或混合）的会话均可复用。
  */
 internal fun selectReusableSession(sessions: List<ManagedSessionState>, hostId: Long): ManagedSessionState? =
-    sessions.lastOrNull { it.profile.id == hostId && it.features != setOf(SessionFeature.PORT_FORWARD) }
+    sessions.lastOrNull {
+        it.profile.id == hostId &&
+            it.kind == SessionKind.SSH &&
+            it.features != setOf(SessionFeature.PORT_FORWARD)
+    }
 
 class SnippetsViewModel(private val container: AppContainer) : ViewModel() {
     val snippets = container.snippetRepository.snippets.stateIn(
