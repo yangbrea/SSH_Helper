@@ -82,3 +82,5 @@ compile_and_run transport \
     "$project_dir/app/src/main/cpp/ssh/ssh_socks5_proxy.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_transport_test.cpp"
+
+"$project_dir/scripts/run-ssh-native-e2e-test.sh"
