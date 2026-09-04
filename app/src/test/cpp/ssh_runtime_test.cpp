@@ -83,4 +83,33 @@ int main() {
         session->shutdown();
         session->shutdown();
     }
+
+    // Cancellable requests that are still queued must not execute.
+    {
+        sshnative::SshNativeSession session;
+        int executed = 0;
+        const auto keep_id = session.postRequest([&] { ++executed; });
+        const auto cancel_id = session.postRequest([&] { ++executed; });
+        assert(keep_id != 0);
+        assert(cancel_id != 0);
+        assert(keep_id != cancel_id);
+
+        assert(session.cancel(cancel_id));
+        assert(!session.cancel(cancel_id));
+        assert(!session.cancel(0));
+
+        session.shutdown();
+        assert(executed == 1);
+    }
+
+    // Cancellation after shutdown/post-shutdown submissions are rejected.
+    {
+        sshnative::SshNativeSession session;
+        const auto id = session.postRequest([] {});
+        assert(id != 0);
+        session.shutdown();
+        assert(!session.post([] {}));
+        assert(session.postRequest([] {}) == 0);
+        assert(!session.cancel(id));
+    }
 }

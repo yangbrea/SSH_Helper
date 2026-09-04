@@ -5,8 +5,9 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <deque>
+#include <limits>
 #include <system_error>
+#include <utility>
 
 namespace sshnative {
 
@@ -54,14 +55,36 @@ SshNativeSession::~SshNativeSession() {
 }
 
 bool SshNativeSession::post(std::function<void()> task) {
-    if (!task) return false;
+    return postRequest(std::move(task)) != 0;
+}
+
+SshNativeSession::RequestId SshNativeSession::postRequest(std::function<void()> task) {
+    if (!task) return 0;
+    auto command = std::make_shared<Command>();
+    command->task = std::move(task);
+
+    RequestId id;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (shutting_down_) return false;
-        queue_.push_back(std::move(task));
+        if (shutting_down_) return 0;
+        id = next_request_id_;
+        next_request_id_ = next_request_id_ == std::numeric_limits<RequestId>::max()
+            ? 1
+            : next_request_id_ + 1;
+        command->id = id;
+        queue_.push_back(command);
+        pending_.emplace(id, command);
     }
     wake();
-    return true;
+    return id;
+}
+
+bool SshNativeSession::cancel(RequestId id) {
+    if (id == 0) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = pending_.find(id);
+    if (found == pending_.end()) return false;
+    return !found->second->canceled.exchange(true);
 }
 
 void SshNativeSession::shutdown() {
@@ -100,7 +123,7 @@ void SshNativeSession::loop() {
         }
 
         bool should_stop = false;
-        std::deque<std::function<void()>> local;
+        std::deque<std::shared_ptr<Command>> local;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             local.swap(queue_);
@@ -108,9 +131,19 @@ void SshNativeSession::loop() {
                 should_stop = true;
             }
         }
-        for (auto& task : local) {
-            task();
+
+        for (auto& command : local) {
+            bool run = false;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                pending_.erase(command->id);
+                run = !command->canceled.load();
+            }
+            if (run) {
+                command->task();
+            }
         }
+
         if (should_stop) break;
 
         // Re-check after executing the batch so a shutdown arriving during a
