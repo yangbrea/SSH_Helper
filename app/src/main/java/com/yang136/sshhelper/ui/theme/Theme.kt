@@ -161,34 +161,34 @@ private val OceanLight = presetColorScheme(
 
 private val EmeraldDark = presetColorScheme(
     dark = true,
-    primary = Color(0xFF35E07F),
-    secondary = Color(0xFF73D99D),
-    tertiary = Color(0xFFC1E86B),
-    background = Color(0xFF06130E),
-    surface = Color(0xFF0B2118),
-    surfaceVariant = Color(0xFF123426),
-    onPrimary = Color(0xFF00210D),
-    onBackground = Color(0xFFD6FFE4),
-    onSurfaceVariant = Color(0xFFA9CFB7),
-    outline = Color(0xFF6E947D),
-    surfaceContainer = Color(0xFF0E291E),
-    surfaceContainerHigh = Color(0xFF143629),
+    primary = Color(0xFF34D399),
+    secondary = Color(0xFF6EE7B7),
+    tertiary = Color(0xFF5EEAD4),
+    background = Color(0xFF0B0F0D),
+    surface = Color(0xFF121715),
+    surfaceVariant = Color(0xFF1C2320),
+    onPrimary = Color(0xFF052E1B),
+    onBackground = Color(0xFFE6EDE9),
+    onSurfaceVariant = Color(0xFF9AA8A0),
+    outline = Color(0xFF66756E),
+    surfaceContainer = Color(0xFF151B18),
+    surfaceContainerHigh = Color(0xFF1A221E),
 )
 
 private val EmeraldLight = presetColorScheme(
     dark = false,
-    primary = Color(0xFF08783B),
-    secondary = Color(0xFF286B45),
-    tertiary = Color(0xFF4F6800),
-    background = Color(0xFFF3FBF5),
+    primary = Color(0xFF0D7A55),
+    secondary = Color(0xFF38755A),
+    tertiary = Color(0xFF0E7490),
+    background = Color(0xFFF6F8F7),
     surface = Color.White,
-    surfaceVariant = Color(0xFFDCEFE2),
+    surfaceVariant = Color(0xFFE1EAE6),
     onPrimary = Color.White,
-    onBackground = Color(0xFF15251B),
-    onSurfaceVariant = Color(0xFF496253),
-    outline = Color(0xFF687C6E),
-    surfaceContainer = Color(0xFFEAF5ED),
-    surfaceContainerHigh = Color(0xFFDCEFE2),
+    onBackground = Color(0xFF1A211E),
+    onSurfaceVariant = Color(0xFF4D5B54),
+    outline = Color(0xFF64746D),
+    surfaceContainer = Color(0xFFECF2EF),
+    surfaceContainerHigh = Color(0xFFE1EAE6),
 )
 
 private val AmberDark = presetColorScheme(
@@ -362,7 +362,7 @@ internal fun colorScheme(preset: ThemePreset, dark: Boolean): ColorScheme = when
 
 internal fun terminalPalette(preset: ThemePreset, dark: Boolean): TerminalPalette = when (preset) {
     ThemePreset.OCEAN -> oceanTerminalPalette(dark)
-    ThemePreset.EMERALD -> terminalPaletteBase(dark, "#06130e", "#e2ffe9", "#35e07f", "#143d2a")
+    ThemePreset.EMERALD -> terminalPaletteBase(dark, "#0b0f0d", "#e6ede9", "#34d399", "#1c3b31")
     ThemePreset.AMBER -> terminalPaletteBase(
         dark, "#0b0b0d", "#f2ecdd", "#d9b45f", "#4a4025",
         "#faf8f2", "#29251d", "#765b12", "#ddd2b5",

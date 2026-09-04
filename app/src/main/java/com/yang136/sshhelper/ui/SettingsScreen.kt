@@ -200,7 +200,7 @@ internal data class AiSettingsDraft(val baseUrl: String, val apiKey: String, val
 private data class ThemePreview(val preset: ThemePreset, val background: Color, val accent: Color)
 private val themePreviews = listOf(
     ThemePreview(ThemePreset.OCEAN, Color(0xFF07131F), Color(0xFF22D3EE)),
-    ThemePreview(ThemePreset.EMERALD, Color(0xFF06130E), Color(0xFF35E07F)),
+    ThemePreview(ThemePreset.EMERALD, Color(0xFF0B0F0D), Color(0xFF34D399)),
     ThemePreview(ThemePreset.AMBER, Color(0xFF0B0B0D), Color(0xFFD9B45F)),
     ThemePreview(ThemePreset.VIOLET, Color(0xFF0D1117), Color(0xFFB8C4D6)),
 )
