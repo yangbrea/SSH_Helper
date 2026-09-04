@@ -83,6 +83,16 @@ std::string jstringToString(JNIEnv* env, jstring value) {
     return result;
 }
 
+std::string jbyteArrayToString(JNIEnv* env, jbyteArray value) {
+    if (value == nullptr) return std::string();
+    const jsize length = env->GetArrayLength(value);
+    if (length <= 0) return std::string();
+    std::string result;
+    result.resize(static_cast<size_t>(length));
+    env->GetByteArrayRegion(value, 0, length, reinterpret_cast<jbyte*>(&result[0]));
+    return result;
+}
+
 } // namespace
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* /* vm */, void* /* reserved */) {
     return JNI_VERSION_1_6;
@@ -135,6 +145,58 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeConnectExec(
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeConnectExec failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeConnectExecWithPrivateKey(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jstring jhost,
+    jint jport,
+    jstring jusername,
+    jbyteArray jprivateKey,
+    jstring jpassphrase,
+    jstring jcommand) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        const std::string username = jstringToString(env, jusername);
+        const std::string private_key = jbyteArrayToString(env, jprivateKey);
+        const std::string passphrase = jstringToString(env, jpassphrase);
+        const std::string command = jstringToString(env, jcommand);
+        if (host.empty() || username.empty() || private_key.empty() || command.empty()) {
+            throw std::invalid_argument("host/username/private key/command must not be empty");
+        }
+        if (jport <= 0 || jport > 65535) {
+            throw std::invalid_argument("port out of range");
+        }
+
+        const int fd = sshnative::connectTcp(host, static_cast<uint16_t>(jport), std::chrono::seconds(10));
+        sshnative::Libssh2Session session;
+        session.setBlocking(true);
+        session.handshake(fd);
+        const bool authed = session.publicKeyAuth(username, private_key, passphrase);
+        if (!authed) {
+            sshnative::closeFd(fd);
+            throw std::runtime_error("SSH public key authentication failed");
+        }
+        std::string output;
+        const int exit_code = session.execCommand(command, output);
+        sshnative::closeFd(fd);
+        const std::string result = "exit=" + std::to_string(exit_code) + "\n" + output;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeConnectExecWithPrivateKey failed");
         return nullptr;
     }
 }

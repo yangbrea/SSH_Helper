@@ -34,6 +34,8 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
 
     private var route: SshRoute? = null
     private var password: String? = null
+    private var privateKey: ByteArray? = null
+    private var passphrase: String? = null
     private var closed = false
 
     override suspend fun connect(
@@ -47,23 +49,42 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
             return@withContext
         }
         val targetCredential = credentials.target
-        if (targetCredential !is Credential.Password) {
-            mutableState.value = ConnectionState.Error("libssh2 POC 暂只支持密码认证")
+        if (targetCredential !is Credential.Password && targetCredential !is Credential.PrivateKey) {
+            mutableState.value = ConnectionState.Error("不支持的认证类型")
             return@withContext
         }
         mutableState.value = ConnectionState.Connecting
         mutableStage.value = ConnectionStage.TARGET_AUTH
         try {
-            val passwordText = targetCredential.value.concatToString()
-            NativeSshBridge.nativeConnectExec(
-                route.target.hostname,
-                route.target.port,
-                route.target.username,
-                passwordText,
-                "true",
-            )
+            when (targetCredential) {
+                is Credential.Password -> {
+                    val passwordText = targetCredential.value.concatToString()
+                    NativeSshBridge.nativeConnectExec(
+                        route.target.hostname,
+                        route.target.port,
+                        route.target.username,
+                        passwordText,
+                        "true",
+                    )
+                    password = passwordText
+                    privateKey = null
+                    passphrase = null
+                }
+                is Credential.PrivateKey -> {
+                    NativeSshBridge.nativeConnectExecWithPrivateKey(
+                        route.target.hostname,
+                        route.target.port,
+                        route.target.username,
+                        targetCredential.bytes,
+                        targetCredential.passphrase?.concatToString(),
+                        "true",
+                    )
+                    password = null
+                    privateKey = targetCredential.bytes.copyOf()
+                    passphrase = targetCredential.passphrase?.concatToString()
+                }
+            }
             this@Libssh2SshSession.route = route
-            password = passwordText
             mutableState.value = ConnectionState.Connected("${route.target.username}@${route.target.hostname}")
             mutableStage.value = ConnectionStage.READY
         } catch (error: Throwable) {
@@ -79,7 +100,7 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
     ): RemoteCommandResult = withContext(Dispatchers.IO) {
         val activeRoute = route
         val activePassword = password
-        if (activeRoute == null || activePassword == null) {
+        if (activeRoute == null || (activePassword == null && privateKey == null)) {
             return@withContext RemoteCommandResult(
                 exitCode = REMOTE_COMMAND_TIMEOUT_EXIT_CODE,
                 stdout = "",
@@ -87,13 +108,25 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
             )
         }
         try {
-            val raw = NativeSshBridge.nativeConnectExec(
-                activeRoute.target.hostname,
-                activeRoute.target.port,
-                activeRoute.target.username,
-                activePassword,
-                command,
-            )
+            val raw = if (activePassword != null) {
+                NativeSshBridge.nativeConnectExec(
+                    activeRoute.target.hostname,
+                    activeRoute.target.port,
+                    activeRoute.target.username,
+                    activePassword,
+                    command,
+                )
+            } else {
+                val key = privateKey ?: error("SSH private key unavailable")
+                NativeSshBridge.nativeConnectExecWithPrivateKey(
+                    activeRoute.target.hostname,
+                    activeRoute.target.port,
+                    activeRoute.target.username,
+                    key,
+                    passphrase,
+                    command,
+                )
+            }
             val newline = raw.indexOf('\n')
             val exitLine = if (newline >= 0) raw.substring(0, newline) else raw
             val output = if (newline >= 0) raw.substring(newline + 1) else ""
@@ -125,6 +158,9 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
     override suspend fun disconnect() {
         route = null
         password = null
+        privateKey?.fill(0)
+        privateKey = null
+        passphrase = null
         mutableState.value = ConnectionState.Disconnected("已断开", DisconnectCause.USER)
         mutableTerminalState.value = TerminalChannelState.Closed
     }
@@ -146,6 +182,9 @@ class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSess
         closed = true
         route = null
         password = null
+        privateKey?.fill(0)
+        privateKey = null
+        passphrase = null
         mutableState.value = ConnectionState.Disconnected("应用已关闭", DisconnectCause.APP_CLOSED)
         mutableTerminalState.value = TerminalChannelState.Closed
     }

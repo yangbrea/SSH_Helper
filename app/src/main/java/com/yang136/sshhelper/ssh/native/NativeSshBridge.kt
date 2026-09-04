@@ -36,4 +36,14 @@ object NativeSshBridge {
         password: String,
         command: String,
     ): String
+
+    /** Same synchronous POC as [nativeConnectExec] but authenticates with an in-memory private key. */
+    external fun nativeConnectExecWithPrivateKey(
+        host: String,
+        port: Int,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        command: String,
+    ): String
 }
