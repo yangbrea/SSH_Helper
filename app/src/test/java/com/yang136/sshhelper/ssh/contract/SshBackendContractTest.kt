@@ -2,6 +2,7 @@ package com.yang136.sshhelper.ssh.contract
 
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.ForwardType
+import com.yang136.sshhelper.data.ProxyType
 import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.HostProfile
 import com.yang136.sshhelper.data.KnownHostDao
@@ -17,8 +18,12 @@ import com.yang136.sshhelper.ssh.PortForwardCapableSession
 import com.yang136.sshhelper.ssh.SftpCapableSession
 import com.yang136.sshhelper.ssh.SshRoute
 import com.yang136.sshhelper.ssh.SshSession
+import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.ServerSocket
@@ -430,6 +435,29 @@ abstract class SshBackendContractTest {
     }
 
 
+    @Test
+    fun connectsThroughHttpConnectProxy() = runBlocking {
+        val proxy = HttpConnectProxy("127.0.0.1", server.port)
+        val profile = HostProfile(
+            name = "proxy-host",
+            hostname = "target.internal",
+            port = 22,
+            username = "test",
+            authType = AuthType.PASSWORD,
+            proxyType = ProxyType.HTTP,
+            proxyHost = "127.0.0.1",
+            proxyPort = proxy.port,
+        )
+        val session = createSession(MemoryKnownHostDao())
+        try {
+            connectAndConfirm(session, hostProfile = profile)
+            assertTrue("SSH handshake must traverse proxy", proxy.connections.get() >= 1)
+        } finally {
+            session.close()
+        }
+    }
+
+
     protected class MemoryKnownHostDao(initial: KnownHostEntity? = null) : KnownHostDao {
         private var value: KnownHostEntity? = initial
         override suspend fun find(hostname: String, port: Int): KnownHostEntity? = value
@@ -440,6 +468,7 @@ abstract class SshBackendContractTest {
             value = null
         }
     }
+
 
     private class EchoServer {
         private val server = ServerSocket(0)
@@ -465,6 +494,61 @@ abstract class SshBackendContractTest {
         fun close() {
             running.set(false)
             runCatching { server.close() }
+        }
+    }
+
+
+    private class HttpConnectProxy(private val targetHost: String, private val targetPort: Int) {
+        private val server = ServerSocket(0)
+        val connections = AtomicInteger(0)
+        val port: Int get() = server.localPort
+
+        init {
+            Thread {
+                while (true) {
+                    val client = try { server.accept() } catch (e: Exception) { return@Thread }
+                    Thread {
+                        try {
+                            val reader = BufferedReader(InputStreamReader(client.getInputStream()))
+                            val requestLine = reader.readLine() ?: return@Thread
+                            while (true) {
+                                val line = reader.readLine()
+                                if (line == null || line.isEmpty()) break
+                            }
+                            if (!requestLine.startsWith("CONNECT ")) {
+                                client.close()
+                                return@Thread
+                            }
+                            connections.incrementAndGet()
+                            val remote = Socket(targetHost, targetPort)
+                            val writer = BufferedWriter(OutputStreamWriter(client.getOutputStream()))
+                            writer.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+                            writer.flush()
+                            pump(client, remote)
+                        } catch (e: Exception) {
+                            runCatching { client.close() }
+                        }
+                    }.also { it.isDaemon = true; it.start() }
+                }
+            }.also { it.isDaemon = true; it.start() }
+        }
+
+        private fun pump(client: Socket, remote: Socket) {
+            val done = java.util.concurrent.atomic.AtomicBoolean(false)
+            val finish = {
+                if (done.compareAndSet(false, true)) {
+                    runCatching { client.close() }
+                    runCatching { remote.close() }
+                }
+            }
+            Thread {
+                runCatching { client.getInputStream().use { input -> input.copyTo(remote.getOutputStream()) } }
+                finish()
+            }.also { it.isDaemon = true; it.start() }
+            Thread {
+                runCatching { remote.getInputStream().use { input -> input.copyTo(client.getOutputStream()) } }
+                finish()
+            }.also { it.isDaemon = true; it.start() }
         }
     }
 }
