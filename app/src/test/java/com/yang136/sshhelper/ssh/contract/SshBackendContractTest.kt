@@ -9,6 +9,8 @@ import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.ForwardRequest
 import com.yang136.sshhelper.ssh.HostKeyIssue
+import com.yang136.sshhelper.ssh.REMOTE_COMMAND_OUTPUT_LIMIT_EXIT_CODE
+import com.yang136.sshhelper.ssh.REMOTE_COMMAND_TIMEOUT_EXIT_CODE
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.RouteCredentials
 import com.yang136.sshhelper.ssh.PortForwardCapableSession
@@ -253,6 +255,35 @@ abstract class SshBackendContractTest {
             withTimeout(10_000) { connection.await() }
             assertTrue("expected Error, got ${session.state.value}", session.state.value is ConnectionState.Error)
             assertEquals(HostKeyIssue.CHANGED, session.hostKeyRequest.value?.issue)
+        } finally {
+            session.close()
+        }
+    }
+
+
+    @Test
+    fun execCommandTimeoutReturnsTimeoutExitCode() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        try {
+            connectAndConfirm(session, openShell = false)
+            val result = session.execute("sleep 5", timeoutMillis = 200, maxOutputBytes = 1024 * 1024)
+            assertEquals(REMOTE_COMMAND_TIMEOUT_EXIT_CODE, result.exitCode)
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
+    fun execCommandOutputLimitReturnsLimitExitCode() = runBlocking {
+        val session = createSession(MemoryKnownHostDao())
+        try {
+            connectAndConfirm(session, openShell = false)
+            val result = session.execute(
+                "yes x",
+                timeoutMillis = 5_000,
+                maxOutputBytes = 4096,
+            )
+            assertEquals(REMOTE_COMMAND_OUTPUT_LIMIT_EXIT_CODE, result.exitCode)
         } finally {
             session.close()
         }
