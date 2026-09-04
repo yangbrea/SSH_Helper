@@ -19,7 +19,7 @@ import kotlinx.coroutines.withContext
  * exec only. It intentionally does not yet implement SFTP/forwarding, persistent
  * channels, proxy/jump, host-key persistence or the non-blocking event loop.
  */
-class Libssh2SshSession : SshSession {
+class Libssh2SshSession : SshSession, SftpCapableSession, PortForwardCapableSession {
     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val mutableOutput = MutableSharedFlow<ByteArray>(extraBufferCapacity = 128)
     private val mutableTerminalState = MutableStateFlow<TerminalChannelState>(TerminalChannelState.Closed)
@@ -131,6 +131,15 @@ class Libssh2SshSession : SshSession {
 
     override fun respondToHostKey(accept: Boolean) {
         mutableHostKeyRequest.value = null
+    }
+
+
+    override suspend fun openSftpClient(): com.yang136.sshhelper.sftp.SftpClient {
+        error("libssh2 POC 暂不支持 SFTP")
+    }
+
+    override suspend fun registerForward(request: ForwardRequest): ForwardHandle {
+        error("libssh2 POC 暂不支持端口转发")
     }
 
     override fun close() {
