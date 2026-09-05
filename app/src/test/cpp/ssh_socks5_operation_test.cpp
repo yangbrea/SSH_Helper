@@ -51,6 +51,46 @@ void writeExact(int fd, const void* data, size_t size) {
     }
 }
 
+void serveSocks5Auth(int listener) {
+    const int client = accept(listener, nullptr, nullptr);
+    assert(client >= 0);
+    uint8_t greeting[2];
+    readExact(client, greeting, 2);
+    assert(greeting[0] == 0x05);
+    uint8_t methods[8];
+    readExact(client, methods, greeting[1]);
+    uint8_t reply[2] = {0x05, 0x02};
+    writeExact(client, reply, 2);
+
+    uint8_t auth_version_len[2];
+    readExact(client, auth_version_len, 2);
+    assert(auth_version_len[0] == 0x01);
+    std::string user(auth_version_len[1], '\0');
+    readExact(client, &user[0], user.size());
+    uint8_t pass_len = 0;
+    readExact(client, &pass_len, 1);
+    std::string pass(pass_len, '\0');
+    readExact(client, &pass[0], pass.size());
+    assert(user == "proxyuser");
+    assert(pass == "proxypass");
+    uint8_t auth_ok[2] = {0x01, 0x00};
+    writeExact(client, auth_ok, 2);
+
+    uint8_t header[4];
+    readExact(client, header, 4);
+    assert(header[0] == 0x05 && header[1] == 0x01);
+    assert(header[3] == 0x03);
+    uint8_t len = 0;
+    readExact(client, &len, 1);
+    std::string domain(len, '\0');
+    readExact(client, &domain[0], len);
+    uint8_t port[2];
+    readExact(client, port, 2);
+    const uint8_t success[] = {0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0};
+    writeExact(client, success, sizeof(success));
+    close(client);
+}
+
 void serveSocks5(int listener) {
     const int client = accept(listener, nullptr, nullptr);
     assert(client >= 0);
@@ -90,22 +130,39 @@ int main() {
             "127.0.0.1", port, "example.test", 22, "", "", 2s));
     assert(result && "runtime must accept socks5 operation");
 
-    const auto stop = sshnative::MonoClock::now() + 3s;
-    while (sshnative::MonoClock::now() < stop) {
-        sshnative::RuntimeEvent event;
-        if (!runtime->waitEvent(&event, 100ms)) continue;
-        if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
-            event.request_id != result.request_id) {
-            continue;
+    auto wait_connected = [](auto& runtime, auto result) {
+        const auto stop = sshnative::MonoClock::now() + 3s;
+        while (sshnative::MonoClock::now() < stop) {
+            sshnative::RuntimeEvent event;
+            if (!runtime->waitEvent(&event, 100ms)) continue;
+            if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
+                event.request_id != result.request_id) {
+                continue;
+            }
+            assert(event.completion == sshnative::CompletionKind::kSucceeded);
+            assert(event.payload == "connected");
+            return;
         }
-        assert(event.completion == sshnative::CompletionKind::kSucceeded);
-        assert(event.payload == "connected");
-        runtime->shutdown();
-        proxy.join();
-        close(listener);
-        return 0;
-    }
+        assert(false && "socks5 operation timeout");
+    };
+
+    wait_connected(runtime, result);
     runtime->shutdown();
+    proxy.join();
     close(listener);
-    return 1;
+
+    uint16_t auth_port = 0;
+    const int auth_listener = startListener(auth_port);
+    std::thread auth_proxy([auth_listener] { serveSocks5Auth(auth_listener); });
+    auto auth_runtime = sshnative::createSession();
+    auto auth_result = auth_runtime->submit(
+        std::make_unique<sshnative::Socks5ProxyConnectOperation>(
+            "127.0.0.1", auth_port, "example.test", 22,
+            "proxyuser", "proxypass", 2s));
+    assert(auth_result && "runtime must accept socks5 auth operation");
+    wait_connected(auth_runtime, auth_result);
+    auth_runtime->shutdown();
+    auth_proxy.join();
+    close(auth_listener);
+    return 0;
 }
