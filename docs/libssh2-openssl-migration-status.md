@@ -68,6 +68,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - direct runtime 完整链路：password / private key → handshake → exec
   - stdout/stderr/exit code
   - output limit → exit=125
+  - JNI runtime exec 支持 deadline，超时映射 exit=124
 - host tests 与 Android assembleDebug 均通过
 - JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()` / `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
 
@@ -83,7 +84,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ## 尚未完成（按计划顺序）
 - 下一步是把 proxy operation 与 SSH handshake/auth/exec 串成完整代理路径，并加入 runtime 内 host-key decision。
-- exec timeout → exit=124 尚未实现。
+- runtime 内 host-key decision 尚未实现；exec timeout 已通过 JNI deadline 映射 exit=124。
 - shell/PTY、SFTP、forward、jump 尚未 native 化。
 - host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
 - keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
