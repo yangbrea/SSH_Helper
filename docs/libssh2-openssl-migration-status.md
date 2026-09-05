@@ -91,7 +91,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。
 - SFTP、forward、jump 的 native API。
-- `Libssh2SshSession` 的 exec 在已存 fingerprint 时已走 runtime JNI（deadline/output limit/stderr），host key mismatch 会映射为 changed-key 错误，但生产实现与默认切换仍未完成。
+- `Libssh2SshSession` 的 exec 在已存 fingerprint 时已走 `NativeSshRuntime` runtime JNI（deadline/output limit/stderr），host key mismatch 会映射为 changed-key 错误，但生产实现与默认切换仍未完成。
 - 删除 JSch 及清理文档/notices。
 - 真机/模拟器 release 门禁。
 
