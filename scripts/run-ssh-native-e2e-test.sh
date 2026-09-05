@@ -341,6 +341,66 @@ trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_
     -o "$runtime_transport_handoff_binary"
 "$runtime_transport_handoff_binary" "$port"
 
+http_proxy_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-http-proxy-port.XXXXXX")"
+http_proxy_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-http-proxy-err.XXXXXX")"
+socks_proxy_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-socks-proxy-port.XXXXXX")"
+socks_proxy_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-socks-proxy-err.XXXXXX")"
+runtime_proxy_exec_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-proxy-exec.XXXXXX")"
+trap 'kill "$server_pid" "$http_proxy_pid" "$socks_proxy_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$runtime_transport_handoff_binary" "$runtime_proxy_exec_binary" "$port_file" "$server_err" "$key_file" "$http_proxy_port_file" "$http_proxy_err" "$socks_proxy_port_file" "$socks_proxy_err" "$kbdint_port_file" "$kbdint_server_err" "$kbdint_binary"' EXIT
+
+python3 "$project_dir/scripts/ssh-native-test-proxy.py" http "$port" >"$http_proxy_port_file" 2>"$http_proxy_err" &
+http_proxy_pid=$!
+for _ in $(seq 1 50); do
+    if [[ -s "$http_proxy_port_file" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+if [[ ! -s "$http_proxy_port_file" ]]; then
+    echo "[ssh-native] e2e failed to start http proxy" >&2
+    cat "$http_proxy_err" >&2 || true
+    exit 1
+fi
+http_proxy_port="$(head -1 "$http_proxy_port_file")"
+
+python3 "$project_dir/scripts/ssh-native-test-proxy.py" socks5 "$port" >"$socks_proxy_port_file" 2>"$socks_proxy_err" &
+socks_proxy_pid=$!
+for _ in $(seq 1 50); do
+    if [[ -s "$socks_proxy_port_file" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+if [[ ! -s "$socks_proxy_port_file" ]]; then
+    echo "[ssh-native] e2e failed to start socks proxy" >&2
+    cat "$socks_proxy_err" >&2 || true
+    exit 1
+fi
+socks_proxy_port="$(head -1 "$socks_proxy_port_file")"
+
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_direct_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_proxy_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socks5_operation.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_proxy_exec_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$runtime_proxy_exec_binary"
+"$runtime_proxy_exec_binary" "$port" http "$http_proxy_port" "$key_file"
+"$runtime_proxy_exec_binary" "$port" socks5 "$socks_proxy_port" "$key_file"
+
 kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"
 kbdint_server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-err.XXXXXX")"
 kbdint_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint.XXXXXX")"
