@@ -14,12 +14,17 @@ import sys
 class ExecSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         self._chan = chan
+        self._command = ""
 
     def exec_requested(self, command):
+        self._command = command
         return True
 
     def session_started(self):
-        self._chan.write("native-exec-ok")
+        if self._command == "stderr-test":
+            self._chan.write_stderr("native-stderr-ok")
+        else:
+            self._chan.write("native-exec-ok")
         self._chan.exit(0)
 
 

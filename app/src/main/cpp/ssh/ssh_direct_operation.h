@@ -51,6 +51,7 @@ private:
     bool exec_started_ = false;
     bool close_started_ = false;
     std::string output_;
+    std::string stderr_;
 };
 
 // Full direct transport operation with in-memory private-key authentication.
@@ -94,6 +95,7 @@ private:
     bool exec_started_ = false;
     bool close_started_ = false;
     std::string output_;
+    std::string stderr_;
 };
 
 } // namespace sshnative

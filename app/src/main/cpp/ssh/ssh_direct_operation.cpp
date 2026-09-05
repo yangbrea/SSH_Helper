@@ -231,27 +231,72 @@ StepResult TcpPasswordExecOperation::step(
         }
     }
 
-    // Phase 6: read stdout until EOF.
+    // Phase 6: read stdout and stderr until channel EOF.
     if (!close_started_) {
-        char buffer[4096];
-        const ssize_t count = libssh2_channel_read(
-            channel_, buffer, sizeof(buffer));
-        Libssh2CallResult translated = classifyLibssh2Count(
-            session_.get(), fd_, count, ErrorDomain::kChannel,
-            "channel_read");
-        switch (translated.kind) {
-            case Libssh2CallKind::kWouldBlock:
-                return StepResult::waitIo(std::move(translated.interest));
-            case Libssh2CallKind::kFailed:
-                return StepResult::failed(std::move(translated.error));
-            case Libssh2CallKind::kSucceeded:
-                break;
+        if (libssh2_channel_eof(channel_)) {
+            close_started_ = true;
+        } else {
+            char out_buffer[4096];
+            char err_buffer[4096];
+            IoInterest pending_interest;
+            size_t progress_bytes = 0;
+
+            const ssize_t out_count = libssh2_channel_read(
+                channel_, out_buffer, sizeof(out_buffer));
+            Libssh2CallResult out_translated = classifyLibssh2Count(
+                session_.get(), fd_, out_count, ErrorDomain::kChannel,
+                "channel_read");
+            switch (out_translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    pending_interest = std::move(out_translated.interest);
+                    break;
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(out_translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    if (out_translated.value > 0) {
+                        output_.append(
+                            out_buffer,
+                            static_cast<size_t>(out_translated.value));
+                        progress_bytes += static_cast<size_t>(out_translated.value);
+                    }
+                    break;
+            }
+
+            const ssize_t err_count = libssh2_channel_read_stderr(
+                channel_, err_buffer, sizeof(err_buffer));
+            Libssh2CallResult err_translated = classifyLibssh2Count(
+                session_.get(), fd_, err_count, ErrorDomain::kChannel,
+                "channel_read_stderr");
+            switch (err_translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    if (pending_interest.empty()) {
+                        pending_interest = std::move(err_translated.interest);
+                    }
+                    break;
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(err_translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    if (err_translated.value > 0) {
+                        stderr_.append(
+                            err_buffer,
+                            static_cast<size_t>(err_translated.value));
+                        progress_bytes += static_cast<size_t>(err_translated.value);
+                    }
+                    break;
+            }
+
+            if (progress_bytes > 0) {
+                return StepResult::progress(progress_bytes);
+            }
+            if (!pending_interest.empty()) {
+                return StepResult::waitIo(std::move(pending_interest));
+            }
+            if (libssh2_channel_eof(channel_)) {
+                close_started_ = true;
+            } else {
+                return StepResult::noProgress();
+            }
         }
-        if (translated.value > 0) {
-            output_.append(buffer, static_cast<size_t>(translated.value));
-            return StepResult::progress(static_cast<size_t>(translated.value));
-        }
-        close_started_ = true;
     }
 
     // Phase 7: close channel and return exit status.
@@ -270,8 +315,12 @@ StepResult TcpPasswordExecOperation::step(
     const int exit_code = libssh2_channel_get_exit_status(channel_);
     libssh2_channel_free(channel_);
     channel_ = nullptr;
-    return StepResult::complete(
-        "exit=" + std::to_string(exit_code) + "\n" + output_);
+    std::string result_payload =
+        "exit=" + std::to_string(exit_code) + "\n" + output_;
+    if (!stderr_.empty()) {
+        result_payload += "\nSTDERR_BEGIN\n" + stderr_ + "\nSTDERR_END\n";
+    }
+    return StepResult::complete(std::move(result_payload));
 }
 
 
@@ -483,25 +532,70 @@ StepResult TcpPrivateKeyExecOperation::step(
     }
 
     if (!close_started_) {
-        char buffer[4096];
-        const ssize_t count = libssh2_channel_read(
-            channel_, buffer, sizeof(buffer));
-        Libssh2CallResult translated = classifyLibssh2Count(
-            session_.get(), fd_, count, ErrorDomain::kChannel,
-            "channel_read");
-        switch (translated.kind) {
-            case Libssh2CallKind::kWouldBlock:
-                return StepResult::waitIo(std::move(translated.interest));
-            case Libssh2CallKind::kFailed:
-                return StepResult::failed(std::move(translated.error));
-            case Libssh2CallKind::kSucceeded:
-                break;
+        if (libssh2_channel_eof(channel_)) {
+            close_started_ = true;
+        } else {
+            char out_buffer[4096];
+            char err_buffer[4096];
+            IoInterest pending_interest;
+            size_t progress_bytes = 0;
+
+            const ssize_t out_count = libssh2_channel_read(
+                channel_, out_buffer, sizeof(out_buffer));
+            Libssh2CallResult out_translated = classifyLibssh2Count(
+                session_.get(), fd_, out_count, ErrorDomain::kChannel,
+                "channel_read");
+            switch (out_translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    pending_interest = std::move(out_translated.interest);
+                    break;
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(out_translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    if (out_translated.value > 0) {
+                        output_.append(
+                            out_buffer,
+                            static_cast<size_t>(out_translated.value));
+                        progress_bytes += static_cast<size_t>(out_translated.value);
+                    }
+                    break;
+            }
+
+            const ssize_t err_count = libssh2_channel_read_stderr(
+                channel_, err_buffer, sizeof(err_buffer));
+            Libssh2CallResult err_translated = classifyLibssh2Count(
+                session_.get(), fd_, err_count, ErrorDomain::kChannel,
+                "channel_read_stderr");
+            switch (err_translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    if (pending_interest.empty()) {
+                        pending_interest = std::move(err_translated.interest);
+                    }
+                    break;
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(err_translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    if (err_translated.value > 0) {
+                        stderr_.append(
+                            err_buffer,
+                            static_cast<size_t>(err_translated.value));
+                        progress_bytes += static_cast<size_t>(err_translated.value);
+                    }
+                    break;
+            }
+
+            if (progress_bytes > 0) {
+                return StepResult::progress(progress_bytes);
+            }
+            if (!pending_interest.empty()) {
+                return StepResult::waitIo(std::move(pending_interest));
+            }
+            if (libssh2_channel_eof(channel_)) {
+                close_started_ = true;
+            } else {
+                return StepResult::noProgress();
+            }
         }
-        if (translated.value > 0) {
-            output_.append(buffer, static_cast<size_t>(translated.value));
-            return StepResult::progress(static_cast<size_t>(translated.value));
-        }
-        close_started_ = true;
     }
 
     const int result = libssh2_channel_close(channel_);
@@ -519,7 +613,11 @@ StepResult TcpPrivateKeyExecOperation::step(
     const int exit_code = libssh2_channel_get_exit_status(channel_);
     libssh2_channel_free(channel_);
     channel_ = nullptr;
-    return StepResult::complete(
-        "exit=" + std::to_string(exit_code) + "\n" + output_);
+    std::string result_payload =
+        "exit=" + std::to_string(exit_code) + "\n" + output_;
+    if (!stderr_.empty()) {
+        result_payload += "\nSTDERR_BEGIN\n" + stderr_ + "\nSTDERR_END\n";
+    }
+    return StepResult::complete(std::move(result_payload));
 }
 } // namespace sshnative
