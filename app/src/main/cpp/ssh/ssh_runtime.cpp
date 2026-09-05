@@ -238,6 +238,8 @@ struct LoopContext::Access {
     virtual void add(std::unique_ptr<RuntimeResource> resource) = 0;
     virtual void storeTransport(int fd) = 0;
     virtual int takeTransport() = 0;
+    virtual void storeSession(std::unique_ptr<RuntimeResource> session) = 0;
+    virtual RuntimeResource* getActiveSession() noexcept = 0;
 };
 
 SessionState LoopContext::state() const noexcept { return access_->getState(); }
@@ -253,6 +255,15 @@ void LoopContext::storeTransportFd(int fd) {
 }
 
 int LoopContext::takeTransportFd() { return access_->takeTransport(); }
+
+void LoopContext::storeActiveSession(std::unique_ptr<RuntimeResource> session) {
+    if (!session) throw std::invalid_argument("active session resource is null");
+    access_->storeSession(std::move(session));
+}
+
+RuntimeResource* LoopContext::activeSession() const noexcept {
+    return access_->getActiveSession();
+}
 
 class SshNativeSession::Impl final : public LoopContext::Access {
 public:
@@ -373,6 +384,20 @@ public:
         const int fd = pending_transport_fd_;
         pending_transport_fd_ = -1;
         return fd;
+    }
+
+    void storeSession(std::unique_ptr<RuntimeResource> session) override {
+        assertOwner();
+        if (!session) throw std::invalid_argument("active session resource is null");
+        if (active_session_ != nullptr) {
+            throw std::logic_error("active SSH session already exists");
+        }
+        resources_.push_back(std::move(session));
+        active_session_ = resources_.back().get();
+    }
+
+    RuntimeResource* getActiveSession() noexcept override {
+        return active_session_;
     }
 
 private:
@@ -729,7 +754,10 @@ private:
             }
             close_index_ = resources_.size();
         }
-        if (close_index_ >= resources_.size()) return true;
+        if (close_index_ >= resources_.size()) {
+            active_session_ = nullptr;
+            return true;
+        }
 
         StepResult result;
         try {
@@ -892,6 +920,7 @@ private:
     ReadySet ready_;
 
     std::vector<std::unique_ptr<RuntimeResource>> resources_;
+    RuntimeResource* active_session_ = nullptr;
     int pending_transport_fd_ = -1;
     bool closing_started_ = false;
     size_t close_index_ = 0;

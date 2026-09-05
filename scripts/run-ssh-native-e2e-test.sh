@@ -460,4 +460,7 @@ trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_
     -lcrypto \
     -o "$runtime_direct_kbdint_binary"
 "$runtime_direct_kbdint_binary" "$kbdint_port"
+
+"$project_dir/scripts/run-ssh-native-persistent-e2e-test.sh"
+
 echo "[ssh-native] e2e passed"

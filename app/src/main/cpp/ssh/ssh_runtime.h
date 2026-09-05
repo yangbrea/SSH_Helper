@@ -103,6 +103,12 @@ public:
     // Takes ownership of the previously stored transport socket, or returns -1.
     int takeTransportFd();
 
+    // Stores an authenticated SSH session resource as the runtime's active
+    // session. Future operations can retrieve it through [activeSession].
+    void storeActiveSession(std::unique_ptr<RuntimeResource> session);
+    // Returns the active SSH session resource, or nullptr if none is stored.
+    RuntimeResource* activeSession() const noexcept;
+
 private:
     friend class SshNativeSession;
     struct Access;
