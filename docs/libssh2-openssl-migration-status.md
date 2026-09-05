@@ -69,7 +69,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - stdout/stderr/exit code
   - output limit → exit=125
   - JNI runtime exec 支持 deadline，超时映射 exit=124
-  - direct runtime exec 支持 expected fingerprint，host key 不匹配时认证前失败
+  - direct runtime exec 支持 expected fingerprint：不匹配认证前失败（E2E），匹配可正常 exec（E2E）
 - host tests 与 Android assembleDebug 均通过
 - JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
 
