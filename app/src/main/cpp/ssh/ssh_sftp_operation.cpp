@@ -129,4 +129,148 @@ StepResult SftpListOperation::step(
     return StepResult::noProgress();
 }
 
+SftpRealPathOperation::SftpRealPathOperation(std::string path)
+    : path_(std::move(path)) {
+    if (path_.empty()) throw std::invalid_argument("path must not be empty");
+}
+
+SftpRealPathOperation::~SftpRealPathOperation() {
+    cleanup();
+}
+
+void SftpRealPathOperation::cleanup() noexcept {
+    if (sftp_ != nullptr) {
+        libssh2_sftp_shutdown(sftp_);
+        sftp_ = nullptr;
+    }
+}
+
+StepResult SftpRealPathOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    RuntimeResource* active_resource = context.activeSession();
+    if (active_resource == nullptr ||
+        active_resource->kind() != ResourceKind::kLibssh2Session) {
+        return StepResult::failed(noSessionError());
+    }
+    auto* session_resource = static_cast<SshSessionResource*>(active_resource);
+    LIBSSH2_SESSION* session = session_resource->session()->get();
+    const int fd = session_resource->fd();
+    if (fd < 0) return StepResult::failed(noSessionError());
+
+    if (done_) return StepResult::complete(path_);
+    if (sftp_ == nullptr) {
+        Libssh2CallResult init_result = classifyLibssh2Pointer(
+            session, fd, libssh2_sftp_init(session),
+            ErrorDomain::kSftp, "sftp_init");
+        switch (init_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(init_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(init_result.error));
+            case Libssh2CallKind::kSucceeded:
+                sftp_ = static_cast<LIBSSH2_SFTP*>(init_result.pointer);
+                break;
+        }
+    }
+    if (sftp_ != nullptr) {
+        char target[4096];
+        const int result = libssh2_sftp_realpath(
+            sftp_, path_.c_str(), target, sizeof(target));
+        Libssh2CallResult real_result = classifyLibssh2Int(
+            session, fd, result, ErrorDomain::kSftp, "sftp_realpath");
+        switch (real_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(real_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(real_result.error));
+            case Libssh2CallKind::kSucceeded:
+                path_.assign(target, static_cast<size_t>(result));
+                done_ = true;
+                break;
+        }
+    }
+    if (done_) {
+        cleanup();
+        return StepResult::complete(path_);
+    }
+    return StepResult::noProgress();
+}
+
+SftpStatOperation::SftpStatOperation(std::string path, bool follow_links)
+    : path_(std::move(path)), follow_links_(follow_links) {
+    if (path_.empty()) throw std::invalid_argument("path must not be empty");
+}
+
+SftpStatOperation::~SftpStatOperation() {
+    cleanup();
+}
+
+void SftpStatOperation::cleanup() noexcept {
+    if (sftp_ != nullptr) {
+        libssh2_sftp_shutdown(sftp_);
+        sftp_ = nullptr;
+    }
+}
+
+StepResult SftpStatOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    RuntimeResource* active_resource = context.activeSession();
+    if (active_resource == nullptr ||
+        active_resource->kind() != ResourceKind::kLibssh2Session) {
+        return StepResult::failed(noSessionError());
+    }
+    auto* session_resource = static_cast<SshSessionResource*>(active_resource);
+    LIBSSH2_SESSION* session = session_resource->session()->get();
+    const int fd = session_resource->fd();
+    if (fd < 0) return StepResult::failed(noSessionError());
+
+    if (done_) return StepResult::complete(output_);
+    if (sftp_ == nullptr) {
+        Libssh2CallResult init_result = classifyLibssh2Pointer(
+            session, fd, libssh2_sftp_init(session),
+            ErrorDomain::kSftp, "sftp_init");
+        switch (init_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(init_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(init_result.error));
+            case Libssh2CallKind::kSucceeded:
+                sftp_ = static_cast<LIBSSH2_SFTP*>(init_result.pointer);
+                break;
+        }
+    }
+    if (sftp_ != nullptr) {
+        LIBSSH2_SFTP_ATTRIBUTES attrs{};
+        const int result = libssh2_sftp_stat_ex(
+            sftp_, path_.c_str(), static_cast<unsigned int>(path_.size()),
+            follow_links_ ? LIBSSH2_SFTP_STAT : LIBSSH2_SFTP_LSTAT, &attrs);
+        Libssh2CallResult stat_result = classifyLibssh2Int(
+            session, fd, result, ErrorDomain::kSftp, "sftp_stat");
+        switch (stat_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(stat_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(stat_result.error));
+            case Libssh2CallKind::kSucceeded:
+                output_ = std::string() +
+                    std::to_string(static_cast<long long>(attrs.filesize)) + "	" +
+                    std::to_string(static_cast<long long>(attrs.mtime)) + "	" +
+                    std::to_string(static_cast<long long>(attrs.permissions & 0xFFF)) + "	" +
+                    std::to_string(static_cast<long long>(attrs.uid)) + "	" +
+                    std::to_string(static_cast<long long>(attrs.gid));
+                done_ = true;
+                break;
+        }
+    }
+    if (done_) {
+        cleanup();
+        return StepResult::complete(output_);
+    }
+    return StepResult::noProgress();
+}
+
 } // namespace sshnative

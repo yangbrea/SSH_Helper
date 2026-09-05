@@ -498,6 +498,30 @@ sftp_port="$(head -1 "$sftp_port_file")"
     -lcrypto \
     -o "$sftp_binary"
 "$sftp_binary" "$sftp_port"
+
+sftp_meta_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-sftp-meta.XXXXXX")"
+trap 'kill "$server_pid" "$http_proxy_pid" "$socks_proxy_pid" "$sftp_server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$runtime_transport_handoff_binary" "$runtime_proxy_exec_binary" "$runtime_shell_binary" "$runtime_pty_exec_binary" "$sftp_binary" "$sftp_meta_binary" "$port_file" "$server_err" "$key_file" "$http_proxy_port_file" "$http_proxy_err" "$socks_proxy_port_file" "$socks_proxy_err" "$sftp_port_file" "$sftp_err" "$kbdint_port_file" "$kbdint_server_err" "$kbdint_binary"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_connect_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_sftp_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_sftp_meta_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$sftp_meta_binary"
+"$sftp_meta_binary" "$sftp_port"
 kill "$sftp_server_pid" 2>/dev/null || true
 
 kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"

@@ -30,4 +30,39 @@ private:
     bool done_ = false;
 };
 
+// One-shot SFTP realpath on the active SSH session.
+class SftpRealPathOperation final : public Operation {
+public:
+    explicit SftpRealPathOperation(std::string path);
+    ~SftpRealPathOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void cleanup() noexcept;
+
+    std::string path_;
+    _LIBSSH2_SFTP* sftp_ = nullptr;
+    bool done_ = false;
+};
+
+// One-shot SFTP stat/lstat on the active SSH session. Completion payload is
+// "type\tsize\tmodified\tpermissions\tuid\tgid".
+class SftpStatOperation final : public Operation {
+public:
+    SftpStatOperation(std::string path, bool follow_links);
+    ~SftpStatOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void cleanup() noexcept;
+
+    std::string path_;
+    bool follow_links_ = true;
+    _LIBSSH2_SFTP* sftp_ = nullptr;
+    std::string output_;
+    bool done_ = false;
+};
+
 } // namespace sshnative
