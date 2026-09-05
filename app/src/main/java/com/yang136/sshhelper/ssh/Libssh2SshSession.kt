@@ -20,11 +20,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * libssh2-backed [SshSession] with in-memory host-key verification.
  *
- * This implementation is still a blocking/direct-connection POC: each command
- * opens a fresh TCP+SSH connection, verifies the host key against
- * [KnownHostDao] (or an in-memory fallback), then authenticates and executes
- * synchronously. Persistent channels, SFTP, forwarding, proxy/jump and the
- * non-blocking event loop are not implemented yet.
+ * This implementation verifies host keys during connect and, for subsequent
+ * exec calls with a stored fingerprint, uses the nonblocking runtime JNI path
+ * with deadline/output-limit support. Persistent channels, SFTP, forwarding,
+ * proxy/jump and full runtime host-key decisions are not implemented yet.
  */
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
@@ -49,6 +48,7 @@ class Libssh2SshSession(
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
     @Volatile private var liveHandle = 0L
+    @Volatile private var runtimeHandle = 0L
     @Volatile private var closed = false
 
     override suspend fun connect(
@@ -124,19 +124,55 @@ class Libssh2SshSession(
             )
         }
         try {
-            val raw = verifiedExec(
-                route = activeRoute,
-                username = activeRoute.target.username,
-                password = activePassword,
-                privateKey = privateKey,
-                passphrase = passphrase,
-                command = command,
-            )
-            val newline = raw.indexOf('\n')
-            val exitLine = if (newline >= 0) raw.substring(0, newline) else raw
-            val output = if (newline >= 0) raw.substring(newline + 1) else ""
-            val exitCode = exitLine.removePrefix("exit=").toIntOrNull() ?: 0
-            RemoteCommandResult(exitCode = exitCode, stdout = output, stderr = "")
+            val expectedFingerprint = findKnownHost(
+                activeRoute.target.hostname,
+                activeRoute.target.port,
+            )?.fingerprintSha256
+            val raw = if (expectedFingerprint != null) {
+                ensureRuntimeHandle()
+                val host = activeRoute.target.hostname
+                val port = activeRoute.target.port
+                val username = activeRoute.target.username
+                if (activePassword != null) {
+                    NativeSshBridge.nativeRunDirectPasswordExec(
+                        runtimeHandle,
+                        host,
+                        port,
+                        username,
+                        activePassword,
+                        command,
+                        expectedFingerprint,
+                        SSH_CONNECT_TIMEOUT_MS.toLong(),
+                        timeoutMillis,
+                        maxOutputBytes,
+                    )
+                } else {
+                    val key = privateKey ?: error("SSH private key unavailable")
+                    NativeSshBridge.nativeRunDirectPrivateKeyExec(
+                        runtimeHandle,
+                        host,
+                        port,
+                        username,
+                        key,
+                        passphrase,
+                        command,
+                        expectedFingerprint,
+                        SSH_CONNECT_TIMEOUT_MS.toLong(),
+                        timeoutMillis,
+                        maxOutputBytes,
+                    )
+                }
+            } else {
+                verifiedExec(
+                    route = activeRoute,
+                    username = activeRoute.target.username,
+                    password = activePassword,
+                    privateKey = privateKey,
+                    passphrase = passphrase,
+                    command = command,
+                )
+            }
+            parseExecPayload(raw)
         } catch (error: HostKeyBlockedException) {
             if (error.request.issue == HostKeyIssue.CHANGED) {
                 mutableHostKeyRequest.value = error.request
@@ -154,6 +190,37 @@ class Libssh2SshSession(
                 stderr = error.message ?: "native exec failed",
             )
         }
+    }
+
+    private fun parseExecPayload(raw: String): RemoteCommandResult {
+        val newline = raw.indexOf('\n')
+        val exitLine = if (newline >= 0) raw.substring(0, newline) else raw
+        val afterExit = if (newline >= 0) raw.substring(newline + 1) else ""
+        val exitCode = exitLine.removePrefix("exit=").toIntOrNull() ?: 0
+
+        val stderrMarker = "\nSTDERR_BEGIN\n"
+        val stderrIndex = afterExit.indexOf(stderrMarker)
+        if (stderrIndex < 0) {
+            return RemoteCommandResult(
+                exitCode = exitCode,
+                stdout = afterExit,
+                stderr = "",
+            )
+        }
+        val stdout = afterExit.substring(0, stderrIndex)
+        val stderrEndMarker = "\nSTDERR_END\n"
+        val stderrStart = stderrIndex + stderrMarker.length
+        val stderrEnd = afterExit.indexOf(stderrEndMarker, stderrStart)
+        val stderr = if (stderrEnd >= 0) {
+            afterExit.substring(stderrStart, stderrEnd)
+        } else {
+            afterExit.substring(stderrStart)
+        }
+        return RemoteCommandResult(
+            exitCode = exitCode,
+            stdout = stdout,
+            stderr = stderr,
+        )
     }
 
     private suspend fun verifiedExec(
@@ -296,6 +363,20 @@ class Libssh2SshSession(
         }
     }
 
+    private fun ensureRuntimeHandle() {
+        if (runtimeHandle == 0L) {
+            runtimeHandle = NativeSshBridge.nativeCreate()
+        }
+    }
+
+    private fun closeRuntimeHandle() {
+        val handle = runtimeHandle
+        if (handle != 0L) {
+            runtimeHandle = 0L
+            runCatching { NativeSshBridge.nativeClose(handle) }
+        }
+    }
+
     private fun cancelPendingHostKey() {
         hostKeyDecision.getAndSet(null)?.complete(false)
         mutableHostKeyRequest.value = null
@@ -318,6 +399,7 @@ class Libssh2SshSession(
     override suspend fun disconnect() {
         cancelPendingHostKey()
         closeLiveHandle()
+        closeRuntimeHandle()
         route = null
         password = null
         privateKey?.fill(0)
@@ -346,6 +428,7 @@ class Libssh2SshSession(
         closed = true
         cancelPendingHostKey()
         closeLiveHandle()
+        closeRuntimeHandle()
         route = null
         password = null
         privateKey?.fill(0)
