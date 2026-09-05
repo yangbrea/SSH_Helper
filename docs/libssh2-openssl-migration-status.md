@@ -31,6 +31,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   exactly-once completion、取消、关闭、资源所有权、公平调度、背压及 sanitizer 门禁。
 - Step 4 host tests、ASan/UBSan、TSan、双 ABI `assembleDebug` 和现有 SSH E2E 均通过。
 - 已开始把真实 libssh2 调用迁入 runtime `Operation`：
+  - `TcpConnectOperation`：non-blocking TCP connect（DNS 在 producer 线程，connect/poll 在 owner），host test 通过。
   - `Libssh2HandshakeOperation`：non-blocking handshake + host key 读取，E2E 通过。
   - `Libssh2PasswordAuthOperation`：non-blocking password auth，E2E 通过。
   - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
@@ -76,6 +77,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `080712b feat(ssh-native): add nonblocking TCP connect runtime operation`
 - `156668f feat(ssh-native): capture exec stdout as nonblocking runtime operation`
 - `338ed98 feat(ssh-native): run in-memory private key auth as runtime operation`
 - `7dc5106 feat(ssh-native): run password auth as nonblocking runtime operation`
