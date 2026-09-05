@@ -30,6 +30,9 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - runtime 支持 active authenticated SSH session 资源：
   - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
   - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
+  - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
+    `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
+    `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
@@ -111,6 +114,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `d3e59d7 feat(ssh): keep Libssh2SshSession persistent session for repeated exec`
 - `ae8fb9d feat(ssh-native): add active session resource and persistent exec`
 - `45e15ee refactor(ssh): remove blocking POC JNI bridge from production`
 - `95fd300 test(ssh-native): verify proxy path blocks host key mismatch`
