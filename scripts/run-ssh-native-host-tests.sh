@@ -102,6 +102,13 @@ compile_and_run runtime \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_test.cpp"
 
+compile_and_run connect_operation \
+    "$project_dir/app/src/main/cpp/ssh/ssh_connect_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_connect_operation_test.cpp"
+
 compile_and_run_libssh2 libssh2_nonblocking \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/test/cpp/ssh_libssh2_nonblocking_test.cpp"
