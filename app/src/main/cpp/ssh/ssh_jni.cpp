@@ -608,6 +608,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
     jstring jusername,
     jstring jpassword,
     jstring jcommand,
+    jstring jexpected_fingerprint,
     jlong connect_timeout_millis,
     jlong exec_timeout_millis,
     jint max_output_bytes) {
@@ -616,6 +617,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
         const std::string username = jstringToString(env, jusername);
         const std::string password = jstringToString(env, jpassword);
         const std::string command = jstringToString(env, jcommand);
+        const std::string expected_fingerprint = jstringToString(env, jexpected_fingerprint);
         if (host.empty() || username.empty() || password.empty() || command.empty()) {
             throw std::invalid_argument("host/username/password/command must not be empty");
         }
@@ -631,7 +633,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
         auto operation = std::make_unique<sshnative::TcpPasswordExecOperation>(
             host, static_cast<uint16_t>(jport), username, password, command,
             std::chrono::milliseconds(connect_timeout_millis),
-            static_cast<size_t>(max_output_bytes));
+            static_cast<size_t>(max_output_bytes), expected_fingerprint);
         sshnative::RequestOptions options;
         options.deadline = sshnative::MonoClock::now() +
             std::chrono::milliseconds(exec_timeout_millis);
@@ -669,6 +671,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
     jbyteArray jprivateKey,
     jstring jpassphrase,
     jstring jcommand,
+    jstring jexpected_fingerprint,
     jlong connect_timeout_millis,
     jlong exec_timeout_millis,
     jint max_output_bytes) {
@@ -678,6 +681,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
         const std::string private_key = jbyteArrayToString(env, jprivateKey);
         const std::string passphrase = jstringToString(env, jpassphrase);
         const std::string command = jstringToString(env, jcommand);
+        const std::string expected_fingerprint = jstringToString(env, jexpected_fingerprint);
         if (host.empty() || username.empty() || private_key.empty() || command.empty()) {
             throw std::invalid_argument("host/username/private key/command must not be empty");
         }
@@ -693,7 +697,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
         auto operation = std::make_unique<sshnative::TcpPrivateKeyExecOperation>(
             host, static_cast<uint16_t>(jport), username, private_key, passphrase,
             command, std::chrono::milliseconds(connect_timeout_millis),
-            static_cast<size_t>(max_output_bytes));
+            static_cast<size_t>(max_output_bytes), expected_fingerprint);
         sshnative::RequestOptions options;
         options.deadline = sshnative::MonoClock::now() +
             std::chrono::milliseconds(exec_timeout_millis);
