@@ -59,6 +59,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_operations.cpp
     ssh/ssh_proxy_operation.cpp
     ssh/ssh_runtime.cpp
+    ssh/ssh_socks5_operation.cpp
     ssh/ssh_socks5_proxy.cpp
     ssh/ssh_socket.cpp
     ssh/ssh_transport.cpp
