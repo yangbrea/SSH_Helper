@@ -52,6 +52,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_direct_operation.cpp
     ssh/ssh_error.cpp
     ssh/ssh_hostkey.cpp
+    ssh/ssh_handshake_operation.cpp
     ssh/ssh_http_proxy.cpp
     ssh/ssh_jni.cpp
     ssh/ssh_libssh2.cpp

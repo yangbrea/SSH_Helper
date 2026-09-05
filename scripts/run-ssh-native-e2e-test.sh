@@ -97,8 +97,30 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     -o "$runtime_handshake_binary"
 "$runtime_handshake_binary" "$port"
 
+runtime_tcp_handshake_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-tcp-handshake.XXXXXX")"
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$port_file" "$server_err" "$key_file"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_handshake_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_tcp_handshake_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$runtime_tcp_handshake_binary"
+"$runtime_tcp_handshake_binary" "$port"
+
 runtime_password_auth_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-password-auth.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -120,7 +142,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_password_auth_binary" "$port"
 
 runtime_private_key_auth_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-private-key-auth.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -142,7 +164,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_private_key_auth_binary" "$port" "$key_file"
 
 runtime_password_exec_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-password-exec.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -164,7 +186,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_password_exec_binary" "$port"
 
 runtime_direct_password_exec_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-password-exec.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -186,7 +208,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_direct_password_exec_binary" "$port"
 
 runtime_direct_private_key_exec_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-private-key-exec.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -208,7 +230,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_direct_private_key_exec_binary" "$port" "$key_file"
 
 runtime_direct_stderr_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-stderr.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -230,7 +252,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_direct_stderr_binary" "$port"
 
 runtime_direct_output_limit_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-output-limit.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -252,7 +274,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_direct_output_limit_binary" "$port"
 
 runtime_hostkey_mismatch_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-hostkey-mismatch.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -274,7 +296,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 "$runtime_hostkey_mismatch_binary" "$port"
 
 runtime_hostkey_match_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-hostkey-match.XXXXXX")"
-trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$port_file" "$server_err" "$key_file"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$port_file" "$server_err" "$key_file"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
@@ -299,7 +321,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
 kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"
 kbdint_server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-err.XXXXXX")"
 kbdint_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint.XXXXXX")"
-trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
 
 python3 "$project_dir/scripts/ssh-native-test-server.py" kbdint >"$kbdint_port_file" 2>"$kbdint_server_err" &
 kbdint_server_pid=$!
@@ -334,7 +356,7 @@ kbdint_port="$(head -1 "$kbdint_port_file")"
 "$kbdint_binary" "$kbdint_port"
 
 runtime_direct_kbdint_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-kbdint.XXXXXX")"
-trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$kbdint_binary" "$runtime_direct_kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$kbdint_binary" "$runtime_direct_kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
 "${CXX:-c++}" \
     -std=c++17 \
     -pthread \
