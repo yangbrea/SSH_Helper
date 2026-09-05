@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <system_error>
@@ -25,6 +26,43 @@ void setNonBlocking(int fd) {
     if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
         throw std::system_error(errno, std::generic_category(), "fcntl");
     }
+}
+
+bool hasAuthMethod(const char* methods, const char* wanted) {
+    if (methods == nullptr) return false;
+    const std::string list(methods);
+    const std::string needle(wanted);
+    size_t start = 0;
+    while (start <= list.size()) {
+        const size_t end = list.find(',', start);
+        const std::string token = list.substr(
+            start, end == std::string::npos ? std::string::npos : end - start);
+        if (token == needle) return true;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return false;
+}
+
+void keyboardInteractiveCallback(
+    const char* /* name */,
+    int /* name_len */,
+    const char* /* instruction */,
+    int /* instruction_len */,
+    int num_prompts,
+    const LIBSSH2_USERAUTH_KBDINT_PROMPT* /* prompts */,
+    LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses,
+    void** abstract) {
+    if (num_prompts != 1 || abstract == nullptr || *abstract == nullptr) {
+        return;
+    }
+    const auto* password = static_cast<const std::string*>(*abstract);
+    char* copy = static_cast<char*>(std::malloc(password->size() + 1));
+    if (copy == nullptr) return;
+    std::memcpy(copy, password->data(), password->size());
+    copy[password->size()] = '\0';
+    responses[0].text = copy;
+    responses[0].length = static_cast<unsigned int>(password->size());
 }
 
 } // namespace
@@ -200,14 +238,60 @@ StepResult TcpPasswordExecOperation::step(
         }
     }
 
-    // Phase 3: password auth.
+    // Phase 3: password or keyboard-interactive auth.
     if (!auth_done_) {
-        if (!auth_started_) auth_started_ = true;
-        const int result = libssh2_userauth_password(
-            session_.get(), username_.c_str(), password_.c_str());
+        if (!auth_method_decided_) {
+            Libssh2CallResult methods_result = classifyLibssh2Pointer(
+                session_.get(), fd_,
+                libssh2_userauth_list(
+                    session_.get(), username_.c_str(),
+                    static_cast<unsigned int>(username_.size())),
+                ErrorDomain::kAuth, "userauth_list");
+            switch (methods_result.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    return StepResult::waitIo(
+                        std::move(methods_result.interest));
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(
+                        std::move(methods_result.error));
+                case Libssh2CallKind::kSucceeded:
+                    break;
+            }
+            const char* methods =
+                static_cast<const char*>(methods_result.pointer);
+            auth_method_decided_ = true;
+            if (hasAuthMethod(methods, "password")) {
+                use_keyboard_interactive_ = false;
+            } else if (hasAuthMethod(methods, "keyboard-interactive")) {
+                use_keyboard_interactive_ = true;
+            } else {
+                SshError error;
+                error.domain = ErrorDomain::kAuth;
+                error.code = "no_supported_password_method";
+                error.message = "server does not offer password or keyboard-interactive";
+                return StepResult::failed(std::move(error));
+            }
+        }
+
+        if (!auth_started_) {
+            auth_started_ = true;
+            if (use_keyboard_interactive_) {
+                void** abstract_slot = libssh2_session_abstract(session_.get());
+                if (abstract_slot != nullptr) {
+                    *abstract_slot = const_cast<std::string*>(&password_);
+                }
+            }
+        }
+
+        const int result = use_keyboard_interactive_
+            ? libssh2_userauth_keyboard_interactive(
+                  session_.get(), username_.c_str(), keyboardInteractiveCallback)
+            : libssh2_userauth_password(
+                  session_.get(), username_.c_str(), password_.c_str());
         Libssh2CallResult translated = classifyLibssh2Int(
             session_.get(), fd_, result, ErrorDomain::kAuth,
-            "userauth_password");
+            use_keyboard_interactive_ ? "userauth_keyboard_interactive"
+                                      : "userauth_password");
         switch (translated.kind) {
             case Libssh2CallKind::kWouldBlock:
                 return StepResult::waitIo(std::move(translated.interest));

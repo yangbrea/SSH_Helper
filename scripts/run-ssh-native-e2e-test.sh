@@ -332,4 +332,26 @@ kbdint_port="$(head -1 "$kbdint_port_file")"
     -lcrypto \
     -o "$kbdint_binary"
 "$kbdint_binary" "$kbdint_port"
+
+runtime_direct_kbdint_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-direct-kbdint.XXXXXX")"
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$kbdint_binary" "$runtime_direct_kbdint_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_direct_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_direct_keyboard_interactive_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$runtime_direct_kbdint_binary"
+"$runtime_direct_kbdint_binary" "$kbdint_port"
 echo "[ssh-native] e2e passed"

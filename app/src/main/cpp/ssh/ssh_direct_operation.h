@@ -51,6 +51,8 @@ private:
     bool handshake_done_ = false;
     bool hostkey_checked_ = false;
     bool auth_started_ = false;
+    bool auth_method_decided_ = false;
+    bool use_keyboard_interactive_ = false;
     bool auth_done_ = false;
     bool exec_started_ = false;
     bool close_started_ = false;
