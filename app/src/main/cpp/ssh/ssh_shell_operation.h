@@ -32,14 +32,15 @@ private:
     bool close_started_ = false;
 };
 
-// Opens a PTY shell on the active SSH session and stores it as the runtime's
-// active channel.
+// Opens a PTY shell (or a PTY exec command when command is non-empty) on the
+// active SSH session and stores it as the runtime's active channel.
 class OpenShellOperation final : public Operation {
 public:
     OpenShellOperation(
         unsigned int columns,
         unsigned int rows,
-        std::string term = "xterm-256color");
+        std::string term = "xterm-256color",
+        std::string command = {});
     ~OpenShellOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -48,9 +49,10 @@ private:
     unsigned int columns_ = 80;
     unsigned int rows_ = 24;
     std::string term_;
+    std::string command_;
     LIBSSH2_CHANNEL* channel_ = nullptr;
     bool pty_requested_ = false;
-    bool shell_requested_ = false;
+    bool startup_requested_ = false;
     bool stored_ = false;
 };
 

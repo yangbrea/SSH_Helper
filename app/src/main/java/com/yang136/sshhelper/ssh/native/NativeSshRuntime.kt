@@ -72,6 +72,15 @@ class NativeSshRuntime {
         return NativeSshBridge.nativeRunOpenShell(handle, columns, rows)
     }
 
+    fun runOpenPtyExec(
+        command: String,
+        columns: Int,
+        rows: Int,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenPtyExec(handle, command, columns, rows)
+    }
+
     fun runShellWrite(data: ByteArray): String {
         ensureCreated()
         return NativeSshBridge.nativeRunShellWrite(handle, data)

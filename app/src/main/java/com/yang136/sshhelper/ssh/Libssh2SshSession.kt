@@ -548,10 +548,6 @@ class Libssh2SshSession(
     }
 
     override suspend fun openTerminal(target: TerminalTarget) = withContext(Dispatchers.IO) {
-        if (target !is TerminalTarget.PlainShell) {
-            mutableTerminalState.value = TerminalChannelState.Error("libssh2 POC 暂不支持持久会话终端")
-            return@withContext
-        }
         if (!persistentSessionOpen) {
             mutableTerminalState.value = TerminalChannelState.Error("SSH 连接不可用")
             return@withContext
@@ -559,13 +555,25 @@ class Libssh2SshSession(
         closeTerminal()
         mutableTerminalState.value = TerminalChannelState.Opening
         try {
-            nativeRuntime.runOpenShell(ptyColumns, ptyRows)
+            when (target) {
+                TerminalTarget.PlainShell -> nativeRuntime.runOpenShell(ptyColumns, ptyRows)
+                is TerminalTarget.Persistent -> {
+                    val multiplexer = MultiplexerRegistry.forType(target.type)
+                        ?: error("未配置远端会话管理器")
+                    val command = if (target.create) {
+                        multiplexer.createCommand(target.name)
+                    } else {
+                        multiplexer.attachCommand(target.name)
+                    }
+                    nativeRuntime.runOpenPtyExec(command, ptyColumns, ptyRows)
+                }
+            }
             terminalChannelOpen = true
             mutableTerminalState.value = TerminalChannelState.Active(target)
             terminalReaderJob = terminalScope.launch { readShellLoop() }
         } catch (error: Throwable) {
             terminalChannelOpen = false
-            mutableTerminalState.value = TerminalChannelState.Error(error.message ?: "打开 Shell 失败")
+            mutableTerminalState.value = TerminalChannelState.Error(error.message ?: "打开终端失败")
         }
     }
 

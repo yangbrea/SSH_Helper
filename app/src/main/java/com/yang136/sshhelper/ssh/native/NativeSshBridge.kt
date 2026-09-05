@@ -163,6 +163,14 @@ object NativeSshBridge {
         rows: Int,
     ): String
 
+    /** Opens a PTY exec channel (used by tmux/zellij persistent sessions). */
+    external fun nativeRunOpenPtyExec(
+        handle: Long,
+        command: String,
+        columns: Int,
+        rows: Int,
+    ): String
+
     /** Writes bytes to the active shell channel. */
     external fun nativeRunShellWrite(
         handle: Long,

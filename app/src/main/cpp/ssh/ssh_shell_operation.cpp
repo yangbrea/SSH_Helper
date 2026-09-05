@@ -103,8 +103,10 @@ void SshChannelResource::forceClose() noexcept {
 OpenShellOperation::OpenShellOperation(
     unsigned int columns,
     unsigned int rows,
-    std::string term)
-    : columns_(columns), rows_(rows), term_(std::move(term)) {
+    std::string term,
+    std::string command)
+    : columns_(columns), rows_(rows), term_(std::move(term)),
+      command_(std::move(command)) {
     if (term_.empty()) term_ = "xterm-256color";
     if (columns_ == 0) columns_ = 80;
     if (rows_ == 0) rows_ = 24;
@@ -167,10 +169,13 @@ StepResult OpenShellOperation::step(
         }
     }
 
-    if (channel_ != nullptr && pty_requested_ && !shell_requested_) {
-        const int result = libssh2_channel_shell(channel_);
+    if (channel_ != nullptr && pty_requested_ && !startup_requested_) {
+        const int result = command_.empty()
+            ? libssh2_channel_shell(channel_)
+            : libssh2_channel_exec(channel_, command_.c_str());
         Libssh2CallResult translated = classifyLibssh2Int(
-            session, fd, result, ErrorDomain::kChannel, "channel_shell");
+            session, fd, result, ErrorDomain::kChannel,
+            command_.empty() ? "channel_shell" : "channel_exec");
         switch (translated.kind) {
             case Libssh2CallKind::kWouldBlock:
                 return StepResult::waitIo(std::move(translated.interest));
@@ -179,12 +184,12 @@ StepResult OpenShellOperation::step(
                 channel_ = nullptr;
                 return StepResult::failed(std::move(translated.error));
             case Libssh2CallKind::kSucceeded:
-                shell_requested_ = true;
+                startup_requested_ = true;
                 break;
         }
     }
 
-    if (channel_ != nullptr && pty_requested_ && shell_requested_ && !stored_) {
+    if (channel_ != nullptr && pty_requested_ && startup_requested_ && !stored_) {
         auto resource = std::make_unique<SshChannelResource>(session, fd, channel_);
         channel_ = nullptr;
         context.storeActiveChannel(std::move(resource));

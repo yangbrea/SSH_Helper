@@ -773,6 +773,52 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenShell(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenPtyExec(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jcommand,
+    jint columns,
+    jint rows) {
+    try {
+        const std::string command = jstringToString(env, jcommand);
+        if (command.empty()) throw std::invalid_argument("command must not be empty");
+        if (columns <= 0 || rows <= 0) {
+            throw std::invalid_argument("invalid pty columns/rows");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenShellOperation>(
+            static_cast<unsigned int>(columns),
+            static_cast<unsigned int>(rows),
+            "xterm-256color",
+            command);
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit open pty exec");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenPtyExec failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellWrite(
     JNIEnv* env,
     jobject /* thiz */,
