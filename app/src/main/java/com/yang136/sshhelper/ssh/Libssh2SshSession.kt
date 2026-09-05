@@ -527,6 +527,7 @@ class Libssh2SshSession(
                 val data = nativeRuntime.runShellRead(8192, 250L) ?: continue
                 if (data.isEmpty()) {
                     terminalChannelOpen = false
+                    runCatching { nativeRuntime.runCloseShell() }
                     mutableTerminalState.value = TerminalChannelState.Ended("远端 Shell 已退出")
                     return
                 }
@@ -535,6 +536,7 @@ class Libssh2SshSession(
         } catch (error: Throwable) {
             if (error !is kotlinx.coroutines.CancellationException) {
                 terminalChannelOpen = false
+                runCatching { nativeRuntime.runCloseShell() }
                 mutableTerminalState.value = TerminalChannelState.Error(
                     error.message ?: "Shell 读取失败",
                 )
