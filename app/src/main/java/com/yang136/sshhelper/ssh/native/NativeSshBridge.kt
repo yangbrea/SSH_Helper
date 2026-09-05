@@ -73,6 +73,7 @@ object NativeSshBridge {
         password: String,
         command: String,
         connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
         maxOutputBytes: Int,
     ): String
 
@@ -89,6 +90,7 @@ object NativeSshBridge {
         passphrase: String?,
         command: String,
         connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
         maxOutputBytes: Int,
     ): String
 

@@ -106,7 +106,8 @@ jobject newRuntimeEvent(JNIEnv* env, const sshnative::RuntimeEvent& event) {
 std::string awaitRuntimeCompletion(
     JNIEnv* env,
     const std::shared_ptr<sshnative::SshNativeSession>& session,
-    sshnative::SubmitResult submit) {
+    sshnative::SubmitResult submit,
+    bool map_timeout_to_exit_124 = false) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
         sshnative::RuntimeEvent event;
@@ -117,6 +118,10 @@ std::string awaitRuntimeCompletion(
         }
         if (event.completion == sshnative::CompletionKind::kSucceeded) {
             return std::move(event.payload);
+        }
+        if (map_timeout_to_exit_124 &&
+            event.error.domain == sshnative::ErrorDomain::kTimeout) {
+            return "exit=124\n";
         }
         const std::string message = event.error.message.empty()
             ? "native runtime operation failed"
@@ -604,6 +609,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
     jstring jpassword,
     jstring jcommand,
     jlong connect_timeout_millis,
+    jlong exec_timeout_millis,
     jint max_output_bytes) {
     try {
         const std::string host = jstringToString(env, jhost);
@@ -613,7 +619,8 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
         if (host.empty() || username.empty() || password.empty() || command.empty()) {
             throw std::invalid_argument("host/username/password/command must not be empty");
         }
-        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 || max_output_bytes <= 0) {
+        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 ||
+            exec_timeout_millis <= 0 || max_output_bytes <= 0) {
             throw std::invalid_argument("invalid port/timeout/max output");
         }
         const auto session = gSshRegistry.get(handle);
@@ -625,11 +632,15 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExe
             host, static_cast<uint16_t>(jport), username, password, command,
             std::chrono::milliseconds(connect_timeout_millis),
             static_cast<size_t>(max_output_bytes));
-        const auto submit = session->submit(std::move(operation));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(exec_timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
         if (!submit) {
             throw std::runtime_error("failed to submit direct password exec");
         }
-        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, /*map_timeout_to_exit_124=*/true);
         if (env->ExceptionCheck()) return nullptr;
         return env->NewStringUTF(result.c_str());
     } catch (const std::bad_alloc&) {
@@ -659,6 +670,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
     jstring jpassphrase,
     jstring jcommand,
     jlong connect_timeout_millis,
+    jlong exec_timeout_millis,
     jint max_output_bytes) {
     try {
         const std::string host = jstringToString(env, jhost);
@@ -669,7 +681,8 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
         if (host.empty() || username.empty() || private_key.empty() || command.empty()) {
             throw std::invalid_argument("host/username/private key/command must not be empty");
         }
-        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 || max_output_bytes <= 0) {
+        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 ||
+            exec_timeout_millis <= 0 || max_output_bytes <= 0) {
             throw std::invalid_argument("invalid port/timeout/max output");
         }
         const auto session = gSshRegistry.get(handle);
@@ -681,11 +694,15 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyE
             host, static_cast<uint16_t>(jport), username, private_key, passphrase,
             command, std::chrono::milliseconds(connect_timeout_millis),
             static_cast<size_t>(max_output_bytes));
-        const auto submit = session->submit(std::move(operation));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(exec_timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
         if (!submit) {
             throw std::runtime_error("failed to submit direct private key exec");
         }
-        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, /*map_timeout_to_exit_124=*/true);
         if (env->ExceptionCheck()) return nullptr;
         return env->NewStringUTF(result.c_str());
     } catch (const std::bad_alloc&) {
