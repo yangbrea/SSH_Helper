@@ -22,7 +22,8 @@ public:
         std::string password,
         std::string command,
         std::chrono::milliseconds connect_timeout,
-        size_t max_output_bytes = 1024 * 1024);
+        size_t max_output_bytes = 1024 * 1024,
+        std::string expected_fingerprint = {});
     ~TcpPasswordExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -35,6 +36,7 @@ private:
     std::string username_;
     std::string password_;
     std::string command_;
+    std::string expected_fingerprint_;
     MonoTime deadline_ = MonoTime::max();
 
     addrinfo* addresses_ = nullptr;
@@ -47,6 +49,7 @@ private:
     LIBSSH2_CHANNEL* channel_ = nullptr;
     bool handshake_started_ = false;
     bool handshake_done_ = false;
+    bool hostkey_checked_ = false;
     bool auth_started_ = false;
     bool auth_done_ = false;
     bool exec_started_ = false;
@@ -68,7 +71,8 @@ public:
         std::string passphrase,
         std::string command,
         std::chrono::milliseconds connect_timeout,
-        size_t max_output_bytes = 1024 * 1024);
+        size_t max_output_bytes = 1024 * 1024,
+        std::string expected_fingerprint = {});
     ~TcpPrivateKeyExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -82,6 +86,7 @@ private:
     std::string private_key_;
     std::string passphrase_;
     std::string command_;
+    std::string expected_fingerprint_;
     MonoTime deadline_ = MonoTime::max();
 
     addrinfo* addresses_ = nullptr;
@@ -94,6 +99,7 @@ private:
     LIBSSH2_CHANNEL* channel_ = nullptr;
     bool handshake_started_ = false;
     bool handshake_done_ = false;
+    bool hostkey_checked_ = false;
     bool auth_started_ = false;
     bool auth_done_ = false;
     bool exec_started_ = false;

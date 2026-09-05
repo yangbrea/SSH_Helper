@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "ssh_error.h"
+#include "ssh_hostkey.h"
 #include "ssh_libssh2_nonblocking.h"
 #include "ssh_socket.h"
 
@@ -35,12 +36,14 @@ TcpPasswordExecOperation::TcpPasswordExecOperation(
     std::string password,
     std::string command,
     std::chrono::milliseconds connect_timeout,
-    size_t max_output_bytes)
+    size_t max_output_bytes,
+    std::string expected_fingerprint)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
       password_(std::move(password)),
       command_(std::move(command)),
+      expected_fingerprint_(std::move(expected_fingerprint)),
       deadline_(MonoClock::now() + connect_timeout),
       max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || password_.empty() || command_.empty()) {
@@ -178,6 +181,22 @@ StepResult TcpPasswordExecOperation::step(
             case Libssh2CallKind::kSucceeded:
                 handshake_done_ = true;
                 break;
+        }
+    }
+
+    if (handshake_done_ && !hostkey_checked_) {
+        hostkey_checked_ = true;
+        if (!expected_fingerprint_.empty()) {
+            int key_type = 0;
+            const std::vector<uint8_t> blob = session_.hostKey(&key_type);
+            const std::string fingerprint = hostKeySha256Fingerprint(blob);
+            if (fingerprint != expected_fingerprint_) {
+                SshError error;
+                error.domain = ErrorDomain::kHostKey;
+                error.code = "host_key_mismatch";
+                error.message = "host key does not match expected fingerprint";
+                return StepResult::failed(std::move(error));
+            }
         }
     }
 
@@ -340,13 +359,15 @@ TcpPrivateKeyExecOperation::TcpPrivateKeyExecOperation(
     std::string passphrase,
     std::string command,
     std::chrono::milliseconds connect_timeout,
-    size_t max_output_bytes)
+    size_t max_output_bytes,
+    std::string expected_fingerprint)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
       private_key_(std::move(private_key)),
       passphrase_(std::move(passphrase)),
       command_(std::move(command)),
+      expected_fingerprint_(std::move(expected_fingerprint)),
       deadline_(MonoClock::now() + connect_timeout),
       max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || private_key_.empty() || command_.empty()) {
@@ -482,6 +503,22 @@ StepResult TcpPrivateKeyExecOperation::step(
             case Libssh2CallKind::kSucceeded:
                 handshake_done_ = true;
                 break;
+        }
+    }
+
+    if (handshake_done_ && !hostkey_checked_) {
+        hostkey_checked_ = true;
+        if (!expected_fingerprint_.empty()) {
+            int key_type = 0;
+            const std::vector<uint8_t> blob = session_.hostKey(&key_type);
+            const std::string fingerprint = hostKeySha256Fingerprint(blob);
+            if (fingerprint != expected_fingerprint_) {
+                SshError error;
+                error.domain = ErrorDomain::kHostKey;
+                error.code = "host_key_mismatch";
+                error.message = "host key does not match expected fingerprint";
+                return StepResult::failed(std::move(error));
+            }
         }
     }
 
