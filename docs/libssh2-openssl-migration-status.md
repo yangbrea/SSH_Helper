@@ -46,6 +46,9 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - direct runtime exec 已支持 max_output_bytes 输出上限，超限返回 exit=125，E2E 通过。
   - `HttpProxyConnectOperation`：non-blocking HTTP CONNECT runtime operation，host test 通过。
   - `Socks5ProxyConnectOperation`：non-blocking SOCKS5 CONNECT runtime operation（no-auth/user-pass），host test 通过。
+  - 代理完整路径已串通：HTTP CONNECT / SOCKS5 CONNECT operation 把 socket 存入 runtime pending slot，
+    随后 `TcpPasswordExecOperation` / `TcpPrivateKeyExecOperation` 以 `take_pending_transport` 模式复用同一 socket
+    完成 handshake/auth/exec；HTTP 与 SOCKS5 的密码/私钥 E2E 均通过。
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
@@ -93,7 +96,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- 把 HTTP/SOCKS5 proxy operation 与 SSH handshake/auth/exec 串成完整代理路径。
+- 把代理路径接入 JNI / `Libssh2SshSession`（当前 native E2E 已串通 HTTP/SOCKS5 + password/private-key exec）。
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - shell/PTY、持久会话。
 - SFTP 全功能 native 化。
@@ -104,6 +107,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `35c6984 test(ssh-native): cover proxied runtime exec over HTTP and SOCKS5`
 - `c6250b6 feat(ssh-native): store transport fd between runtime operations`
 - `72682d7 feat(ssh): route Libssh2SshSession host key probe through runtime`
 - `835cf7c feat(ssh-native): expose TcpHandshakeOperation through JNI and NativeSshRuntime`
