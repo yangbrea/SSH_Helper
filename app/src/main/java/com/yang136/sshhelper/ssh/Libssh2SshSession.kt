@@ -184,10 +184,16 @@ class Libssh2SshSession(
                 stderr = error.message ?: "主机密钥验证失败",
             )
         } catch (error: Throwable) {
+            val message = error.message ?: "native exec failed"
+            if (message.contains("host key does not match", ignoreCase = true) ||
+                message.contains("host_key_mismatch", ignoreCase = true)
+            ) {
+                mutableState.value = ConnectionState.Error("主机密钥已变化，连接已阻止")
+            }
             RemoteCommandResult(
                 exitCode = REMOTE_COMMAND_TIMEOUT_EXIT_CODE,
                 stdout = "",
-                stderr = error.message ?: "native exec failed",
+                stderr = message,
             )
         }
     }
