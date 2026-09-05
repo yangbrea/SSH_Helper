@@ -3,6 +3,7 @@
 #include "ssh_runtime.h"
 #include "ssh_libssh2.h"
 
+#include <cstdint>
 #include <string>
 
 struct _LIBSSH2_SFTP;
@@ -61,6 +62,27 @@ private:
     std::string path_;
     bool follow_links_ = true;
     _LIBSSH2_SFTP* sftp_ = nullptr;
+    std::string output_;
+    bool done_ = false;
+};
+
+// One-shot SFTP file read on the active SSH session. Completion payload is the
+// raw bytes read (up to max_bytes).
+class SftpReadOperation final : public Operation {
+public:
+    SftpReadOperation(std::string path, uint64_t offset, size_t max_bytes);
+    ~SftpReadOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void cleanup() noexcept;
+
+    std::string path_;
+    uint64_t offset_ = 0;
+    size_t max_bytes_ = 0;
+    _LIBSSH2_SFTP* sftp_ = nullptr;
+    _LIBSSH2_SFTP_HANDLE* file_ = nullptr;
     std::string output_;
     bool done_ = false;
 };

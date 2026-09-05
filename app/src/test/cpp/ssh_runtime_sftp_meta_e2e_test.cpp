@@ -77,6 +77,19 @@ int main(int argc, char** argv) {
         runtime->shutdown();
     }
 
+    {
+        auto runtime = openSession(port);
+        auto read = runtime->submit(std::make_unique<sshnative::SftpReadOperation>(
+            "README.md", 0, 1024));
+        assert(waitForEvent(*runtime, read, &e));
+        if (e.completion != sshnative::CompletionKind::kSucceeded ||
+            e.payload.empty()) {
+            std::cerr << "sftp read failed: " << e.error.message << "\n";
+            return 1;
+        }
+        runtime->shutdown();
+    }
+
     std::cout << "runtime-sftp-meta-ok\n";
     return 0;
 }

@@ -2,6 +2,7 @@
 
 #include <libssh2_sftp.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <utility>
@@ -269,6 +270,104 @@ StepResult SftpStatOperation::step(
     if (done_) {
         cleanup();
         return StepResult::complete(output_);
+    }
+    return StepResult::noProgress();
+}
+
+SftpReadOperation::SftpReadOperation(
+    std::string path,
+    uint64_t offset,
+    size_t max_bytes)
+    : path_(std::move(path)), offset_(offset), max_bytes_(max_bytes) {
+    if (path_.empty()) throw std::invalid_argument("path must not be empty");
+    if (max_bytes_ == 0) throw std::invalid_argument("max bytes must be positive");
+}
+
+SftpReadOperation::~SftpReadOperation() {
+    cleanup();
+}
+
+void SftpReadOperation::cleanup() noexcept {
+    if (file_ != nullptr) {
+        libssh2_sftp_close_handle(file_);
+        file_ = nullptr;
+    }
+    if (sftp_ != nullptr) {
+        libssh2_sftp_shutdown(sftp_);
+        sftp_ = nullptr;
+    }
+}
+
+StepResult SftpReadOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    RuntimeResource* active_resource = context.activeSession();
+    if (active_resource == nullptr ||
+        active_resource->kind() != ResourceKind::kLibssh2Session) {
+        return StepResult::failed(noSessionError());
+    }
+    auto* session_resource = static_cast<SshSessionResource*>(active_resource);
+    LIBSSH2_SESSION* session = session_resource->session()->get();
+    const int fd = session_resource->fd();
+    if (fd < 0) return StepResult::failed(noSessionError());
+
+    if (done_) return StepResult::complete(std::move(output_));
+    if (sftp_ == nullptr) {
+        Libssh2CallResult init_result = classifyLibssh2Pointer(
+            session, fd, libssh2_sftp_init(session),
+            ErrorDomain::kSftp, "sftp_init");
+        switch (init_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(init_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(init_result.error));
+            case Libssh2CallKind::kSucceeded:
+                sftp_ = static_cast<LIBSSH2_SFTP*>(init_result.pointer);
+                break;
+        }
+    }
+    if (sftp_ != nullptr && file_ == nullptr) {
+        Libssh2CallResult open_result = classifyLibssh2Pointer(
+            session, fd,
+            libssh2_sftp_open(sftp_, path_.c_str(), LIBSSH2_FXF_READ, 0),
+            ErrorDomain::kSftp, "sftp_open");
+        switch (open_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(open_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(open_result.error));
+            case Libssh2CallKind::kSucceeded:
+                file_ = static_cast<LIBSSH2_SFTP_HANDLE*>(open_result.pointer);
+                libssh2_sftp_seek64(file_, offset_);
+                break;
+        }
+    }
+    while (file_ != nullptr && output_.size() < max_bytes_) {
+        char buffer[8192];
+        const size_t want = std::min(sizeof(buffer), max_bytes_ - output_.size());
+        const ssize_t result = libssh2_sftp_read(file_, buffer, want);
+        Libssh2CallResult read_result = classifyLibssh2Count(
+            session, fd, result, ErrorDomain::kSftp, "sftp_read");
+        switch (read_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(read_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(read_result.error));
+            case Libssh2CallKind::kSucceeded:
+                if (read_result.value > 0) {
+                    output_.append(buffer, static_cast<size_t>(read_result.value));
+                } else {
+                    done_ = true;
+                }
+                break;
+        }
+        if (done_) break;
+    }
+    if (output_.size() >= max_bytes_) done_ = true;
+    if (done_) {
+        cleanup();
+        return StepResult::complete(std::move(output_));
     }
     return StepResult::noProgress();
 }
