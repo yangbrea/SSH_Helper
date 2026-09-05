@@ -37,6 +37,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
   - `Libssh2PasswordExecOperation`：non-blocking password auth + exec + stdout，E2E 通过。
   - `TcpPasswordExecOperation`：从 host:port 到 exec 的完整 direct runtime 路径（TCP connect + handshake + password auth + exec），E2E 通过。
+  - `TcpPrivateKeyExecOperation`：从 host:port 到 exec 的完整 direct runtime 路径（TCP connect + handshake + in-memory private key auth + exec），E2E 通过。
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
@@ -78,6 +79,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `9fcedf8 feat(ssh-native): run full direct private-key exec in runtime`
 - `e46695d feat(ssh-native): run full direct tcp+handshake+auth+exec in runtime`
 - `080712b feat(ssh-native): add nonblocking TCP connect runtime operation`
 - `156668f feat(ssh-native): capture exec stdout as nonblocking runtime operation`
