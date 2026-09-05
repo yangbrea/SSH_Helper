@@ -60,6 +60,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_persistent_session.cpp
     ssh/ssh_proxy_operation.cpp
     ssh/ssh_runtime.cpp
+    ssh/ssh_sftp_operation.cpp
     ssh/ssh_shell_operation.cpp
     ssh/ssh_socks5_operation.cpp
     ssh/ssh_socks5_proxy.cpp

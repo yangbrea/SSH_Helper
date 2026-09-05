@@ -87,15 +87,24 @@ class Server(asyncssh.SSHServer):
 
 async def main():
     auth_mode = sys.argv[1] if len(sys.argv) > 1 else "password"
-    if auth_mode not in ("password", "kbdint"):
+    if auth_mode not in ("password", "kbdint", "sftp"):
         raise SystemExit("unknown auth mode: " + auth_mode)
     key = asyncssh.generate_private_key("ssh-ed25519")
-    server = await asyncssh.create_server(
-        lambda: Server(auth_mode),
-        "127.0.0.1",
-        0,
-        server_host_keys=[key],
-    )
+    if auth_mode == "sftp":
+        server = await asyncssh.create_server(
+            lambda: Server("password"),
+            "127.0.0.1",
+            0,
+            server_host_keys=[key],
+            sftp_factory=True,
+        )
+    else:
+        server = await asyncssh.create_server(
+            lambda: Server(auth_mode),
+            "127.0.0.1",
+            0,
+            server_host_keys=[key],
+        )
     port = server.sockets[0].getsockname()[1]
     print(port, flush=True)
     await asyncio.Event().wait()

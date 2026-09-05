@@ -18,6 +18,7 @@ key_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-key.XXXXXX")"
 server_pid=""
 http_proxy_pid=""
 socks_proxy_pid=""
+sftp_server_pid=""
 kbdint_server_pid=""
 kbdint_port_file=""
 kbdint_server_err=""
@@ -457,6 +458,47 @@ trap 'kill "$server_pid" "$http_proxy_pid" "$socks_proxy_pid" "$kbdint_server_pi
     -lcrypto \
     -o "$runtime_pty_exec_binary"
 "$runtime_pty_exec_binary" "$port"
+
+sftp_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-sftp-port.XXXXXX")"
+sftp_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-sftp-err.XXXXXX")"
+sftp_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-sftp.XXXXXX")"
+trap 'kill "$server_pid" "$http_proxy_pid" "$socks_proxy_pid" "$sftp_server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary" "$runtime_handshake_binary" "$runtime_tcp_handshake_binary" "$runtime_password_auth_binary" "$runtime_private_key_auth_binary" "$runtime_password_exec_binary" "$runtime_direct_password_exec_binary" "$runtime_direct_private_key_exec_binary" "$runtime_direct_stderr_binary" "$runtime_direct_output_limit_binary" "$runtime_hostkey_mismatch_binary" "$runtime_hostkey_match_binary" "$runtime_transport_handoff_binary" "$runtime_proxy_exec_binary" "$runtime_shell_binary" "$runtime_pty_exec_binary" "$sftp_binary" "$port_file" "$server_err" "$key_file" "$http_proxy_port_file" "$http_proxy_err" "$socks_proxy_port_file" "$socks_proxy_err" "$sftp_port_file" "$sftp_err" "$kbdint_port_file" "$kbdint_server_err" "$kbdint_binary"' EXIT
+python3 "$project_dir/scripts/ssh-native-test-server.py" sftp >"$sftp_port_file" 2>"$sftp_err" &
+sftp_server_pid=$!
+for _ in $(seq 1 50); do
+    if [[ -s "$sftp_port_file" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+if [[ ! -s "$sftp_port_file" ]]; then
+    echo "[ssh-native] e2e failed to start sftp test server" >&2
+    cat "$sftp_err" >&2 || true
+    exit 1
+fi
+sftp_port="$(head -1 "$sftp_port_file")"
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_connect_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_sftp_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_sftp_list_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$sftp_binary"
+"$sftp_binary" "$sftp_port"
+kill "$sftp_server_pid" 2>/dev/null || true
 
 kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"
 kbdint_server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-err.XXXXXX")"
