@@ -75,13 +75,15 @@ TcpPasswordExecOperation::TcpPasswordExecOperation(
     std::string command,
     std::chrono::milliseconds connect_timeout,
     size_t max_output_bytes,
-    std::string expected_fingerprint)
+    std::string expected_fingerprint,
+    bool take_pending_transport)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
       password_(std::move(password)),
       command_(std::move(command)),
       expected_fingerprint_(std::move(expected_fingerprint)),
+      take_pending_transport_(take_pending_transport),
       deadline_(MonoClock::now() + connect_timeout),
       max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || password_.empty() || command_.empty()) {
@@ -92,18 +94,20 @@ TcpPasswordExecOperation::TcpPasswordExecOperation(
         throw std::invalid_argument("connect_timeout must be positive");
     }
 
-    const std::string port_string = std::to_string(port_);
-    struct addrinfo hints {};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    const int gai_result = getaddrinfo(
-        host_.c_str(), port_string.c_str(), &hints, &addresses_);
-    if (gai_result != 0) {
-        throw std::runtime_error(
-            std::string("DNS resolution failed: ") + gai_strerror(gai_result));
+    if (!take_pending_transport_) {
+        const std::string port_string = std::to_string(port_);
+        struct addrinfo hints {};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+        const int gai_result = getaddrinfo(
+            host_.c_str(), port_string.c_str(), &hints, &addresses_);
+        if (gai_result != 0) {
+            throw std::runtime_error(
+                std::string("DNS resolution failed: ") + gai_strerror(gai_result));
+        }
+        current_ = addresses_;
     }
-    current_ = addresses_;
 }
 
 TcpPasswordExecOperation::~TcpPasswordExecOperation() {
@@ -132,9 +136,18 @@ void TcpPasswordExecOperation::advanceToNextAddress() noexcept {
 }
 
 StepResult TcpPasswordExecOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
+    if (take_pending_transport_ && fd_ < 0) {
+        fd_ = context.takeTransportFd();
+        if (fd_ < 0) {
+            return StepResult::failed(SshError{
+                ErrorDomain::kInternal, "no_transport_fd",
+                "operation requires an established transport socket"});
+        }
+        connected_ = true;
+    }
     // Phase 1: nonblocking TCP connect.
     while (!connected_) {
         if (now >= deadline_) {
@@ -444,7 +457,8 @@ TcpPrivateKeyExecOperation::TcpPrivateKeyExecOperation(
     std::string command,
     std::chrono::milliseconds connect_timeout,
     size_t max_output_bytes,
-    std::string expected_fingerprint)
+    std::string expected_fingerprint,
+    bool take_pending_transport)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
@@ -452,6 +466,7 @@ TcpPrivateKeyExecOperation::TcpPrivateKeyExecOperation(
       passphrase_(std::move(passphrase)),
       command_(std::move(command)),
       expected_fingerprint_(std::move(expected_fingerprint)),
+      take_pending_transport_(take_pending_transport),
       deadline_(MonoClock::now() + connect_timeout),
       max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || private_key_.empty() || command_.empty()) {
@@ -462,18 +477,20 @@ TcpPrivateKeyExecOperation::TcpPrivateKeyExecOperation(
         throw std::invalid_argument("connect_timeout must be positive");
     }
 
-    const std::string port_string = std::to_string(port_);
-    struct addrinfo hints {};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    const int gai_result = getaddrinfo(
-        host_.c_str(), port_string.c_str(), &hints, &addresses_);
-    if (gai_result != 0) {
-        throw std::runtime_error(
-            std::string("DNS resolution failed: ") + gai_strerror(gai_result));
+    if (!take_pending_transport_) {
+        const std::string port_string = std::to_string(port_);
+        struct addrinfo hints {};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+        const int gai_result = getaddrinfo(
+            host_.c_str(), port_string.c_str(), &hints, &addresses_);
+        if (gai_result != 0) {
+            throw std::runtime_error(
+                std::string("DNS resolution failed: ") + gai_strerror(gai_result));
+        }
+        current_ = addresses_;
     }
-    current_ = addresses_;
 }
 
 TcpPrivateKeyExecOperation::~TcpPrivateKeyExecOperation() {
@@ -502,9 +519,18 @@ void TcpPrivateKeyExecOperation::advanceToNextAddress() noexcept {
 }
 
 StepResult TcpPrivateKeyExecOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
+    if (take_pending_transport_ && fd_ < 0) {
+        fd_ = context.takeTransportFd();
+        if (fd_ < 0) {
+            return StepResult::failed(SshError{
+                ErrorDomain::kInternal, "no_transport_fd",
+                "operation requires an established transport socket"});
+        }
+        connected_ = true;
+    }
     while (!connected_) {
         if (now >= deadline_) {
             SshError error;

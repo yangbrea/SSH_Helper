@@ -83,7 +83,7 @@ void TcpConnectOperation::advanceToNextAddress() noexcept {
 }
 
 StepResult TcpConnectOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
     if (done_) return StepResult::complete("connected");
@@ -115,6 +115,8 @@ StepResult TcpConnectOperation::step(
         if (!connect_pending_) {
             const int result = connect(fd_, current_->ai_addr, current_->ai_addrlen);
             if (result == 0) {
+                context.storeTransportFd(fd_);
+                fd_ = -1;
                 done_ = true;
                 return StepResult::complete("connected");
             }
@@ -141,6 +143,8 @@ StepResult TcpConnectOperation::step(
             advanceToNextAddress();
             continue;
         }
+        context.storeTransportFd(fd_);
+        fd_ = -1;
         done_ = true;
         return StepResult::complete("connected");
     }

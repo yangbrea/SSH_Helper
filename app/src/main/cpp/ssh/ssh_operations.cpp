@@ -16,7 +16,7 @@ namespace sshnative {
 
 Libssh2HandshakeOperation::Libssh2HandshakeOperation(int socket_fd)
     : fd_(socket_fd) {
-    if (fd_ < 0) throw std::invalid_argument("socket fd must not be negative");
+    if (fd_ < -1) throw std::invalid_argument("socket fd must not be negative");
 }
 
 Libssh2HandshakeOperation::~Libssh2HandshakeOperation() {
@@ -27,9 +27,17 @@ Libssh2HandshakeOperation::~Libssh2HandshakeOperation() {
 }
 
 StepResult Libssh2HandshakeOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet&,
     MonoTime) {
+    if (fd_ < 0) {
+        fd_ = context.takeTransportFd();
+        if (fd_ < 0) {
+            return StepResult::failed(SshError{
+                ErrorDomain::kInternal, "no_transport_fd",
+                "operation requires an established transport socket"});
+        }
+    }
     if (!handshake_started_) {
         session_.setBlocking(false);
         handshake_started_ = true;
@@ -60,7 +68,9 @@ StepResult Libssh2HandshakeOperation::step(
     const std::string fingerprint = hostKeySha256Fingerprint(blob);
     const std::string key_type_name = hostKeyTypeName(key_type);
     return StepResult::complete(
-        "fingerprint=" + fingerprint + "\nkeyType=" + key_type_name);
+        "fingerprint=" + fingerprint +
+        "\nkeyType=" + key_type_name +
+        "\nkeyBase64=" + hostKeyBase64(blob));
 }
 
 Libssh2PasswordAuthOperation::Libssh2PasswordAuthOperation(

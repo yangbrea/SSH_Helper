@@ -10,7 +10,8 @@
 namespace sshnative {
 
 // Nonblocking SOCKS5 CONNECT operation. Supports no-auth and username/password
-// auth. On success the completion payload is "connected".
+// auth. On success the completion payload is "connected" and the fd is stored in
+// the runtime's pending transport slot for a later SSH operation.
 class Socks5ProxyConnectOperation final : public Operation {
 public:
     Socks5ProxyConnectOperation(

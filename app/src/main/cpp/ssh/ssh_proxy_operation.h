@@ -13,8 +13,8 @@ namespace sshnative {
 // proxy, sends CONNECT for target_host:target_port, and reads the proxy
 // response header. On success the completion payload is "connected".
 //
-// This is an incremental Step 5 proxy operation; the connected fd is currently
-// owned only until the operation completes.
+// On success the connected fd is stored in the runtime's pending transport slot,
+// ready for the SSH handshake on the same socket.
 class HttpProxyConnectOperation final : public Operation {
 public:
     HttpProxyConnectOperation(

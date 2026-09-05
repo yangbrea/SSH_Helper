@@ -236,6 +236,8 @@ struct LoopContext::Access {
     virtual SessionState getState() const noexcept = 0;
     virtual void setState(SessionState next) = 0;
     virtual void add(std::unique_ptr<RuntimeResource> resource) = 0;
+    virtual void storeTransport(int fd) = 0;
+    virtual int takeTransport() = 0;
 };
 
 SessionState LoopContext::state() const noexcept { return access_->getState(); }
@@ -244,6 +246,13 @@ void LoopContext::addResource(std::unique_ptr<RuntimeResource> resource) {
     if (!resource) throw std::invalid_argument("resource is null");
     access_->add(std::move(resource));
 }
+
+void LoopContext::storeTransportFd(int fd) {
+    if (fd < 0) throw std::invalid_argument("transport fd must not be negative");
+    access_->storeTransport(fd);
+}
+
+int LoopContext::takeTransportFd() { return access_->takeTransport(); }
 
 class SshNativeSession::Impl final : public LoopContext::Access {
 public:
@@ -348,6 +357,22 @@ public:
     void add(std::unique_ptr<RuntimeResource> resource) override {
         assertOwner();
         resources_.push_back(std::move(resource));
+    }
+
+    void storeTransport(int fd) override {
+        assertOwner();
+        if (fd < 0) throw std::invalid_argument("transport fd must not be negative");
+        if (pending_transport_fd_ >= 0) {
+            close(pending_transport_fd_);
+        }
+        pending_transport_fd_ = fd;
+    }
+
+    int takeTransport() override {
+        assertOwner();
+        const int fd = pending_transport_fd_;
+        pending_transport_fd_ = -1;
+        return fd;
     }
 
 private:
@@ -680,6 +705,8 @@ private:
             completeForClose(id);
         }
 
+        closePendingTransport();
+
         std::stable_sort(resources_.begin(), resources_.end(),
                          [](const auto& left, const auto& right) {
                              return left->kind() < right->kind();
@@ -737,6 +764,13 @@ private:
         return close_index_ >= resources_.size();
     }
 
+    void closePendingTransport() noexcept {
+        if (pending_transport_fd_ >= 0) {
+            close(pending_transport_fd_);
+            pending_transport_fd_ = -1;
+        }
+    }
+
     void emergencyClose() noexcept {
         accepting_.store(false, std::memory_order_release);
         std::deque<Command> queued;
@@ -751,6 +785,7 @@ private:
         for (auto iterator = resources_.rbegin(); iterator != resources_.rend(); ++iterator) {
             (*iterator)->forceClose();
         }
+        closePendingTransport();
     }
 
     std::vector<::pollfd> buildPollFds() const {
@@ -857,6 +892,7 @@ private:
     ReadySet ready_;
 
     std::vector<std::unique_ptr<RuntimeResource>> resources_;
+    int pending_transport_fd_ = -1;
     bool closing_started_ = false;
     size_t close_index_ = 0;
     MonoTime force_close_at_ = MonoTime::max();

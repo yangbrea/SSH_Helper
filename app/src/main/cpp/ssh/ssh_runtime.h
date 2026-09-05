@@ -96,6 +96,13 @@ public:
     void transition(SessionState next);
     void addResource(std::unique_ptr<RuntimeResource> resource);
 
+    // Transfers ownership of an established non-blocking transport socket to
+    // the runtime. The socket is stored between requests so a later operation
+    // can continue (SSH handshake/auth/exec) on the same transport.
+    void storeTransportFd(int fd);
+    // Takes ownership of the previously stored transport socket, or returns -1.
+    int takeTransportFd();
+
 private:
     friend class SshNativeSession;
     struct Access;

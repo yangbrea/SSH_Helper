@@ -13,10 +13,9 @@ namespace sshnative {
 // (caller/producer thread); socket creation, connect and poll continuation run
 // on the runtime owner thread. On success the completion payload is "connected".
 //
-// This is the first runtime piece for Step 5 direct transport. It currently owns
-// the connected fd only until the operation completes; later Steps will move the
-// fd into a persistent runtime resource so handshake/auth can continue on the
-// same transport.
+// This is the first runtime piece for Step 5 direct transport. On success the
+// connected fd is stored in the runtime's pending transport slot so a later
+// handshake/auth/exec operation can continue on the same socket.
 class TcpConnectOperation final : public Operation {
 public:
     TcpConnectOperation(

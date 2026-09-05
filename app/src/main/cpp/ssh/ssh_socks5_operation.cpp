@@ -161,7 +161,7 @@ bool Socks5ProxyConnectOperation::readExactly(
 }
 
 StepResult Socks5ProxyConnectOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
     // Phase: TCP connect to proxy.
@@ -420,6 +420,8 @@ StepResult Socks5ProxyConnectOperation::step(
             return StepResult::waitIo({{fd_, POLLIN}});
         }
         phase_ = Phase::kDone;
+        context.storeTransportFd(fd_);
+        fd_ = -1;
         return StepResult::complete("connected");
     }
 

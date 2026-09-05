@@ -134,7 +134,7 @@ void HttpProxyConnectOperation::closeFdAndAdvance() noexcept {
 }
 
 StepResult HttpProxyConnectOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
     // TCP connect to proxy.
@@ -298,6 +298,8 @@ StepResult HttpProxyConnectOperation::step(
         error.message = "HTTP CONNECT failed with status " + code_string;
         return StepResult::failed(std::move(error));
     }
+    context.storeTransportFd(fd_);
+    fd_ = -1;
     return StepResult::complete("connected");
 }
 

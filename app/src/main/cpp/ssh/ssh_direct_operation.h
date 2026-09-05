@@ -23,7 +23,8 @@ public:
         std::string command,
         std::chrono::milliseconds connect_timeout,
         size_t max_output_bytes = 1024 * 1024,
-        std::string expected_fingerprint = {});
+        std::string expected_fingerprint = {},
+        bool take_pending_transport = false);
     ~TcpPasswordExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -37,6 +38,7 @@ private:
     std::string password_;
     std::string command_;
     std::string expected_fingerprint_;
+    bool take_pending_transport_ = false;
     MonoTime deadline_ = MonoTime::max();
 
     addrinfo* addresses_ = nullptr;
@@ -74,7 +76,8 @@ public:
         std::string command,
         std::chrono::milliseconds connect_timeout,
         size_t max_output_bytes = 1024 * 1024,
-        std::string expected_fingerprint = {});
+        std::string expected_fingerprint = {},
+        bool take_pending_transport = false);
     ~TcpPrivateKeyExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -89,6 +92,7 @@ private:
     std::string passphrase_;
     std::string command_;
     std::string expected_fingerprint_;
+    bool take_pending_transport_ = false;
     MonoTime deadline_ = MonoTime::max();
 
     addrinfo* addresses_ = nullptr;
