@@ -72,6 +72,51 @@ object NativeSshBridge {
     ): String
 
     /**
+     * Uses the runtime's pending transport fd (previously stored by an HTTP or
+     * SOCKS5 CONNECT operation) to perform an SSH handshake and return the host
+     * key fields without authenticating.
+     */
+    external fun nativeRunPendingTcpHandshake(
+        handle: Long,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Uses the runtime's pending transport fd to perform SSH handshake, password
+     * auth and one exec. Returns the same payload as the direct exec APIs.
+     */
+    external fun nativeRunPendingDirectPasswordExec(
+        handle: Long,
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        command: String,
+        expectedFingerprint: String,
+        connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String
+
+    /**
+     * Uses the runtime's pending transport fd to perform SSH handshake,
+     * in-memory private key auth and one exec.
+     */
+    external fun nativeRunPendingDirectPrivateKeyExec(
+        handle: Long,
+        host: String,
+        port: Int,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        command: String,
+        expectedFingerprint: String,
+        connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String
+
+    /**
      * Submits a direct TCP+SSH password exec operation to the runtime handle and
      * waits for its completion. Returns the same payload as the direct exec APIs.
      */

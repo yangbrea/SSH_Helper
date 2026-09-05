@@ -3,6 +3,7 @@ package com.yang136.sshhelper.ssh
 import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
+import com.yang136.sshhelper.data.ProxyType
 import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
@@ -22,8 +23,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * This implementation uses the nonblocking runtime JNI path for both host-key
  * probing during connect and exec calls with a stored fingerprint, including
- * deadline/output-limit support. Persistent channels, SFTP, forwarding,
- * proxy/jump and full runtime host-key decisions are not implemented yet.
+ * deadline/output-limit support. HTTP/SOCKS5 proxies are supported through the
+ * runtime transport handoff path. Persistent channels, SFTP, forwarding, jump
+ * hosts and full runtime host-key decisions are not implemented yet.
  */
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
@@ -47,8 +49,17 @@ class Libssh2SshSession(
     private var password: String? = null
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
+    private var targetProxyPassword: String? = null
     private val nativeRuntime = NativeSshRuntime()
     @Volatile private var closed = false
+
+    private data class TargetProxy(
+        val type: ProxyType,
+        val host: String,
+        val port: Int,
+        val username: String?,
+        val password: String,
+    )
 
     override suspend fun connect(
         route: SshRoute,
@@ -71,6 +82,7 @@ class Libssh2SshSession(
             val passwordText = (targetCredential as? Credential.Password)?.value?.concatToString()
             val privateKeyText = (targetCredential as? Credential.PrivateKey)?.bytes
             val passphraseText = (targetCredential as? Credential.PrivateKey)?.passphrase?.concatToString()
+            targetProxyPassword = credentials.targetProxyPassword
             verifiedExec(
                 route = route,
                 username = route.target.username,
@@ -128,36 +140,17 @@ class Libssh2SshSession(
                 activeRoute.target.port,
             )?.fingerprintSha256
             val raw = if (expectedFingerprint != null) {
-                val host = activeRoute.target.hostname
-                val port = activeRoute.target.port
-                val username = activeRoute.target.username
-                if (activePassword != null) {
-                    nativeRuntime.runDirectPasswordExec(
-                        host,
-                        port,
-                        username,
-                        activePassword,
-                        command,
-                        expectedFingerprint,
-                        SSH_CONNECT_TIMEOUT_MS.toLong(),
-                        timeoutMillis,
-                        maxOutputBytes,
-                    )
-                } else {
-                    val key = privateKey ?: error("SSH private key unavailable")
-                    nativeRuntime.runDirectPrivateKeyExec(
-                        host,
-                        port,
-                        username,
-                        key,
-                        passphrase,
-                        command,
-                        expectedFingerprint,
-                        SSH_CONNECT_TIMEOUT_MS.toLong(),
-                        timeoutMillis,
-                        maxOutputBytes,
-                    )
-                }
+                runDirectExec(
+                    route = activeRoute,
+                    username = activeRoute.target.username,
+                    password = activePassword,
+                    privateKey = privateKey,
+                    passphrase = passphrase,
+                    command = command,
+                    expectedFingerprint = expectedFingerprint,
+                    execTimeoutMillis = timeoutMillis,
+                    maxOutputBytes = maxOutputBytes,
+                )
             } else {
                 verifiedExec(
                     route = activeRoute,
@@ -211,7 +204,7 @@ class Libssh2SshSession(
     ): String {
         val hostname = route.target.hostname
         val port = route.target.port
-        val info = probeRuntimeHostKey(hostname, port)
+        val info = probeRuntimeHostKey(route, hostname, port)
         val request = hostKeyRequest(hostname, port, info)
         if (request != null) {
             if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
@@ -227,43 +220,149 @@ class Libssh2SshSession(
             saveKnownHost(hostname, port, info)
         }
         mutableStage.value = ConnectionStage.TARGET_AUTH
+        return runDirectExec(
+            route = route,
+            username = username,
+            password = password,
+            privateKey = privateKey,
+            passphrase = passphrase,
+            command = command,
+            expectedFingerprint = info.fingerprint,
+            execTimeoutMillis = execTimeoutMillis,
+            maxOutputBytes = maxOutputBytes,
+        )
+    }
+
+    private suspend fun runDirectExec(
+        route: SshRoute,
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        command: String,
+        expectedFingerprint: String,
+        execTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String {
+        val hostname = route.target.hostname
+        val port = route.target.port
+        val proxy = targetProxy(route)
+        if (proxy != null) {
+            connectProxy(proxy, hostname, port)
+        }
         return if (password != null) {
-            nativeRuntime.runDirectPasswordExec(
-                hostname,
-                port,
-                username,
-                password,
-                command,
-                info.fingerprint,
-                SSH_CONNECT_TIMEOUT_MS.toLong(),
-                execTimeoutMillis,
-                maxOutputBytes,
-            )
+            if (proxy != null) {
+                nativeRuntime.runPendingDirectPasswordExec(
+                    hostname,
+                    port,
+                    username,
+                    password,
+                    command,
+                    expectedFingerprint,
+                    SSH_CONNECT_TIMEOUT_MS.toLong(),
+                    execTimeoutMillis,
+                    maxOutputBytes,
+                )
+            } else {
+                nativeRuntime.runDirectPasswordExec(
+                    hostname,
+                    port,
+                    username,
+                    password,
+                    command,
+                    expectedFingerprint,
+                    SSH_CONNECT_TIMEOUT_MS.toLong(),
+                    execTimeoutMillis,
+                    maxOutputBytes,
+                )
+            }
         } else {
             val key = privateKey ?: error("SSH private key unavailable")
-            nativeRuntime.runDirectPrivateKeyExec(
-                hostname,
-                port,
-                username,
-                key,
-                passphrase,
-                command,
-                info.fingerprint,
-                SSH_CONNECT_TIMEOUT_MS.toLong(),
-                execTimeoutMillis,
-                maxOutputBytes,
-            )
+            if (proxy != null) {
+                nativeRuntime.runPendingDirectPrivateKeyExec(
+                    hostname,
+                    port,
+                    username,
+                    key,
+                    passphrase,
+                    command,
+                    expectedFingerprint,
+                    SSH_CONNECT_TIMEOUT_MS.toLong(),
+                    execTimeoutMillis,
+                    maxOutputBytes,
+                )
+            } else {
+                nativeRuntime.runDirectPrivateKeyExec(
+                    hostname,
+                    port,
+                    username,
+                    key,
+                    passphrase,
+                    command,
+                    expectedFingerprint,
+                    SSH_CONNECT_TIMEOUT_MS.toLong(),
+                    execTimeoutMillis,
+                    maxOutputBytes,
+                )
+            }
         }
     }
 
-    private suspend fun probeRuntimeHostKey(hostname: String, port: Int): TcpHandshakeInfo {
+    private suspend fun probeRuntimeHostKey(
+        route: SshRoute,
+        hostname: String,
+        port: Int,
+    ): TcpHandshakeInfo {
         mutableStage.value = ConnectionStage.TARGET_HOST_KEY
-        val raw = nativeRuntime.runTcpHandshake(
-            hostname,
-            port,
-            SSH_CONNECT_TIMEOUT_MS.toLong(),
-        )
+        val proxy = targetProxy(route)
+        val raw = if (proxy != null) {
+            connectProxy(proxy, hostname, port)
+            nativeRuntime.runPendingTcpHandshake(SSH_CONNECT_TIMEOUT_MS.toLong())
+        } else {
+            nativeRuntime.runTcpHandshake(
+                hostname,
+                port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
         return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    private fun targetProxy(route: SshRoute): TargetProxy? {
+        val type = route.target.proxyType ?: return null
+        val host = route.target.proxyHost ?: return null
+        val port = route.target.proxyPort ?: return null
+        return TargetProxy(
+            type = type,
+            host = host,
+            port = port,
+            username = route.target.proxyUsername,
+            password = targetProxyPassword.orEmpty(),
+        )
+    }
+
+    private fun connectProxy(proxy: TargetProxy, targetHost: String, targetPort: Int) {
+        val result = when (proxy.type) {
+            ProxyType.HTTP -> nativeRuntime.runHttpProxyConnect(
+                proxy.host,
+                proxy.port,
+                targetHost,
+                targetPort,
+                proxy.username.orEmpty(),
+                proxy.password,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+            ProxyType.SOCKS5 -> nativeRuntime.runSocks5ProxyConnect(
+                proxy.host,
+                proxy.port,
+                targetHost,
+                targetPort,
+                proxy.username.orEmpty(),
+                proxy.password,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        check(result == "connected") { "proxy connect failed" }
     }
 
     private suspend fun hostKeyRequest(
@@ -356,6 +455,7 @@ class Libssh2SshSession(
         privateKey?.fill(0)
         privateKey = null
         passphrase = null
+        targetProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("已断开", DisconnectCause.USER)
         mutableTerminalState.value = TerminalChannelState.Closed
     }
@@ -384,6 +484,7 @@ class Libssh2SshSession(
         privateKey?.fill(0)
         privateKey = null
         passphrase = null
+        targetProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("应用已关闭", DisconnectCause.APP_CLOSED)
         mutableTerminalState.value = TerminalChannelState.Closed
     }

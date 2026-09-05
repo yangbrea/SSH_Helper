@@ -16,6 +16,54 @@ class NativeSshRuntime {
         }
     }
 
+    fun runPendingTcpHandshake(
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunPendingTcpHandshake(
+            handle, timeoutMillis,
+        )
+    }
+
+    fun runPendingDirectPasswordExec(
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        command: String,
+        expectedFingerprint: String,
+        connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunPendingDirectPasswordExec(
+            handle, host, port, username, password, command,
+            expectedFingerprint, connectTimeoutMillis, execTimeoutMillis,
+            maxOutputBytes,
+        )
+    }
+
+    fun runPendingDirectPrivateKeyExec(
+        host: String,
+        port: Int,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        command: String,
+        expectedFingerprint: String,
+        connectTimeoutMillis: Long,
+        execTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunPendingDirectPrivateKeyExec(
+            handle, host, port, username, privateKey, passphrase, command,
+            expectedFingerprint, connectTimeoutMillis, execTimeoutMillis,
+            maxOutputBytes,
+        )
+    }
+
     fun runDirectPasswordExec(
         host: String,
         port: Int,
