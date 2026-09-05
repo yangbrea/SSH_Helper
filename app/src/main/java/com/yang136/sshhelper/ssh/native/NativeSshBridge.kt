@@ -115,6 +115,47 @@ object NativeSshBridge {
         maxOutputBytes: Int,
     ): String
 
+    /** Connects a TCP socket and stores it in the runtime's pending transport slot. */
+    external fun nativeRunTcpConnect(
+        handle: Long,
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Consumes the pending transport, authenticates, and stores the result as
+     * the active persistent SSH session. Returns "session=ok".
+     */
+    external fun nativeRunOpenSession(
+        handle: Long,
+        username: String,
+        password: String,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Same as [nativeRunOpenSession] but authenticates with an in-memory
+     * private key.
+     */
+    external fun nativeRunOpenSessionWithPrivateKey(
+        handle: Long,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String
+
+    /** Runs one exec on the active persistent SSH session. */
+    external fun nativeRunPersistentExec(
+        handle: Long,
+        command: String,
+        maxOutputBytes: Int,
+        timeoutMillis: Long,
+    ): String
+
     /**
      * Submits a direct TCP+SSH password exec operation to the runtime handle and
      * waits for its completion. Returns the same payload as the direct exec APIs.

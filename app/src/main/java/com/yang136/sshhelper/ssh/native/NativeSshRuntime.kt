@@ -16,6 +16,54 @@ class NativeSshRuntime {
         }
     }
 
+    fun runTcpConnect(
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunTcpConnect(
+            handle, host, port, timeoutMillis,
+        )
+    }
+
+    fun runOpenSession(
+        username: String,
+        password: String,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenSession(
+            handle, username, password, expectedFingerprint, timeoutMillis,
+        )
+    }
+
+    fun runOpenSessionWithPrivateKey(
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenSessionWithPrivateKey(
+            handle, username, privateKey, passphrase, expectedFingerprint,
+            timeoutMillis,
+        )
+    }
+
+    fun runPersistentExec(
+        command: String,
+        maxOutputBytes: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunPersistentExec(
+            handle, command, maxOutputBytes, timeoutMillis,
+        )
+    }
+
     fun runPendingTcpHandshake(
         timeoutMillis: Long,
     ): String {

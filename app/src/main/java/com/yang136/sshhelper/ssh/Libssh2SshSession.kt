@@ -21,11 +21,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * libssh2-backed [SshSession] with in-memory host-key verification.
  *
- * This implementation uses the nonblocking runtime JNI path for both host-key
- * probing during connect and exec calls with a stored fingerprint, including
- * deadline/output-limit support. HTTP/SOCKS5 proxies are supported through the
- * runtime transport handoff path. Persistent channels, SFTP, forwarding, jump
- * hosts and full runtime host-key decisions are not implemented yet.
+ * This implementation uses the nonblocking runtime JNI path for host-key
+ * probing and keeps an authenticated persistent session open for repeated exec
+ * calls, including deadline/output-limit support. HTTP/SOCKS5 proxies are
+ * supported through the runtime transport handoff path. Shell/PTY, SFTP,
+ * forwarding, jump hosts and full runtime host-key decisions are not implemented
+ * yet.
  */
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
@@ -50,6 +51,7 @@ class Libssh2SshSession(
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
     private var targetProxyPassword: String? = null
+    private var persistentSessionOpen = false
     private val nativeRuntime = NativeSshRuntime()
     @Volatile private var closed = false
 
@@ -83,15 +85,15 @@ class Libssh2SshSession(
             val privateKeyText = (targetCredential as? Credential.PrivateKey)?.bytes
             val passphraseText = (targetCredential as? Credential.PrivateKey)?.passphrase?.concatToString()
             targetProxyPassword = credentials.targetProxyPassword
-            verifiedExec(
+            openVerifiedPersistentSession(
                 route = route,
                 username = route.target.username,
                 password = passwordText,
                 privateKey = privateKeyText,
                 passphrase = passphraseText,
-                command = "true",
             )
             this@Libssh2SshSession.route = route
+            persistentSessionOpen = true
             password = passwordText
             if (privateKeyText != null) {
                 privateKey = privateKeyText.copyOf()
@@ -139,7 +141,13 @@ class Libssh2SshSession(
                 activeRoute.target.hostname,
                 activeRoute.target.port,
             )?.fingerprintSha256
-            val raw = if (expectedFingerprint != null) {
+            val raw = if (persistentSessionOpen) {
+                nativeRuntime.runPersistentExec(
+                    command = command,
+                    maxOutputBytes = maxOutputBytes,
+                    timeoutMillis = timeoutMillis,
+                )
+            } else if (expectedFingerprint != null) {
                 runDirectExec(
                     route = activeRoute,
                     username = activeRoute.target.username,
@@ -231,6 +239,80 @@ class Libssh2SshSession(
             execTimeoutMillis = execTimeoutMillis,
             maxOutputBytes = maxOutputBytes,
         )
+    }
+
+    private suspend fun openVerifiedPersistentSession(
+        route: SshRoute,
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+    ): String {
+        val hostname = route.target.hostname
+        val port = route.target.port
+        val info = probeRuntimeHostKey(route, hostname, port)
+        val request = hostKeyRequest(hostname, port, info)
+        if (request != null) {
+            if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                mutableHostKeyRequest.value = request
+                throw HostKeyBlockedException(request)
+            }
+            mutableHostKeyRequest.value = request
+            val accepted = awaitHostKeyDecision()
+            mutableHostKeyRequest.value = null
+            if (!accepted) {
+                throw HostKeyBlockedException(request)
+            }
+            saveKnownHost(hostname, port, info)
+        }
+        mutableStage.value = ConnectionStage.TARGET_AUTH
+        return openPersistentSession(
+            route = route,
+            username = username,
+            password = password,
+            privateKey = privateKey,
+            passphrase = passphrase,
+            expectedFingerprint = info.fingerprint,
+        )
+    }
+
+    private suspend fun openPersistentSession(
+        route: SshRoute,
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        expectedFingerprint: String,
+    ): String {
+        val hostname = route.target.hostname
+        val port = route.target.port
+        val proxy = targetProxy(route)
+        if (proxy != null) {
+            connectProxy(proxy, hostname, port)
+        } else {
+            nativeRuntime.runTcpConnect(
+                hostname,
+                port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        return if (password != null) {
+            nativeRuntime.runOpenSession(
+                username,
+                password,
+                expectedFingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        } else {
+            val key = privateKey ?: error("SSH private key unavailable")
+            nativeRuntime.runOpenSessionWithPrivateKey(
+                username,
+                key,
+                passphrase,
+                expectedFingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
     }
 
     private suspend fun runDirectExec(
@@ -450,6 +532,7 @@ class Libssh2SshSession(
     override suspend fun disconnect() {
         cancelPendingHostKey()
         nativeRuntime.close()
+        persistentSessionOpen = false
         route = null
         password = null
         privateKey?.fill(0)
@@ -479,6 +562,7 @@ class Libssh2SshSession(
         closed = true
         cancelPendingHostKey()
         nativeRuntime.close()
+        persistentSessionOpen = false
         route = null
         password = null
         privateKey?.fill(0)
