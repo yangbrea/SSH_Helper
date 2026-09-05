@@ -25,6 +25,15 @@ object NativeSshBridge {
     /** Closes a native SSH runtime handle; 0, repeated and unknown IDs are safe. */
     external fun nativeClose(handle: Long)
 
+    /** Requests cancellation. Success means the request was still owned by the runtime. */
+    external fun nativeCancel(handle: Long, requestId: Long): Boolean
+
+    /**
+     * Waits for one copied completion/state event. A zero timeout only polls;
+     * a negative timeout waits indefinitely. Returns null on timeout.
+     */
+    external fun nativeAwaitEvent(handle: Long, timeoutMillis: Long): NativeSshEvent?
+
     /**
      * Opens a direct TCP connection and completes the SSH handshake without
      * authenticating. Returns an opaque handle that owns the connection.

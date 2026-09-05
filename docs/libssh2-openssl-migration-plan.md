@@ -374,6 +374,9 @@ docs(ssh): update notices and architecture after cutover
 
 ## Step 4：实现 native session runtime 和事件循环
 
+详细设计见 `docs/libssh2-step4-runtime-design.md`。实现与验收以该文档定义的
+continuation、EAGAIN、poll、deadline、取消、关闭、公平调度和背压 contract 为准。
+
 ### 目标
 
 建立后续所有功能共同依赖的串行、非阻塞、安全关闭 runtime。
@@ -1100,4 +1103,3 @@ Gradle dependency tree 必须不再包含 JSch：
 - 实施文件与用户当前未提交修改发生重叠，且无法安全合并。
 
 暂停报告至少应包含：复现步骤、日志脱敏摘要、受影响功能、已尝试方案、可选路径、每条路径的兼容和安全影响。未得到用户选择前，不扩大迁移范围。
-

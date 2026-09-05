@@ -4,6 +4,16 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(cd -- "$script_dir/.." && pwd)"
 
+sanitizer_flags=()
+case "${SSH_NATIVE_SANITIZER:-}" in
+    "") ;;
+    address) sanitizer_flags=(-fsanitize=address -fno-omit-frame-pointer) ;;
+    undefined) sanitizer_flags=(-fsanitize=undefined -fno-omit-frame-pointer) ;;
+    thread) sanitizer_flags=(-fsanitize=thread -fno-omit-frame-pointer) ;;
+    address,undefined) sanitizer_flags=(-fsanitize=address,undefined -fno-omit-frame-pointer) ;;
+    *) echo "unsupported SSH_NATIVE_SANITIZER: $SSH_NATIVE_SANITIZER" >&2; exit 2 ;;
+esac
+
 compile_and_run() {
     local name="$1"
     shift
@@ -17,6 +27,7 @@ compile_and_run() {
         -Wall \
         -Wextra \
         -Werror \
+        "${sanitizer_flags[@]}" \
         -I"$project_dir/app/src/main/cpp" \
         "$@" \
         -o "$test_binary"
@@ -37,6 +48,7 @@ compile_and_run_libssh2() {
         -Wall \
         -Wextra \
         -Werror \
+        "${sanitizer_flags[@]}" \
         -I"$project_dir/app/src/main/cpp" \
         "$@" \
         -lssh2 \
@@ -59,6 +71,7 @@ compile_and_run_hostkey() {
         -Wall \
         -Wextra \
         -Werror \
+        "${sanitizer_flags[@]}" \
         -I"$project_dir/app/src/main/cpp" \
         "$@" \
         -lcrypto \
@@ -85,8 +98,13 @@ compile_and_run_libssh2 libssh2_handshake \
     "$project_dir/app/src/test/cpp/ssh_libssh2_handshake_test.cpp"
 
 compile_and_run runtime \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_test.cpp"
+
+compile_and_run_libssh2 libssh2_nonblocking \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_libssh2_nonblocking_test.cpp"
 
 compile_and_run socket \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \

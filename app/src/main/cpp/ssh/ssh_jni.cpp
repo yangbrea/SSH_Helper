@@ -11,6 +11,7 @@
 #include <openssl/opensslv.h>
 
 #include <cstdint>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <new>
@@ -70,6 +71,33 @@ std::string capabilitiesString() {
     capabilities += ";crypto_backend=openssl";
     capabilities += ";legacy_algorithms=false";
     return capabilities;
+}
+
+jobject newRuntimeEvent(JNIEnv* env, const sshnative::RuntimeEvent& event) {
+    jclass event_class = env->FindClass(
+        "com/yang136/sshhelper/ssh/native/NativeSshEvent");
+    if (event_class == nullptr) return nullptr;
+    jmethodID constructor = env->GetMethodID(
+        event_class, "<init>",
+        "(IJIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)V");
+    if (constructor == nullptr) return nullptr;
+
+    jstring domain = env->NewStringUTF(sshnative::errorDomainName(event.error.domain));
+    jstring code = env->NewStringUTF(event.error.code.c_str());
+    jstring message = env->NewStringUTF(event.error.message.c_str());
+    jbyteArray payload = env->NewByteArray(static_cast<jsize>(event.payload.size()));
+    if (domain == nullptr || code == nullptr || message == nullptr || payload == nullptr) {
+        return nullptr;
+    }
+    if (!event.payload.empty()) {
+        env->SetByteArrayRegion(payload, 0, static_cast<jsize>(event.payload.size()),
+                                reinterpret_cast<const jbyte*>(event.payload.data()));
+    }
+    return env->NewObject(
+        event_class, constructor,
+        static_cast<jint>(event.kind), static_cast<jlong>(event.request_id),
+        static_cast<jint>(event.completion), static_cast<jint>(event.session_state),
+        domain, code, message, payload);
 }
 
 } // namespace
@@ -487,13 +515,59 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeClose(
         return;
     }
     try {
-        // Stop the owner event loop, run already-queued work, then drop the
-        // registry reference. Repeated/unknown/0 handles remain safe no-ops.
+        // Remove first so no new JNI calls can reach the closing session.
+        // Runtime shutdown cancels outstanding work and closes owned resources.
         auto removed = gSshRegistry.remove(handle);
         if (removed) {
             removed->shutdown();
         }
     } catch (...) {
         throwIllegalState(env, "nativeClose failed");
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeCancel(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong request_id) {
+    try {
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return JNI_FALSE;
+        }
+        return session->cancel(static_cast<sshnative::RequestId>(request_id))
+            ? JNI_TRUE : JNI_FALSE;
+    } catch (...) {
+        throwIllegalState(env, "nativeCancel failed");
+        return JNI_FALSE;
+    }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeAwaitEvent(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong timeout_millis) {
+    try {
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        sshnative::RuntimeEvent event;
+        if (!session->waitEvent(&event, std::chrono::milliseconds(timeout_millis))) {
+            return nullptr;
+        }
+        return newRuntimeEvent(env, event);
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeAwaitEvent failed");
+        return nullptr;
     }
 }

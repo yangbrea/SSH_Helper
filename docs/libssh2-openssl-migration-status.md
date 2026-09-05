@@ -13,9 +13,23 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ### Native runtime / transport
 - `libsshhelper_ssh.so` 独立 shared library。
-- 单 owner event-loop runtime、cancellable command queue。
+- Step 4 production runtime 已实现：每 transport 单 owner thread、`Operation::step()`
+  continuation、wake fd + socket `poll()`、monotonic deadline、active/queued cancel、
+  exactly-once completion 与有界 shutdown。
+- 三档 weighted scheduler 防止 bulk 饿死 interactive；command/completion obligation 和
+  `WatermarkedBuffer` 提供可恢复背压。
+- 资源按 SFTP handle、channel、SFTP session、listener、libssh2 session、socket 的依赖
+  顺序关闭；graceful close 超时后执行有界 force-close。
+- `ssh_libssh2_nonblocking.*` 统一分类 int/count/pointer API 的 success、EAGAIN 与 failure，
+  EAGAIN 后立即复制 `libssh2_session_block_directions()`，失败后立即复制 last-error。
+- JNI/Kotlin 已提供 `nativeCancel()`、`nativeAwaitEvent()` 和不可变 `NativeSshEvent`，owner
+  thread 不直接回调 JVM。
 - non-blocking TCP connect、HTTP CONNECT、SOCKS5 CONNECT、统一 transport 选择。
 - 现代算法策略 helper。
+- Step 4 的 production runtime 设计已固化在
+  `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
+  exactly-once completion、取消、关闭、资源所有权、公平调度、背压及 sanitizer 门禁。
+- Step 4 host tests、ASan/UBSan、TSan、双 ABI `assembleDebug` 和现有 SSH E2E 均通过。
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
@@ -46,7 +60,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- native 非阻塞 event-loop 完整接入 libssh2（当前 POC 为 blocking）。
+- Step 5 起把 DNS/TCP/proxy 和真实 libssh2 handshake/auth 等功能实现为新的 runtime
+  `Operation`；当前实际连接路径仍使用保留的 blocking POC。
 - host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
 - keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。

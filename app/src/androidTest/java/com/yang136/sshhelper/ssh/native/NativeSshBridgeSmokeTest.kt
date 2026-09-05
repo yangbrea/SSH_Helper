@@ -3,6 +3,7 @@ package com.yang136.sshhelper.ssh.native
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +36,8 @@ class NativeSshBridgeSmokeTest {
     fun handleLifecycleIsIdempotentAndSafe() {
         val handle = NativeSshBridge.nativeCreate()
         assertNotEquals("nativeCreate must return a non-zero handle", 0L, handle)
+        assertNull("a new runtime must not contain events", NativeSshBridge.nativeAwaitEvent(handle, 0))
+        assertFalse("unknown requests cannot be cancelled", NativeSshBridge.nativeCancel(handle, 1L))
 
         NativeSshBridge.nativeClose(handle)
         NativeSshBridge.nativeClose(handle)
