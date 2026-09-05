@@ -15,6 +15,14 @@ test_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-e2e.XXXXXX")"
 port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-port.XXXXXX")"
 server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-server-err.XXXXXX")"
 key_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-key.XXXXXX")"
+server_pid=""
+http_proxy_pid=""
+socks_proxy_pid=""
+kbdint_server_pid=""
+kbdint_port_file=""
+kbdint_server_err=""
+kbdint_binary=""
+runtime_direct_kbdint_binary=""
 trap 'rm -f "$test_binary" "$port_file" "$server_err" "$key_file"' EXIT
 
 "${CXX:-c++}" \
