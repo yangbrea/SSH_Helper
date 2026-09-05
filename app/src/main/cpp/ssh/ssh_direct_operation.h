@@ -53,4 +53,47 @@ private:
     std::string output_;
 };
 
+// Full direct transport operation with in-memory private-key authentication.
+class TcpPrivateKeyExecOperation final : public Operation {
+public:
+    TcpPrivateKeyExecOperation(
+        std::string host,
+        uint16_t port,
+        std::string username,
+        std::string private_key,
+        std::string passphrase,
+        std::string command,
+        std::chrono::milliseconds connect_timeout);
+    ~TcpPrivateKeyExecOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void advanceToNextAddress() noexcept;
+
+    std::string host_;
+    uint16_t port_ = 0;
+    std::string username_;
+    std::string private_key_;
+    std::string passphrase_;
+    std::string command_;
+    MonoTime deadline_ = MonoTime::max();
+
+    addrinfo* addresses_ = nullptr;
+    addrinfo* current_ = nullptr;
+    int fd_ = -1;
+    bool connect_pending_ = false;
+    bool connected_ = false;
+
+    Libssh2Session session_;
+    LIBSSH2_CHANNEL* channel_ = nullptr;
+    bool handshake_started_ = false;
+    bool handshake_done_ = false;
+    bool auth_started_ = false;
+    bool auth_done_ = false;
+    bool exec_started_ = false;
+    bool close_started_ = false;
+    std::string output_;
+};
+
 } // namespace sshnative
