@@ -196,36 +196,8 @@ class Libssh2SshSession(
         }
     }
 
-    private fun parseExecPayload(raw: String): RemoteCommandResult {
-        val newline = raw.indexOf('\n')
-        val exitLine = if (newline >= 0) raw.substring(0, newline) else raw
-        val afterExit = if (newline >= 0) raw.substring(newline + 1) else ""
-        val exitCode = exitLine.removePrefix("exit=").toIntOrNull() ?: 0
-
-        val stderrMarker = "\nSTDERR_BEGIN\n"
-        val stderrIndex = afterExit.indexOf(stderrMarker)
-        if (stderrIndex < 0) {
-            return RemoteCommandResult(
-                exitCode = exitCode,
-                stdout = afterExit,
-                stderr = "",
-            )
-        }
-        val stdout = afterExit.substring(0, stderrIndex)
-        val stderrEndMarker = "\nSTDERR_END\n"
-        val stderrStart = stderrIndex + stderrMarker.length
-        val stderrEnd = afterExit.indexOf(stderrEndMarker, stderrStart)
-        val stderr = if (stderrEnd >= 0) {
-            afterExit.substring(stderrStart, stderrEnd)
-        } else {
-            afterExit.substring(stderrStart)
-        }
-        return RemoteCommandResult(
-            exitCode = exitCode,
-            stdout = stdout,
-            stderr = stderr,
-        )
-    }
+    private fun parseExecPayload(raw: String): RemoteCommandResult =
+        parseRuntimeExecPayload(raw)
 
     private suspend fun verifiedExec(
         route: SshRoute,
@@ -432,3 +404,34 @@ class Libssh2SshSession(
 private class HostKeyBlockedException(
     val request: HostKeyRequest,
 ) : IllegalStateException("主机密钥验证失败")
+
+internal fun parseRuntimeExecPayload(raw: String): RemoteCommandResult {
+    val newline = raw.indexOf('\n')
+    val exitLine = if (newline >= 0) raw.substring(0, newline) else raw
+    val afterExit = if (newline >= 0) raw.substring(newline + 1) else ""
+    val exitCode = exitLine.removePrefix("exit=").toIntOrNull() ?: 0
+
+    val stderrMarker = "\nSTDERR_BEGIN\n"
+    val stderrIndex = afterExit.indexOf(stderrMarker)
+    if (stderrIndex < 0) {
+        return RemoteCommandResult(
+            exitCode = exitCode,
+            stdout = afterExit,
+            stderr = "",
+        )
+    }
+    val stdout = afterExit.substring(0, stderrIndex)
+    val stderrEndMarker = "\nSTDERR_END\n"
+    val stderrStart = stderrIndex + stderrMarker.length
+    val stderrEnd = afterExit.indexOf(stderrEndMarker, stderrStart)
+    val stderr = if (stderrEnd >= 0) {
+        afterExit.substring(stderrStart, stderrEnd)
+    } else {
+        afterExit.substring(stderrStart)
+    }
+    return RemoteCommandResult(
+        exitCode = exitCode,
+        stdout = stdout,
+        stderr = stderr,
+    )
+}
