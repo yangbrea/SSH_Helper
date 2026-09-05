@@ -97,6 +97,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `835cf7c feat(ssh-native): expose TcpHandshakeOperation through JNI and NativeSshRuntime`
 - `9b8fd0a feat(ssh-native): add TcpHandshakeOperation host key probe`
 - `2dde306 docs(ssh): record runtime payload parser tests`
 - `c9f4e95 test(ssh): extract and unit-test runtime exec payload parser`
