@@ -35,6 +35,37 @@ object NativeSshBridge {
     external fun nativeAwaitEvent(handle: Long, timeoutMillis: Long): NativeSshEvent?
 
     /**
+     * Submits a direct TCP+SSH password exec operation to the runtime handle and
+     * waits for its completion. Returns the same payload as the direct exec APIs.
+     */
+    external fun nativeRunDirectPasswordExec(
+        handle: Long,
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        command: String,
+        connectTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String
+
+    /**
+     * Submits a direct TCP+SSH private-key exec operation to the runtime handle
+     * and waits for its completion.
+     */
+    external fun nativeRunDirectPrivateKeyExec(
+        handle: Long,
+        host: String,
+        port: Int,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        command: String,
+        connectTimeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String
+
+    /**
      * Opens a direct TCP connection and completes the SSH handshake without
      * authenticating. Returns an opaque handle that owns the connection.
      */

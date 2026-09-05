@@ -19,6 +19,7 @@
 
 #include "../handle_registry.h"
 #include "ssh_blocking_connection.h"
+#include "ssh_direct_operation.h"
 #include "ssh_error.h"
 #include "ssh_libssh2.h"
 #include "ssh_runtime.h"
@@ -98,6 +99,37 @@ jobject newRuntimeEvent(JNIEnv* env, const sshnative::RuntimeEvent& event) {
         static_cast<jint>(event.kind), static_cast<jlong>(event.request_id),
         static_cast<jint>(event.completion), static_cast<jint>(event.session_state),
         domain, code, message, payload);
+}
+
+std::string awaitRuntimeCompletion(
+    JNIEnv* env,
+    const std::shared_ptr<sshnative::SshNativeSession>& session,
+    sshnative::SubmitResult submit) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (std::chrono::steady_clock::now() < deadline) {
+        sshnative::RuntimeEvent event;
+        if (!session->waitEvent(&event, std::chrono::milliseconds(100))) continue;
+        if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
+            event.request_id != submit.request_id) {
+            continue;
+        }
+        if (event.completion == sshnative::CompletionKind::kSucceeded) {
+            return std::move(event.payload);
+        }
+        const std::string message = event.error.message.empty()
+            ? "native runtime operation failed"
+            : event.error.message;
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, message.c_str());
+        }
+        return {};
+    }
+    jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+    if (exceptionClass != nullptr) {
+        env->ThrowNew(exceptionClass, "native runtime operation timed out");
+    }
+    return {};
 }
 
 } // namespace
@@ -446,6 +478,116 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeDirectClose(
         }
     } catch (...) {
         throwIllegalState(env, "nativeDirectClose failed");
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPasswordExec(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jhost,
+    jint jport,
+    jstring jusername,
+    jstring jpassword,
+    jstring jcommand,
+    jlong connect_timeout_millis,
+    jint max_output_bytes) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        const std::string command = jstringToString(env, jcommand);
+        if (host.empty() || username.empty() || password.empty() || command.empty()) {
+            throw std::invalid_argument("host/username/password/command must not be empty");
+        }
+        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 || max_output_bytes <= 0) {
+            throw std::invalid_argument("invalid port/timeout/max output");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::TcpPasswordExecOperation>(
+            host, static_cast<uint16_t>(jport), username, password, command,
+            std::chrono::milliseconds(connect_timeout_millis),
+            static_cast<size_t>(max_output_bytes));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit direct password exec");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunDirectPasswordExec failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunDirectPrivateKeyExec(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jhost,
+    jint jport,
+    jstring jusername,
+    jbyteArray jprivateKey,
+    jstring jpassphrase,
+    jstring jcommand,
+    jlong connect_timeout_millis,
+    jint max_output_bytes) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        const std::string username = jstringToString(env, jusername);
+        const std::string private_key = jbyteArrayToString(env, jprivateKey);
+        const std::string passphrase = jstringToString(env, jpassphrase);
+        const std::string command = jstringToString(env, jcommand);
+        if (host.empty() || username.empty() || private_key.empty() || command.empty()) {
+            throw std::invalid_argument("host/username/private key/command must not be empty");
+        }
+        if (jport <= 0 || jport > 65535 || connect_timeout_millis <= 0 || max_output_bytes <= 0) {
+            throw std::invalid_argument("invalid port/timeout/max output");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::TcpPrivateKeyExecOperation>(
+            host, static_cast<uint16_t>(jport), username, private_key, passphrase,
+            command, std::chrono::milliseconds(connect_timeout_millis),
+            static_cast<size_t>(max_output_bytes));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit direct private key exec");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunDirectPrivateKeyExec failed");
+        return nullptr;
     }
 }
 
