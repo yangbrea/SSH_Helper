@@ -126,4 +126,78 @@ StepResult Libssh2PasswordAuthOperation::step(
     return StepResult::failed(SshError{ErrorDomain::kInternal, "unreachable",
                                        "unexpected auth operation state"});
 }
+
+Libssh2PrivateKeyAuthOperation::Libssh2PrivateKeyAuthOperation(
+    int socket_fd,
+    std::string username,
+    std::string private_key,
+    std::string passphrase)
+    : fd_(socket_fd),
+      username_(std::move(username)),
+      private_key_(std::move(private_key)),
+      passphrase_(std::move(passphrase)) {
+    if (fd_ < 0) throw std::invalid_argument("socket fd must not be negative");
+    if (username_.empty() || private_key_.empty()) {
+        throw std::invalid_argument("username/private key must not be empty");
+    }
+}
+
+Libssh2PrivateKeyAuthOperation::~Libssh2PrivateKeyAuthOperation() {
+    if (fd_ >= 0) {
+        closeFd(fd_);
+        fd_ = -1;
+    }
+}
+
+StepResult Libssh2PrivateKeyAuthOperation::step(
+    LoopContext&,
+    const ReadySet&,
+    MonoTime) {
+    if (!handshake_started_) {
+        session_.setBlocking(false);
+        handshake_started_ = true;
+    }
+
+    if (!handshake_done_) {
+        const int result = libssh2_session_handshake(session_.get(), fd_);
+        Libssh2CallResult translated = classifyLibssh2Int(
+            session_.get(), fd_, result, ErrorDomain::kSshHandshake,
+            "session_handshake");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                handshake_done_ = true;
+                break;
+        }
+    }
+
+    if (!auth_started_) {
+        auth_started_ = true;
+    }
+    const int result = libssh2_userauth_publickey_frommemory(
+        session_.get(),
+        username_.c_str(),
+        static_cast<unsigned int>(username_.size()),
+        nullptr,
+        0,
+        private_key_.data(),
+        private_key_.size(),
+        passphrase_.empty() ? nullptr : passphrase_.c_str());
+    Libssh2CallResult translated = classifyLibssh2Int(
+        session_.get(), fd_, result, ErrorDomain::kAuth,
+        "userauth_publickey_frommemory");
+    switch (translated.kind) {
+        case Libssh2CallKind::kWouldBlock:
+            return StepResult::waitIo(std::move(translated.interest));
+        case Libssh2CallKind::kFailed:
+            return StepResult::failed(std::move(translated.error));
+        case Libssh2CallKind::kSucceeded:
+            return StepResult::complete("auth=ok");
+    }
+    return StepResult::failed(SshError{ErrorDomain::kInternal, "unreachable",
+                                       "unexpected auth operation state"});
+}
 } // namespace sshnative

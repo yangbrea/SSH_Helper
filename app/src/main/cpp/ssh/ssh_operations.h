@@ -47,4 +47,29 @@ private:
     std::string password_;
 };
 
+// Performs a nonblocking handshake followed by in-memory public-key
+// authentication on an already-connected socket. Completion payload is
+// "auth=ok" on success.
+class Libssh2PrivateKeyAuthOperation final : public Operation {
+public:
+    Libssh2PrivateKeyAuthOperation(
+        int socket_fd,
+        std::string username,
+        std::string private_key,
+        std::string passphrase);
+    ~Libssh2PrivateKeyAuthOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    int fd_ = -1;
+    Libssh2Session session_;
+    bool handshake_started_ = false;
+    bool handshake_done_ = false;
+    bool auth_started_ = false;
+    std::string username_;
+    std::string private_key_;
+    std::string passphrase_;
+};
+
 } // namespace sshnative
