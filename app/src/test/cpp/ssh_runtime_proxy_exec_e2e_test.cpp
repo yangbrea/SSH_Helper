@@ -89,6 +89,36 @@ void runPasswordExec(sshnative::SshNativeSession& runtime,
     assert(exec_event.payload.find("native-exec-ok") != std::string::npos);
 }
 
+void runHostKeyMismatch(sshnative::SshNativeSession& runtime,
+                        const std::string& proxy_type,
+                        int proxy_port,
+                        int ssh_port) {
+    auto connect_result = runtime.submit(makeProxyConnect(proxy_type, proxy_port, ssh_port));
+    assert(connect_result && "runtime must accept proxy connect operation");
+    sshnative::RuntimeEvent connect_event;
+    assert(waitForEvent(runtime, connect_result, &connect_event));
+    assert(connect_event.completion == sshnative::CompletionKind::kSucceeded);
+    assert(connect_event.payload == "connected");
+
+    auto exec_result = runtime.submit(
+        std::make_unique<sshnative::TcpPasswordExecOperation>(
+            "127.0.0.1",
+            static_cast<uint16_t>(ssh_port),
+            "test",
+            "secret",
+            "true",
+            5s,
+            1024u,
+            "SHA256:definitely-not-the-host-key",
+            true));
+    assert(exec_result && "runtime must accept pending proxy host key mismatch");
+    sshnative::RuntimeEvent exec_event;
+    assert(waitForEvent(runtime, exec_result, &exec_event));
+    assert(exec_event.completion == sshnative::CompletionKind::kFailed);
+    assert(exec_event.error.domain == sshnative::ErrorDomain::kHostKey);
+    assert(exec_event.error.code == "host_key_mismatch");
+}
+
 void runPrivateKeyExec(sshnative::SshNativeSession& runtime,
                        const std::string& proxy_type,
                        int proxy_port,
@@ -133,6 +163,7 @@ int main(int argc, char** argv) {
     auto runtime = sshnative::createSession();
     runPasswordExec(*runtime, proxy_type, proxy_port, ssh_port);
     runPrivateKeyExec(*runtime, proxy_type, proxy_port, ssh_port, private_key);
+    runHostKeyMismatch(*runtime, proxy_type, proxy_port, ssh_port);
     std::cout << "runtime-proxy-" << proxy_type << "-exec-ok\n";
     runtime->shutdown();
     return 0;
