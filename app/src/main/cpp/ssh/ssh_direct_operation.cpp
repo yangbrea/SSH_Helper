@@ -34,13 +34,15 @@ TcpPasswordExecOperation::TcpPasswordExecOperation(
     std::string username,
     std::string password,
     std::string command,
-    std::chrono::milliseconds connect_timeout)
+    std::chrono::milliseconds connect_timeout,
+    size_t max_output_bytes)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
       password_(std::move(password)),
       command_(std::move(command)),
-      deadline_(MonoClock::now() + connect_timeout) {
+      deadline_(MonoClock::now() + connect_timeout),
+      max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || password_.empty() || command_.empty()) {
         throw std::invalid_argument("host/username/password/command must not be empty");
     }
@@ -286,6 +288,10 @@ StepResult TcpPasswordExecOperation::step(
             }
 
             if (progress_bytes > 0) {
+                if (output_.size() + stderr_.size() > max_output_bytes_) {
+                    output_limit_hit_ = true;
+                    close_started_ = true;
+                }
                 return StepResult::progress(progress_bytes);
             }
             if (!pending_interest.empty()) {
@@ -312,7 +318,9 @@ StepResult TcpPasswordExecOperation::step(
         case Libssh2CallKind::kSucceeded:
             break;
     }
-    const int exit_code = libssh2_channel_get_exit_status(channel_);
+    const int exit_code = output_limit_hit_
+        ? 125
+        : libssh2_channel_get_exit_status(channel_);
     libssh2_channel_free(channel_);
     channel_ = nullptr;
     std::string result_payload =
@@ -331,14 +339,16 @@ TcpPrivateKeyExecOperation::TcpPrivateKeyExecOperation(
     std::string private_key,
     std::string passphrase,
     std::string command,
-    std::chrono::milliseconds connect_timeout)
+    std::chrono::milliseconds connect_timeout,
+    size_t max_output_bytes)
     : host_(std::move(host)),
       port_(port),
       username_(std::move(username)),
       private_key_(std::move(private_key)),
       passphrase_(std::move(passphrase)),
       command_(std::move(command)),
-      deadline_(MonoClock::now() + connect_timeout) {
+      deadline_(MonoClock::now() + connect_timeout),
+      max_output_bytes_(max_output_bytes) {
     if (host_.empty() || username_.empty() || private_key_.empty() || command_.empty()) {
         throw std::invalid_argument("host/username/private key/command must not be empty");
     }
@@ -585,6 +595,10 @@ StepResult TcpPrivateKeyExecOperation::step(
             }
 
             if (progress_bytes > 0) {
+                if (output_.size() + stderr_.size() > max_output_bytes_) {
+                    output_limit_hit_ = true;
+                    close_started_ = true;
+                }
                 return StepResult::progress(progress_bytes);
             }
             if (!pending_interest.empty()) {
@@ -610,7 +624,9 @@ StepResult TcpPrivateKeyExecOperation::step(
         case Libssh2CallKind::kSucceeded:
             break;
     }
-    const int exit_code = libssh2_channel_get_exit_status(channel_);
+    const int exit_code = output_limit_hit_
+        ? 125
+        : libssh2_channel_get_exit_status(channel_);
     libssh2_channel_free(channel_);
     channel_ = nullptr;
     std::string result_payload =

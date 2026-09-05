@@ -21,7 +21,8 @@ public:
         std::string username,
         std::string password,
         std::string command,
-        std::chrono::milliseconds connect_timeout);
+        std::chrono::milliseconds connect_timeout,
+        size_t max_output_bytes = 1024 * 1024);
     ~TcpPasswordExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -52,6 +53,8 @@ private:
     bool close_started_ = false;
     std::string output_;
     std::string stderr_;
+    size_t max_output_bytes_ = 1024 * 1024;
+    bool output_limit_hit_ = false;
 };
 
 // Full direct transport operation with in-memory private-key authentication.
@@ -64,7 +67,8 @@ public:
         std::string private_key,
         std::string passphrase,
         std::string command,
-        std::chrono::milliseconds connect_timeout);
+        std::chrono::milliseconds connect_timeout,
+        size_t max_output_bytes = 1024 * 1024);
     ~TcpPrivateKeyExecOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -96,6 +100,8 @@ private:
     bool close_started_ = false;
     std::string output_;
     std::string stderr_;
+    size_t max_output_bytes_ = 1024 * 1024;
+    bool output_limit_hit_ = false;
 };
 
 } // namespace sshnative

@@ -23,6 +23,12 @@ class ExecSession(asyncssh.SSHServerSession):
     def session_started(self):
         if self._command == "stderr-test":
             self._chan.write_stderr("native-stderr-ok")
+        elif self._command.startswith("big-output:"):
+            try:
+                size = int(self._command.split(":", 1)[1])
+            except ValueError:
+                size = 0
+            self._chan.write("x" * max(0, size))
         else:
             self._chan.write("native-exec-ok")
         self._chan.exit(0)
