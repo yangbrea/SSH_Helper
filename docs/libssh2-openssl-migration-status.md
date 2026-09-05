@@ -85,28 +85,34 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- 下一步是把 proxy operation 与 SSH handshake/auth/exec 串成完整代理路径，并加入 runtime 内 host-key decision。
-- runtime 内 UNKNOWN host-key 交互决策尚未实现；已支持 expected fingerprint 的 MATCH/CHANGED 阻断。
-- shell/PTY、SFTP、forward、jump 尚未 native 化。
-- host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
-- keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
-- shell/PTY、exec 的 Kotlin `SshSession` 接入。
-- SFTP、forward、jump 的 native API。
-- `Libssh2SshSession` 的 exec 在已存 fingerprint 时已走 `NativeSshRuntime` runtime JNI（deadline/output limit/stderr），host key mismatch 会映射为 changed-key 错误；runtime payload parser 已有 JVM 单测。
-- 删除 JSch 及清理文档/notices。
-- 真机/模拟器 release 门禁。
+- 把 HTTP/SOCKS5 proxy operation 与 SSH handshake/auth/exec 串成完整代理路径。
+- runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
+- shell/PTY、持久会话。
+- SFTP 全功能 native 化。
+- 本地/远程/动态转发 native 化。
+- jump host native 化。
+- `Libssh2SshSession` 生产接入与默认切换。
+- JSch 删除与文档/notices 清理。
+- 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `2dde306 docs(ssh): record runtime payload parser tests`
+- `c9f4e95 test(ssh): extract and unit-test runtime exec payload parser`
+- `d1e5801 docs(ssh): record runtime keyboard-interactive fallback`
+- `7311e7c feat(ssh-native): add keyboard-interactive fallback to direct runtime password exec`
+- `cf7aa5e docs(ssh): record NativeSshRuntime wrapper`
+- `257931f refactor(ssh): add NativeSshRuntime handle wrapper`
+- `0978b77 docs(ssh): record host key match E2E coverage`
+- `c986e81 test(ssh-native): verify expected host key match allows runtime exec`
+- `8abb172 feat(ssh): surface runtime host key mismatch as changed-key error in exec`
+- `3031661 feat(ssh): route Libssh2SshSession exec through runtime JNI when host key known`
+- `069efac docs(ssh): record Libssh2SshSession runtime exec routing`
+- `22a1858 feat(ssh-native): expose expected host key fingerprint through JNI exec bridge`
+- `896c8f9 feat(ssh-native): enforce expected host key in direct runtime exec`
+- `6ef9dee feat(ssh-native): map runtime exec deadline to exit 124 in JNI`
+- `c73e952 feat(ssh-native): expose proxy connect operations through JNI bridge`
+- `140fd44 docs(ssh): record JNI direct runtime bridge`
+- `d633bd1 feat(ssh-native): expose direct runtime exec through JNI bridge`
 - `d6194dc feat(ssh-native): add nonblocking SOCKS5 CONNECT runtime operation`
 - `ec12616 feat(ssh-native): add nonblocking HTTP CONNECT runtime operation`
-- `df0cfcf feat(ssh-native): enforce output limit in direct runtime exec`
-- `3169f52 feat(ssh-native): capture stderr in direct runtime exec operations`
-- `9fcedf8 feat(ssh-native): run full direct private-key exec in runtime`
-- `e46695d feat(ssh-native): run full direct tcp+handshake+auth+exec in runtime`
-- `080712b feat(ssh-native): add nonblocking TCP connect runtime operation`
-- `156668f feat(ssh-native): capture exec stdout as nonblocking runtime operation`
-- `338ed98 feat(ssh-native): run in-memory private key auth as runtime operation`
-- `7dc5106 feat(ssh-native): run password auth as nonblocking runtime operation`
-- `8074d67 feat(ssh-native): drive nonblocking libssh2 handshake through runtime`
-- `2667e85 feat(ssh-native): add production nonblocking runtime and event bridge`
 （里程碑建议后续打 tag `ssh-native-step-NN`。）
