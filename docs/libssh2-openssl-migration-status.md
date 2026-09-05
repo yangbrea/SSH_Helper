@@ -80,6 +80,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - direct runtime password exec 支持 keyboard-interactive fallback（kbdint-only E2E 通过）
 - host tests 与 Android assembleDebug 均通过
 - JNI 已暴露 `nativeRunTcpHandshake()` / `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
+- JNI/Kotlin 新增 pending-transport 调用：`nativeRunPendingTcpHandshake()`、`nativeRunPendingDirectPasswordExec()`、`nativeRunPendingDirectPrivateKeyExec()`；
+  `Libssh2SshSession` 对配置了 HTTP/SOCKS5 的 target 先执行 proxy CONNECT，再在同一个 runtime pending socket 上完成 host-key 探测/认证/exec。
 - `Libssh2SshSession` 的 host-key 探测已从 blocking direct-handshake POC 切换到 runtime `TcpHandshakeOperation`：
   - connect/首次确认前先 `runTcpHandshake()` 读取 fingerprint/keyType/keyBase64。
   - 确认/匹配后使用 `runDirectPasswordExec` / `runDirectPrivateKeyExec` 执行 `true` 验证认证。
@@ -96,7 +98,6 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- 把代理路径接入 JNI / `Libssh2SshSession`（当前 native E2E 已串通 HTTP/SOCKS5 + password/private-key exec）。
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - shell/PTY、持久会话。
 - SFTP 全功能 native 化。
@@ -107,6 +108,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `aaae54f feat(ssh): route Libssh2SshSession through HTTP and SOCKS5 proxies`
 - `35c6984 test(ssh-native): cover proxied runtime exec over HTTP and SOCKS5`
 - `c6250b6 feat(ssh-native): store transport fd between runtime operations`
 - `72682d7 feat(ssh): route Libssh2SshSession host key probe through runtime`
