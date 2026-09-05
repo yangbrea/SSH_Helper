@@ -61,6 +61,15 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - password auth 和 in-memory private key auth 已有 E2E。
 - keyboard-interactive fallback 已实现：先读服务器 auth 方法，仅当无 plain password 时用同一密码回答单个 keyboard-interactive prompt；E2E 已跑通。
 
+### runtime Operation 当前覆盖（direct/proxy/exec）
+- non-blocking TCP connect
+- non-blocking HTTP CONNECT（含 Basic auth）
+- non-blocking SOCKS5 CONNECT（no-auth / user-pass）
+- direct runtime 完整链路：password / private key → handshake → exec
+  - stdout/stderr/exit code
+  - output limit → exit=125
+- host tests 与 Android assembleDebug 均通过
+
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
   - direct connect + host-key UNKNOWN/MATCH/CHANGED
@@ -72,8 +81,9 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- Step 5 仍需把 DNS/TCP/proxy 和 host-key 决策实现为新的 runtime `Operation`；
-  当前 runtime operation 使用外部已连接 fd，实际连接路径仍保留 blocking POC。
+- 下一步是把 proxy operation 与 SSH handshake/auth/exec 串成完整代理路径，并加入 runtime 内 host-key decision。
+- exec timeout → exit=124 尚未实现。
+- shell/PTY、SFTP、forward、jump 尚未 native 化。
 - host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
 - keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。
