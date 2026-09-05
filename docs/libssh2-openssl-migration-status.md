@@ -30,6 +30,9 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - runtime 支持 active authenticated SSH session 资源：
   - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
   - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
+- SFTP 起点已打通：
+  - `SftpListOperation` 在 active SSH session 上初始化 SFTP、opendir/readdir 并输出 `name\ttype\tsize`；
+  - AsyncSSH 测试服务器新增 `sftp` mode（`sftp_factory=True`），native `runtime-sftp-list-ok` E2E 通过。
 - runtime 支持 active shell channel：
   - `OpenShellOperation` 打开 session channel 并请求 `xterm-256color` PTY / shell；
   - `ShellWriteOperation` / `ShellReadOperation` / `ShellResizeOperation` / `CloseShellOperation` 已实现；
@@ -118,7 +121,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
-- SFTP 全功能 native 化。
+- SFTP 全功能 native 化（当前已有一键 list 的 native 起点；需扩展 stat/read/write/streaming/取消）。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
 - `Libssh2SshSession` 生产接入与默认切换。
@@ -126,6 +129,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `906eea2 feat(ssh-native): add one-shot SFTP directory listing`
 - `a6e3184 test(ssh-native): cover PTY exec channel used by persistent sessions`
 - `94d7a83 feat(ssh): support PTY exec terminal for persistent sessions`
 - `b2819f9 feat(ssh): make shell reads poll with deadline for prompt close`
