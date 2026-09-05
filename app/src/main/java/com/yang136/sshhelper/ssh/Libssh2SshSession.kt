@@ -4,6 +4,7 @@ import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.ssh.native.NativeSshBridge
+import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -48,7 +49,7 @@ class Libssh2SshSession(
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
     @Volatile private var liveHandle = 0L
-    @Volatile private var runtimeHandle = 0L
+    private val nativeRuntime = NativeSshRuntime()
     @Volatile private var closed = false
 
     override suspend fun connect(
@@ -129,13 +130,11 @@ class Libssh2SshSession(
                 activeRoute.target.port,
             )?.fingerprintSha256
             val raw = if (expectedFingerprint != null) {
-                ensureRuntimeHandle()
                 val host = activeRoute.target.hostname
                 val port = activeRoute.target.port
                 val username = activeRoute.target.username
                 if (activePassword != null) {
-                    NativeSshBridge.nativeRunDirectPasswordExec(
-                        runtimeHandle,
+                    nativeRuntime.runDirectPasswordExec(
                         host,
                         port,
                         username,
@@ -148,8 +147,7 @@ class Libssh2SshSession(
                     )
                 } else {
                     val key = privateKey ?: error("SSH private key unavailable")
-                    NativeSshBridge.nativeRunDirectPrivateKeyExec(
-                        runtimeHandle,
+                    nativeRuntime.runDirectPrivateKeyExec(
                         host,
                         port,
                         username,
@@ -369,20 +367,6 @@ class Libssh2SshSession(
         }
     }
 
-    private fun ensureRuntimeHandle() {
-        if (runtimeHandle == 0L) {
-            runtimeHandle = NativeSshBridge.nativeCreate()
-        }
-    }
-
-    private fun closeRuntimeHandle() {
-        val handle = runtimeHandle
-        if (handle != 0L) {
-            runtimeHandle = 0L
-            runCatching { NativeSshBridge.nativeClose(handle) }
-        }
-    }
-
     private fun cancelPendingHostKey() {
         hostKeyDecision.getAndSet(null)?.complete(false)
         mutableHostKeyRequest.value = null
@@ -405,7 +389,7 @@ class Libssh2SshSession(
     override suspend fun disconnect() {
         cancelPendingHostKey()
         closeLiveHandle()
-        closeRuntimeHandle()
+        nativeRuntime.close()
         route = null
         password = null
         privateKey?.fill(0)
@@ -434,7 +418,7 @@ class Libssh2SshSession(
         closed = true
         cancelPendingHostKey()
         closeLiveHandle()
-        closeRuntimeHandle()
+        nativeRuntime.close()
         route = null
         password = null
         privateKey?.fill(0)
