@@ -71,7 +71,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - JNI runtime exec 支持 deadline，超时映射 exit=124
   - direct runtime exec 支持 expected fingerprint，host key 不匹配时认证前失败
 - host tests 与 Android assembleDebug 均通过
-- JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()` / `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
+- JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
 
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
