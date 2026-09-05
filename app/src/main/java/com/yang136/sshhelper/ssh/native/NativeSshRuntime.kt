@@ -55,6 +55,17 @@ class NativeSshRuntime {
         )
     }
 
+    fun runTcpHandshake(
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunTcpHandshake(
+            handle, host, port, timeoutMillis,
+        )
+    }
+
     fun runHttpProxyConnect(
         proxyHost: String,
         proxyPort: Int,

@@ -35,6 +35,16 @@ object NativeSshBridge {
     external fun nativeAwaitEvent(handle: Long, timeoutMillis: Long): NativeSshEvent?
 
     /**
+     * Submits a direct TCP+SSH handshake probe and waits for completion.
+     */
+    external fun nativeRunTcpHandshake(
+        handle: Long,
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String
+
+    /**
      * Submits a nonblocking HTTP CONNECT operation to the runtime handle and
      * waits for completion.
      */

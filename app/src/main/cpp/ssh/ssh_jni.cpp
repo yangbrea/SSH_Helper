@@ -23,6 +23,7 @@
 #include "ssh_proxy_operation.h"
 #include "ssh_socks5_operation.h"
 #include "ssh_error.h"
+#include "ssh_handshake_operation.h"
 #include "ssh_libssh2.h"
 #include "ssh_runtime.h"
 #include "ssh_socket.h"
@@ -594,6 +595,50 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSocks5ProxyConnec
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunSocks5ProxyConnect failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunTcpHandshake(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jhost,
+    jint jport,
+    jlong timeout_millis) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        if (host.empty()) throw std::invalid_argument("host must not be empty");
+        if (jport <= 0 || jport > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::TcpHandshakeOperation>(
+            host, static_cast<uint16_t>(jport),
+            std::chrono::milliseconds(timeout_millis));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit tcp handshake");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunTcpHandshake failed");
         return nullptr;
     }
 }
