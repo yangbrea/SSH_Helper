@@ -156,6 +156,37 @@ object NativeSshBridge {
         timeoutMillis: Long,
     ): String
 
+    /** Opens a PTY shell channel on the active persistent SSH session. */
+    external fun nativeRunOpenShell(
+        handle: Long,
+        columns: Int,
+        rows: Int,
+    ): String
+
+    /** Writes bytes to the active shell channel. */
+    external fun nativeRunShellWrite(
+        handle: Long,
+        data: ByteArray,
+    ): String
+
+    /** Reads one chunk of bytes from the active shell channel. */
+    external fun nativeRunShellRead(
+        handle: Long,
+        maxBytes: Int,
+    ): ByteArray
+
+    /** Resizes the active shell PTY. */
+    external fun nativeRunShellResize(
+        handle: Long,
+        columns: Int,
+        rows: Int,
+    ): String
+
+    /** Closes the active shell channel while leaving the SSH session open. */
+    external fun nativeRunCloseShell(
+        handle: Long,
+    ): String
+
     /**
      * Submits a direct TCP+SSH password exec operation to the runtime handle and
      * waits for its completion. Returns the same payload as the direct exec APIs.

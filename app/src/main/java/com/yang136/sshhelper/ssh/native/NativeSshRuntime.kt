@@ -64,6 +64,34 @@ class NativeSshRuntime {
         )
     }
 
+    fun runOpenShell(
+        columns: Int,
+        rows: Int,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenShell(handle, columns, rows)
+    }
+
+    fun runShellWrite(data: ByteArray): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunShellWrite(handle, data)
+    }
+
+    fun runShellRead(maxBytes: Int): ByteArray {
+        ensureCreated()
+        return NativeSshBridge.nativeRunShellRead(handle, maxBytes)
+    }
+
+    fun runShellResize(columns: Int, rows: Int): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunShellResize(handle, columns, rows)
+    }
+
+    fun runCloseShell(): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunCloseShell(handle)
+    }
+
     fun runPendingTcpHandshake(
         timeoutMillis: Long,
     ): String {

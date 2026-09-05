@@ -8,7 +8,13 @@ import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +59,11 @@ class Libssh2SshSession(
     private var targetProxyPassword: String? = null
     private var persistentSessionOpen = false
     private val nativeRuntime = NativeSshRuntime()
+    private val terminalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var terminalReaderJob: Job? = null
+    @Volatile private var terminalChannelOpen = false
+    private var ptyColumns = 80
+    private var ptyRows = 24
     @Volatile private var closed = false
 
     private data class TargetProxy(
@@ -510,26 +521,80 @@ class Libssh2SshSession(
     private fun sameKey(expectedBase64: String, presentedBase64: String): Boolean =
         MessageDigest.isEqual(expectedBase64.encodeToByteArray(), presentedBase64.encodeToByteArray())
 
+    private suspend fun readShellLoop() {
+        try {
+            while (terminalChannelOpen && terminalScope.isActive) {
+                val data = nativeRuntime.runShellRead(8192)
+                if (data.isEmpty()) {
+                    terminalChannelOpen = false
+                    mutableTerminalState.value = TerminalChannelState.Ended("远端 Shell 已退出")
+                    return
+                }
+                mutableOutput.emit(data)
+            }
+        } catch (error: Throwable) {
+            if (error !is kotlinx.coroutines.CancellationException) {
+                terminalChannelOpen = false
+                mutableTerminalState.value = TerminalChannelState.Error(
+                    error.message ?: "Shell 读取失败",
+                )
+            }
+        }
+    }
+
     private fun cancelPendingHostKey() {
         hostKeyDecision.getAndSet(null)?.complete(false)
         mutableHostKeyRequest.value = null
     }
 
-    override suspend fun openTerminal(target: TerminalTarget) {
-        mutableTerminalState.value = TerminalChannelState.Error("libssh2 POC 暂不支持交互终端")
+    override suspend fun openTerminal(target: TerminalTarget) = withContext(Dispatchers.IO) {
+        if (target !is TerminalTarget.PlainShell) {
+            mutableTerminalState.value = TerminalChannelState.Error("libssh2 POC 暂不支持持久会话终端")
+            return@withContext
+        }
+        if (!persistentSessionOpen) {
+            mutableTerminalState.value = TerminalChannelState.Error("SSH 连接不可用")
+            return@withContext
+        }
+        closeTerminal()
+        mutableTerminalState.value = TerminalChannelState.Opening
+        try {
+            nativeRuntime.runOpenShell(ptyColumns, ptyRows)
+            terminalChannelOpen = true
+            mutableTerminalState.value = TerminalChannelState.Active(target)
+            terminalReaderJob = terminalScope.launch { readShellLoop() }
+        } catch (error: Throwable) {
+            terminalChannelOpen = false
+            mutableTerminalState.value = TerminalChannelState.Error(error.message ?: "打开 Shell 失败")
+        }
     }
 
     override suspend fun closeTerminal() {
+        terminalReaderJob?.cancel()
+        terminalReaderJob = null
+        if (terminalChannelOpen) {
+            terminalChannelOpen = false
+            runCatching { nativeRuntime.runCloseShell() }
+        }
         mutableTerminalState.value = TerminalChannelState.Closed
     }
 
     override suspend fun write(data: ByteArray) {
-        // No persistent channel yet; dropping is acceptable only for the POC.
+        if (!terminalChannelOpen || !persistentSessionOpen) return
+        nativeRuntime.runShellWrite(data)
     }
 
-    override suspend fun resize(columns: Int, rows: Int) = Unit
+    override suspend fun resize(columns: Int, rows: Int) {
+        if (!terminalChannelOpen || !persistentSessionOpen) return
+        ptyColumns = columns
+        ptyRows = rows
+        nativeRuntime.runShellResize(columns, rows)
+    }
 
     override suspend fun disconnect() {
+        terminalReaderJob?.cancel()
+        terminalReaderJob = null
+        terminalChannelOpen = false
         cancelPendingHostKey()
         nativeRuntime.close()
         persistentSessionOpen = false
@@ -560,6 +625,10 @@ class Libssh2SshSession(
 
     override fun close() {
         closed = true
+        terminalReaderJob?.cancel()
+        terminalReaderJob = null
+        terminalChannelOpen = false
+        terminalScope.cancel()
         cancelPendingHostKey()
         nativeRuntime.close()
         persistentSessionOpen = false

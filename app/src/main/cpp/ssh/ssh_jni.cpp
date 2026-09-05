@@ -28,6 +28,7 @@
 #include "ssh_operations.h"
 #include "ssh_persistent_session.h"
 #include "ssh_runtime.h"
+#include "ssh_shell_operation.h"
 #include "ssh_socket.h"
 
 namespace {
@@ -162,6 +163,15 @@ std::string jbyteArrayToString(JNIEnv* env, jbyteArray value) {
     std::string result;
     result.resize(static_cast<size_t>(length));
     env->GetByteArrayRegion(value, 0, length, reinterpret_cast<jbyte*>(&result[0]));
+    return result;
+}
+
+jbyteArray stringToJByteArray(JNIEnv* env, const std::string& value) {
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(value.size()));
+    if (result == nullptr) return nullptr;
+    env->SetByteArrayRegion(
+        result, 0, static_cast<jsize>(value.size()),
+        reinterpret_cast<const jbyte*>(value.data()));
     return result;
 }
 
@@ -681,6 +691,196 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunPersistentExec(
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunPersistentExec failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenShell(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint columns,
+    jint rows) {
+    try {
+        if (columns <= 0 || rows <= 0) {
+            throw std::invalid_argument("invalid pty columns/rows");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenShellOperation>(
+            static_cast<unsigned int>(columns),
+            static_cast<unsigned int>(rows));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit open shell");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenShell failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellWrite(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jbyteArray jdata) {
+    try {
+        const std::string data = jbyteArrayToString(env, jdata);
+        if (data.empty()) throw std::invalid_argument("shell data must not be empty");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::ShellWriteOperation>(data);
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit shell write");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunShellWrite failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellRead(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint max_bytes) {
+    try {
+        if (max_bytes <= 0) throw std::invalid_argument("invalid max bytes");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::ShellReadOperation>(
+            static_cast<size_t>(max_bytes));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit shell read");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return stringToJByteArray(env, result);
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunShellRead failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellResize(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jint columns,
+    jint rows) {
+    try {
+        if (columns <= 0 || rows <= 0) {
+            throw std::invalid_argument("invalid pty columns/rows");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::ShellResizeOperation>(
+            static_cast<unsigned int>(columns),
+            static_cast<unsigned int>(rows));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit shell resize");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunShellResize failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunCloseShell(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    try {
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::CloseShellOperation>();
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit close shell");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunCloseShell failed");
         return nullptr;
     }
 }
