@@ -200,4 +200,153 @@ StepResult Libssh2PrivateKeyAuthOperation::step(
     return StepResult::failed(SshError{ErrorDomain::kInternal, "unreachable",
                                        "unexpected auth operation state"});
 }
+
+Libssh2PasswordExecOperation::Libssh2PasswordExecOperation(
+    int socket_fd,
+    std::string username,
+    std::string password,
+    std::string command)
+    : fd_(socket_fd),
+      username_(std::move(username)),
+      password_(std::move(password)),
+      command_(std::move(command)) {
+    if (fd_ < 0) throw std::invalid_argument("socket fd must not be negative");
+    if (username_.empty() || password_.empty() || command_.empty()) {
+        throw std::invalid_argument("username/password/command must not be empty");
+    }
+}
+
+Libssh2PasswordExecOperation::~Libssh2PasswordExecOperation() {
+    if (channel_ != nullptr) {
+        libssh2_channel_free(channel_);
+        channel_ = nullptr;
+    }
+    if (fd_ >= 0) {
+        closeFd(fd_);
+        fd_ = -1;
+    }
+}
+
+StepResult Libssh2PasswordExecOperation::step(
+    LoopContext&,
+    const ReadySet&,
+    MonoTime) {
+    if (!handshake_started_) {
+        session_.setBlocking(false);
+        handshake_started_ = true;
+    }
+
+    if (!handshake_done_) {
+        const int result = libssh2_session_handshake(session_.get(), fd_);
+        Libssh2CallResult translated = classifyLibssh2Int(
+            session_.get(), fd_, result, ErrorDomain::kSshHandshake,
+            "session_handshake");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                handshake_done_ = true;
+                break;
+        }
+    }
+
+    if (!auth_done_) {
+        if (!auth_started_) auth_started_ = true;
+        const int result = libssh2_userauth_password(
+            session_.get(), username_.c_str(), password_.c_str());
+        Libssh2CallResult translated = classifyLibssh2Int(
+            session_.get(), fd_, result, ErrorDomain::kAuth,
+            "userauth_password");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                auth_done_ = true;
+                break;
+        }
+    }
+
+    if (channel_ == nullptr) {
+        Libssh2CallResult translated = classifyLibssh2Pointer(
+            session_.get(), fd_, libssh2_channel_open_session(session_.get()),
+            ErrorDomain::kChannel, "channel_open_session");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                channel_ = static_cast<LIBSSH2_CHANNEL*>(translated.pointer);
+                break;
+        }
+    }
+
+    if (!exec_started_) {
+        exec_started_ = true;
+        const int result = libssh2_channel_exec(
+            channel_, command_.c_str());
+        Libssh2CallResult translated = classifyLibssh2Int(
+            session_.get(), fd_, result, ErrorDomain::kChannel,
+            "channel_exec");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                break;
+        }
+    }
+
+    if (!close_started_) {
+        char buffer[4096];
+        const ssize_t count = libssh2_channel_read(
+            channel_, buffer, sizeof(buffer));
+        Libssh2CallResult translated = classifyLibssh2Count(
+            session_.get(), fd_, count, ErrorDomain::kChannel,
+            "channel_read");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                break;
+        }
+        if (translated.value > 0) {
+            output_.append(buffer, static_cast<size_t>(translated.value));
+            return StepResult::progress(static_cast<size_t>(translated.value));
+        }
+        // In non-blocking mode, zero from channel_read means EOF has been
+        // reached for stdout; proceed to close and read the exit status.
+        close_started_ = true;
+    }
+
+    if (close_started_) {
+        const int result = libssh2_channel_close(channel_);
+        Libssh2CallResult translated = classifyLibssh2Int(
+            session_.get(), fd_, result, ErrorDomain::kChannel,
+            "channel_close");
+        switch (translated.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(translated.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(translated.error));
+            case Libssh2CallKind::kSucceeded:
+                break;
+        }
+        const int exit_code = libssh2_channel_get_exit_status(channel_);
+        libssh2_channel_free(channel_);
+        channel_ = nullptr;
+        return StepResult::complete(
+            "exit=" + std::to_string(exit_code) + "\n" + output_);
+    }
+
+    return StepResult::failed(SshError{ErrorDomain::kInternal, "unreachable",
+                                       "unexpected exec operation state"});
+}
 } // namespace sshnative

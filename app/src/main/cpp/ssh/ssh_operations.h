@@ -72,4 +72,33 @@ private:
     std::string passphrase_;
 };
 
+// Performs nonblocking handshake, plain password auth, exec and stdout capture
+// on an already-connected socket. Completion payload is "exit=N\n" + stdout.
+class Libssh2PasswordExecOperation final : public Operation {
+public:
+    Libssh2PasswordExecOperation(
+        int socket_fd,
+        std::string username,
+        std::string password,
+        std::string command);
+    ~Libssh2PasswordExecOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    int fd_ = -1;
+    Libssh2Session session_;
+    LIBSSH2_CHANNEL* channel_ = nullptr;
+    bool handshake_started_ = false;
+    bool handshake_done_ = false;
+    bool auth_started_ = false;
+    bool auth_done_ = false;
+    bool exec_started_ = false;
+    bool close_started_ = false;
+    std::string username_;
+    std::string password_;
+    std::string command_;
+    std::string output_;
+};
+
 } // namespace sshnative
