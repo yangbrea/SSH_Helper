@@ -49,6 +49,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - 代理完整路径已串通：HTTP CONNECT / SOCKS5 CONNECT operation 把 socket 存入 runtime pending slot，
     随后 `TcpPasswordExecOperation` / `TcpPrivateKeyExecOperation` 以 `take_pending_transport` 模式复用同一 socket
     完成 handshake/auth/exec；HTTP 与 SOCKS5 的密码/私钥 E2E 均通过。
+  - 代理路径同样执行 expected fingerprint 校验，host-key mismatch 在认证前失败（E2E）。
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
@@ -108,6 +109,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `95fd300 test(ssh-native): verify proxy path blocks host key mismatch`
 - `aaae54f feat(ssh): route Libssh2SshSession through HTTP and SOCKS5 proxies`
 - `35c6984 test(ssh-native): cover proxied runtime exec over HTTP and SOCKS5`
 - `c6250b6 feat(ssh-native): store transport fd between runtime operations`
