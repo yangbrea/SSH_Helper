@@ -35,6 +35,33 @@ object NativeSshBridge {
     external fun nativeAwaitEvent(handle: Long, timeoutMillis: Long): NativeSshEvent?
 
     /**
+     * Submits a nonblocking HTTP CONNECT operation to the runtime handle and
+     * waits for completion.
+     */
+    external fun nativeRunHttpProxyConnect(
+        handle: Long,
+        proxyHost: String,
+        proxyPort: Int,
+        targetHost: String,
+        targetPort: Int,
+        username: String,
+        password: String,
+        timeoutMillis: Long,
+    ): String
+
+    /** Submits a nonblocking SOCKS5 CONNECT operation to the runtime handle. */
+    external fun nativeRunSocks5ProxyConnect(
+        handle: Long,
+        proxyHost: String,
+        proxyPort: Int,
+        targetHost: String,
+        targetPort: Int,
+        username: String,
+        password: String,
+        timeoutMillis: Long,
+    ): String
+
+    /**
      * Submits a direct TCP+SSH password exec operation to the runtime handle and
      * waits for its completion. Returns the same payload as the direct exec APIs.
      */

@@ -20,6 +20,8 @@
 #include "../handle_registry.h"
 #include "ssh_blocking_connection.h"
 #include "ssh_direct_operation.h"
+#include "ssh_proxy_operation.h"
+#include "ssh_socks5_operation.h"
 #include "ssh_error.h"
 #include "ssh_libssh2.h"
 #include "ssh_runtime.h"
@@ -478,6 +480,116 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeDirectClose(
         }
     } catch (...) {
         throwIllegalState(env, "nativeDirectClose failed");
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunHttpProxyConnect(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jproxy_host,
+    jint jproxy_port,
+    jstring jtarget_host,
+    jint jtarget_port,
+    jstring jusername,
+    jstring jpassword,
+    jlong timeout_millis) {
+    try {
+        const std::string proxy_host = jstringToString(env, jproxy_host);
+        const std::string target_host = jstringToString(env, jtarget_host);
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        if (proxy_host.empty() || target_host.empty()) {
+            throw std::invalid_argument("proxy/target host must not be empty");
+        }
+        if (jproxy_port <= 0 || jproxy_port > 65535 || jtarget_port <= 0 ||
+            jtarget_port > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid proxy/target port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::HttpProxyConnectOperation>(
+            proxy_host, static_cast<uint16_t>(jproxy_port),
+            target_host, static_cast<uint16_t>(jtarget_port),
+            username, password, std::chrono::milliseconds(timeout_millis));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit http proxy connect");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunHttpProxyConnect failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSocks5ProxyConnect(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jproxy_host,
+    jint jproxy_port,
+    jstring jtarget_host,
+    jint jtarget_port,
+    jstring jusername,
+    jstring jpassword,
+    jlong timeout_millis) {
+    try {
+        const std::string proxy_host = jstringToString(env, jproxy_host);
+        const std::string target_host = jstringToString(env, jtarget_host);
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        if (proxy_host.empty() || target_host.empty()) {
+            throw std::invalid_argument("proxy/target host must not be empty");
+        }
+        if (jproxy_port <= 0 || jproxy_port > 65535 || jtarget_port <= 0 ||
+            jtarget_port > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid proxy/target port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::Socks5ProxyConnectOperation>(
+            proxy_host, static_cast<uint16_t>(jproxy_port),
+            target_host, static_cast<uint16_t>(jtarget_port),
+            username, password, std::chrono::milliseconds(timeout_millis));
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit socks5 proxy connect");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSocks5ProxyConnect failed");
+        return nullptr;
     }
 }
 
