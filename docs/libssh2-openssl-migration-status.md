@@ -34,6 +34,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - `TcpConnectOperation`：non-blocking TCP connect（DNS 在 producer 线程，connect/poll 在 owner），host test 通过。
   - `Libssh2HandshakeOperation`：non-blocking handshake + host key 读取，E2E 通过。
   - `TcpHandshakeOperation`：从 host:port 直连并读取 host key（不认证），E2E 通过。
+  - completion 已包含 `fingerprint` / `keyType` / `keyBase64` 三字段。
   - `Libssh2PasswordAuthOperation`：non-blocking password auth，E2E 通过。
   - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
   - `Libssh2PasswordExecOperation`：non-blocking password auth + exec + stdout，E2E 通过。
@@ -73,7 +74,11 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - direct runtime exec 支持 expected fingerprint：不匹配认证前失败（E2E），匹配可正常 exec（E2E）
   - direct runtime password exec 支持 keyboard-interactive fallback（kbdint-only E2E 通过）
 - host tests 与 Android assembleDebug 均通过
-- JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
+- JNI 已暴露 `nativeRunTcpHandshake()` / `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
+- `Libssh2SshSession` 的 host-key 探测已从 blocking direct-handshake POC 切换到 runtime `TcpHandshakeOperation`：
+  - connect/首次确认前先 `runTcpHandshake()` 读取 fingerprint/keyType/keyBase64。
+  - 确认/匹配后使用 `runDirectPasswordExec` / `runDirectPrivateKeyExec` 执行 `true` 验证认证。
+  - Kotlin 新增 `parseRuntimeTcpHandshakePayload()` 纯函数解析，JVM unit test 覆盖。
 
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
@@ -97,6 +102,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `72682d7 feat(ssh): route Libssh2SshSession host key probe through runtime`
 - `835cf7c feat(ssh-native): expose TcpHandshakeOperation through JNI and NativeSshRuntime`
 - `9b8fd0a feat(ssh-native): add TcpHandshakeOperation host key probe`
 - `2dde306 docs(ssh): record runtime payload parser tests`
