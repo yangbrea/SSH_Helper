@@ -98,9 +98,15 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - local / remote / dynamic forwarding
   - HTTP CONNECT / SOCKS5 proxy
 
+## 已记录风险 / 待验证
+- 同一 libssh2 session 顺序复用 channel 在 AsyncSSH fixture 下未通过：
+  - 同时打开多个 channel 正常（最小 C++ 验证通过）；
+  - 关闭第一个 channel 后再次 `libssh2_channel_open_session()` 返回 NULL（最小 C++ 复现）。
+  - Step 8 前需换用 OpenSSH server 或调整 close/wait sequence 确认真实行为，再设计持久 session。
+
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
-- shell/PTY、持久会话。
+- shell/PTY、持久会话（先解决上方“顺序复用 channel”的验证风险）。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
