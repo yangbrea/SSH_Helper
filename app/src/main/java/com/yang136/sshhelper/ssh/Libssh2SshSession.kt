@@ -524,7 +524,7 @@ class Libssh2SshSession(
     private suspend fun readShellLoop() {
         try {
             while (terminalChannelOpen && terminalScope.isActive) {
-                val data = nativeRuntime.runShellRead(8192)
+                val data = nativeRuntime.runShellRead(8192, 250L) ?: continue
                 if (data.isEmpty()) {
                     terminalChannelOpen = false
                     mutableTerminalState.value = TerminalChannelState.Ended("远端 Shell 已退出")

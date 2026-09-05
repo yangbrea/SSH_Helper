@@ -142,6 +142,42 @@ std::string awaitRuntimeCompletion(
     return {};
 }
 
+// Like awaitRuntimeCompletion, but a deadline timeout returns false with no
+// Java exception. Used by shell reads so a blocked reader can be polled and
+// stopped without needing to cancel the native read request from Kotlin.
+bool awaitRuntimeCompletionWithDeadline(
+    JNIEnv* env,
+    const std::shared_ptr<sshnative::SshNativeSession>& session,
+    sshnative::SubmitResult submit,
+    std::chrono::milliseconds timeout,
+    std::string* out) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        sshnative::RuntimeEvent event;
+        if (!session->waitEvent(&event, std::chrono::milliseconds(50))) continue;
+        if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
+            event.request_id != submit.request_id) {
+            continue;
+        }
+        if (event.completion == sshnative::CompletionKind::kSucceeded) {
+            *out = std::move(event.payload);
+            return true;
+        }
+        if (event.error.domain == sshnative::ErrorDomain::kTimeout) {
+            return false;
+        }
+        const std::string message = event.error.message.empty()
+            ? "native runtime operation failed"
+            : event.error.message;
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, message.c_str());
+        }
+        return false;
+    }
+    return false;
+}
+
 } // namespace
 
 
@@ -778,9 +814,12 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellRead(
     JNIEnv* env,
     jobject /* thiz */,
     jlong handle,
-    jint max_bytes) {
+    jint max_bytes,
+    jlong timeout_millis) {
     try {
-        if (max_bytes <= 0) throw std::invalid_argument("invalid max bytes");
+        if (max_bytes <= 0 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid max bytes/timeout");
+        }
         const auto session = gSshRegistry.get(handle);
         if (!session) {
             throwIllegalState(env, "SSH native handle is closed");
@@ -788,12 +827,19 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellRead(
         }
         auto operation = std::make_unique<sshnative::ShellReadOperation>(
             static_cast<size_t>(max_bytes));
-        const auto submit = session->submit(std::move(operation));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
         if (!submit) {
             throw std::runtime_error("failed to submit shell read");
         }
-        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        std::string result;
+        const bool completed = awaitRuntimeCompletionWithDeadline(
+            env, session, submit, std::chrono::milliseconds(timeout_millis),
+            &result);
         if (env->ExceptionCheck()) return nullptr;
+        if (!completed) return nullptr;
         return stringToJByteArray(env, result);
     } catch (const std::bad_alloc&) {
         throwOutOfMemory(env);

@@ -77,9 +77,9 @@ class NativeSshRuntime {
         return NativeSshBridge.nativeRunShellWrite(handle, data)
     }
 
-    fun runShellRead(maxBytes: Int): ByteArray {
+    fun runShellRead(maxBytes: Int, timeoutMillis: Long = 250L): ByteArray? {
         ensureCreated()
-        return NativeSshBridge.nativeRunShellRead(handle, maxBytes)
+        return NativeSshBridge.nativeRunShellRead(handle, maxBytes, timeoutMillis)
     }
 
     fun runShellResize(columns: Int, rows: Int): String {

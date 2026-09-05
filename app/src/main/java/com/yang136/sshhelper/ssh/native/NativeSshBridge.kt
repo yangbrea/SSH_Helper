@@ -169,11 +169,12 @@ object NativeSshBridge {
         data: ByteArray,
     ): String
 
-    /** Reads one chunk of bytes from the active shell channel. */
+    /** Reads one chunk of bytes from the active shell channel; null on timeout. */
     external fun nativeRunShellRead(
         handle: Long,
         maxBytes: Int,
-    ): ByteArray
+        timeoutMillis: Long,
+    ): ByteArray?
 
     /** Resizes the active shell PTY. */
     external fun nativeRunShellResize(
