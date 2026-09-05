@@ -69,7 +69,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - stdout/stderr/exit code
   - output limit → exit=125
 - host tests 与 Android assembleDebug 均通过
-- JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`，Kotlin 可直接调用 runtime direct 路径。
+- JNI 已暴露 `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()` / `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
 
 ### 后端无关 contract suite（JSch 侧）
 - 已有 14 个共享 contract tests 通过：
