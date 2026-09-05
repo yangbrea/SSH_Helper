@@ -400,6 +400,7 @@ socks_proxy_port="$(head -1 "$socks_proxy_port_file")"
     -o "$runtime_proxy_exec_binary"
 "$runtime_proxy_exec_binary" "$port" http "$http_proxy_port" "$key_file"
 "$runtime_proxy_exec_binary" "$port" socks5 "$socks_proxy_port" "$key_file"
+kill "$http_proxy_pid" "$socks_proxy_pid" 2>/dev/null || true
 
 kbdint_port_file="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-port.XXXXXX")"
 kbdint_server_err="$(mktemp "${TMPDIR:-/tmp}/ssh-native-kbdint-err.XXXXXX")"
