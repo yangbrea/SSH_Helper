@@ -106,6 +106,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - shell/PTY、持久会话接入 JNI/Kotlin。
+  - 本机临时 OpenSSH server 以非 root 运行时无法完成 PTY 分配（`chown(/dev/pts/...)` 失败），
+    Shell/PTY 的 host E2E 需要 root sshd 或 Apache SSHD 等 fixture。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
