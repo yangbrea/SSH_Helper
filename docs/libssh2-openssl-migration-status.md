@@ -27,6 +27,9 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - non-blocking TCP connect、HTTP CONNECT、SOCKS5 CONNECT、统一 transport 选择。
 - runtime 支持跨请求 transport fd 交接：TCP/proxy CONNECT 成功后将同一个 non-blocking socket 存入 pending slot，
   后续 handshake/auth/exec operation 可取回继续，不再每次 operation 结束就丢弃 fd。
+- runtime 支持 active authenticated SSH session 资源：
+  - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
+  - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
@@ -93,14 +96,13 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 已记录风险 / 待验证
-- 同一 libssh2 session 顺序复用 channel 在 AsyncSSH fixture 下未通过：
-  - 同时打开多个 channel 正常（最小 C++ 验证通过）；
-  - 关闭第一个 channel 后再次 `libssh2_channel_open_session()` 返回 NULL（最小 C++ 复现）。
-  - Step 8 前需换用 OpenSSH server 或调整 close/wait sequence 确认真实行为，再设计持久 session。
+- AsyncSSH fixture 下，libssh2 关闭第一个 channel 后再次 `libssh2_channel_open_session()` 会返回 NULL；
+  但临时 OpenSSH server 下同一 session 顺序复用 channel 验证通过，因此该问题属于测试服务器兼容性，
+  持久 session 开发以 OpenSSH 为权威 fixture。后续如需要可再调查 AsyncSSH 侧原因。
 
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
-- shell/PTY、持久会话（先解决上方“顺序复用 channel”的验证风险）。
+- shell/PTY、持久会话接入 JNI/Kotlin。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
@@ -109,6 +111,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `ae8fb9d feat(ssh-native): add active session resource and persistent exec`
 - `45e15ee refactor(ssh): remove blocking POC JNI bridge from production`
 - `95fd300 test(ssh-native): verify proxy path blocks host key mismatch`
 - `aaae54f feat(ssh): route Libssh2SshSession through HTTP and SOCKS5 proxies`
