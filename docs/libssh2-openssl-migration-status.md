@@ -34,6 +34,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - `OpenShellOperation` 打开 session channel 并请求 `xterm-256color` PTY / shell；
   - `ShellWriteOperation` / `ShellReadOperation` / `ShellResizeOperation` / `CloseShellOperation` 已实现；
   - AsyncSSH test server 增加 `shell_requested()` + echo data 支持，native Shell/PTY E2E 通过。
+  - JNI/Kotlin 已接入：`Libssh2SshSession.openTerminal(PlainShell)` 可打开 PTY shell，
+    `write()` / `resize()` / `closeTerminal()` 走 native shell channel，输出通过 reader coroutine 发布到 `Flow<ByteArray>`。
   - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
     `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
     `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
@@ -111,7 +113,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
-- shell/PTY 接入 JNI/Kotlin（native Shell/PTY operations 已完成）。
+- shell/PTY 的取消/关闭边角打磨与持久会话（tmux/zellij）接入。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
@@ -120,6 +122,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `9451398 feat(ssh): wire Shell/PTY operations into Libssh2SshSession`
 - `fea674d feat(ssh-native): add active shell channel with PTY operations`
 - `d3e59d7 feat(ssh): keep Libssh2SshSession persistent session for repeated exec`
 - `ae8fb9d feat(ssh-native): add active session resource and persistent exec`
