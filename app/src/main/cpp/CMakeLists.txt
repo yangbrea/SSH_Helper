@@ -49,6 +49,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_algorithm_policy.cpp
     ssh/ssh_blocking_connection.cpp
     ssh/ssh_connect_operation.cpp
+    ssh/ssh_direct_operation.cpp
     ssh/ssh_error.cpp
     ssh/ssh_hostkey.cpp
     ssh/ssh_http_proxy.cpp

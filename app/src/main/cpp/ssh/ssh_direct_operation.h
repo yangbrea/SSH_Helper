@@ -1,0 +1,56 @@
+#pragma once
+
+#include "ssh_runtime.h"
+#include "ssh_libssh2.h"
+
+#include <chrono>
+#include <cstdint>
+#include <netdb.h>
+#include <string>
+
+namespace sshnative {
+
+// Full direct transport operation: nonblocking TCP connect + SSH handshake +
+// plain password auth + exec stdout capture. DNS is resolved in the
+// constructor; all socket/SSH work happens on the runtime owner thread.
+class TcpPasswordExecOperation final : public Operation {
+public:
+    TcpPasswordExecOperation(
+        std::string host,
+        uint16_t port,
+        std::string username,
+        std::string password,
+        std::string command,
+        std::chrono::milliseconds connect_timeout);
+    ~TcpPasswordExecOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void advanceToNextAddress() noexcept;
+
+    std::string host_;
+    uint16_t port_ = 0;
+    std::string username_;
+    std::string password_;
+    std::string command_;
+    MonoTime deadline_ = MonoTime::max();
+
+    addrinfo* addresses_ = nullptr;
+    addrinfo* current_ = nullptr;
+    int fd_ = -1;
+    bool connect_pending_ = false;
+    bool connected_ = false;
+
+    Libssh2Session session_;
+    LIBSSH2_CHANNEL* channel_ = nullptr;
+    bool handshake_started_ = false;
+    bool handshake_done_ = false;
+    bool auth_started_ = false;
+    bool auth_done_ = false;
+    bool exec_started_ = false;
+    bool close_started_ = false;
+    std::string output_;
+};
+
+} // namespace sshnative
