@@ -37,6 +37,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - JNI/Kotlin 已接入：`Libssh2SshSession.openTerminal(PlainShell)` 可打开 PTY shell，
     `write()` / `resize()` / `closeTerminal()` 走 native shell channel，输出通过 reader coroutine 发布到 `Flow<ByteArray>`。
   - shell read 使用带 deadline 的轮询，`closeTerminal()` 不再被无输出的阻塞 read 卡死。
+  - 支持 PTY exec 终端：`OpenShellOperation` 可执行指定命令，Kotlin 对 `TerminalTarget.Persistent` 使用
+    `MultiplexerRegistry` 生成 tmux/zellij create/attach 命令后走同一 shell channel 数据通路。
   - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
     `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
     `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
@@ -123,6 +125,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `94d7a83 feat(ssh): support PTY exec terminal for persistent sessions`
 - `b2819f9 feat(ssh): make shell reads poll with deadline for prompt close`
 - `9451398 feat(ssh): wire Shell/PTY operations into Libssh2SshSession`
 - `fea674d feat(ssh-native): add active shell channel with PTY operations`
