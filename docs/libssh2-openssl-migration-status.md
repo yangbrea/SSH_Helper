@@ -25,6 +25,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - JNI/Kotlin 已提供 `nativeCancel()`、`nativeAwaitEvent()` 和不可变 `NativeSshEvent`，owner
   thread 不直接回调 JVM。
 - non-blocking TCP connect、HTTP CONNECT、SOCKS5 CONNECT、统一 transport 选择。
+- runtime 支持跨请求 transport fd 交接：TCP/proxy CONNECT 成功后将同一个 non-blocking socket 存入 pending slot，
+  后续 handshake/auth/exec operation 可取回继续，不再每次 operation 结束就丢弃 fd。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
@@ -102,6 +104,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `c6250b6 feat(ssh-native): store transport fd between runtime operations`
 - `72682d7 feat(ssh): route Libssh2SshSession host key probe through runtime`
 - `835cf7c feat(ssh-native): expose TcpHandshakeOperation through JNI and NativeSshRuntime`
 - `9b8fd0a feat(ssh-native): add TcpHandshakeOperation host key probe`
