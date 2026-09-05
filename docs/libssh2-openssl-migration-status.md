@@ -117,7 +117,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
-- shell/PTY 的取消/关闭边角打磨与持久会话（tmux/zellij）接入。
+- Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
