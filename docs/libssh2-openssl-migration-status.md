@@ -51,23 +51,17 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
     完成 handshake/auth/exec；HTTP 与 SOCKS5 的密码/私钥 E2E 均通过。
   - 代理路径同样执行 expected fingerprint 校验，host-key mismatch 在认证前失败（E2E）。
 
-### libssh2 实际连接 POC
+### libssh2 实际连接 POC（已逐步退役）
 - `Libssh2Session` RAII：init/session lifecycle。
 - blocking handshake、password auth、publicKeyAuth()、hostKey()、execCommand()。
 - `BlockingSshConnection` 保持“已完成 handshake 但未认证”的连接，供 host-key 确认后再发送凭据。
 - AsyncSSH E2E host test 已跑通：
   `TCP -> SSH handshake -> password auth -> host key read -> exec -> output`.
 - host-key gate E2E 已跑通：先读取 type/fingerprint/keyBase64，通过后再 password auth + exec。
-- JNI 暴露 `nativeOpenDirectHandshake()` + host-key 读取 + `nativeDirectPasswordExec()` / `nativeDirectPrivateKeyExec()`。
-
-### host-key 确认流程（direct blocking POC）
-- `Libssh2SshSession` 在认证前从 native 读取 host key，与 `KnownHostDao` 比较。
-- UNKNOWN 发布 `HostKeyRequest`，用户接受后写库再认证；MATCH 不重复提示；CHANGED 阻断连接并保留请求。
-- native host-key type 映射修正为真实 libssh2 常量（ssh-rsa、ecdsa-sha2-nistp384/521、ssh-ed25519）。
-
-### 认证（blocking POC）
-- password auth 和 in-memory private key auth 已有 E2E。
-- keyboard-interactive fallback 已实现：先读服务器 auth 方法，仅当无 plain password 时用同一密码回答单个 keyboard-interactive prompt；E2E 已跑通。
+- 生产 JNI 已移除 `nativeOpenDirectHandshake()` / `nativeDirectHostKey*` / `nativeDirectPasswordExec()` /
+  `nativeDirectPrivateKeyExec()` / `nativeDirectClose()` / `nativeConnectExec*()`；
+  这些 blocking POC 仍保留在 host C++ tests 中作为协议基线。
+- host-key 确认已全面切换到 runtime `TcpHandshakeOperation` + runtime direct/pending exec。
 
 ### runtime Operation 当前覆盖（direct/proxy/exec）
 - non-blocking TCP connect
@@ -115,6 +109,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `45e15ee refactor(ssh): remove blocking POC JNI bridge from production`
 - `95fd300 test(ssh-native): verify proxy path blocks host key mismatch`
 - `aaae54f feat(ssh): route Libssh2SshSession through HTTP and SOCKS5 proxies`
 - `35c6984 test(ssh-native): cover proxied runtime exec over HTTP and SOCKS5`
