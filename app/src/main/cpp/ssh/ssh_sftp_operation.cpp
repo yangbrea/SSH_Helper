@@ -372,4 +372,104 @@ StepResult SftpReadOperation::step(
     return StepResult::noProgress();
 }
 
+SftpWriteOperation::SftpWriteOperation(
+    std::string path,
+    uint64_t offset,
+    std::string data)
+    : path_(std::move(path)), offset_(offset), data_(std::move(data)) {
+    if (path_.empty()) throw std::invalid_argument("path must not be empty");
+    if (data_.empty()) throw std::invalid_argument("data must not be empty");
+}
+
+SftpWriteOperation::~SftpWriteOperation() {
+    cleanup();
+}
+
+void SftpWriteOperation::cleanup() noexcept {
+    if (file_ != nullptr) {
+        libssh2_sftp_close_handle(file_);
+        file_ = nullptr;
+    }
+    if (sftp_ != nullptr) {
+        libssh2_sftp_shutdown(sftp_);
+        sftp_ = nullptr;
+    }
+}
+
+StepResult SftpWriteOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    RuntimeResource* active_resource = context.activeSession();
+    if (active_resource == nullptr ||
+        active_resource->kind() != ResourceKind::kLibssh2Session) {
+        return StepResult::failed(noSessionError());
+    }
+    auto* session_resource = static_cast<SshSessionResource*>(active_resource);
+    LIBSSH2_SESSION* session = session_resource->session()->get();
+    const int fd = session_resource->fd();
+    if (fd < 0) return StepResult::failed(noSessionError());
+
+    if (done_) return StepResult::complete("written=" + std::to_string(offset_in_data_));
+    if (sftp_ == nullptr) {
+        Libssh2CallResult init_result = classifyLibssh2Pointer(
+            session, fd, libssh2_sftp_init(session),
+            ErrorDomain::kSftp, "sftp_init");
+        switch (init_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(init_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(init_result.error));
+            case Libssh2CallKind::kSucceeded:
+                sftp_ = static_cast<LIBSSH2_SFTP*>(init_result.pointer);
+                break;
+        }
+    }
+    if (sftp_ != nullptr && file_ == nullptr) {
+        unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT;
+        if (offset_ == 0) flags |= LIBSSH2_FXF_TRUNC;
+        Libssh2CallResult open_result = classifyLibssh2Pointer(
+            session, fd,
+            libssh2_sftp_open(sftp_, path_.c_str(), flags, 0644),
+            ErrorDomain::kSftp, "sftp_open");
+        switch (open_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(open_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(open_result.error));
+            case Libssh2CallKind::kSucceeded:
+                file_ = static_cast<LIBSSH2_SFTP_HANDLE*>(open_result.pointer);
+                libssh2_sftp_seek64(file_, offset_);
+                break;
+        }
+    }
+    while (file_ != nullptr && offset_in_data_ < data_.size()) {
+        const ssize_t result = libssh2_sftp_write(
+            file_, data_.data() + offset_in_data_,
+            data_.size() - offset_in_data_);
+        Libssh2CallResult write_result = classifyLibssh2Count(
+            session, fd, result, ErrorDomain::kSftp, "sftp_write");
+        switch (write_result.kind) {
+            case Libssh2CallKind::kWouldBlock:
+                return StepResult::waitIo(std::move(write_result.interest));
+            case Libssh2CallKind::kFailed:
+                return StepResult::failed(std::move(write_result.error));
+            case Libssh2CallKind::kSucceeded:
+                if (write_result.value > 0) {
+                    offset_in_data_ += static_cast<size_t>(write_result.value);
+                } else {
+                    done_ = true;
+                }
+                break;
+        }
+        if (done_) break;
+    }
+    if (offset_in_data_ >= data_.size()) done_ = true;
+    if (done_) {
+        cleanup();
+        return StepResult::complete("written=" + std::to_string(offset_in_data_));
+    }
+    return StepResult::noProgress();
+}
+
 } // namespace sshnative

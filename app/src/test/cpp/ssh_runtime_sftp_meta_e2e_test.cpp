@@ -90,6 +90,31 @@ int main(int argc, char** argv) {
         runtime->shutdown();
     }
 
+    {
+        auto runtime = openSession(port);
+        const std::string path = "/tmp/ssh-native-sftp-write-test.txt";
+        const std::string content = "sftp-native-write-ok";
+        auto write = runtime->submit(std::make_unique<sshnative::SftpWriteOperation>(
+            path, 0, content));
+        assert(waitForEvent(*runtime, write, &e));
+        if (e.completion != sshnative::CompletionKind::kSucceeded) {
+            std::cerr << "sftp write failed: " << e.error.message << "\n";
+            return 1;
+        }
+        runtime->shutdown();
+
+        runtime = openSession(port);
+        auto read = runtime->submit(std::make_unique<sshnative::SftpReadOperation>(
+            path, 0, content.size() + 16));
+        assert(waitForEvent(*runtime, read, &e));
+        if (e.completion != sshnative::CompletionKind::kSucceeded ||
+            e.payload != content) {
+            std::cerr << "sftp write/read mismatch: " << e.error.message << "\n";
+            return 1;
+        }
+        runtime->shutdown();
+    }
+
     std::cout << "runtime-sftp-meta-ok\n";
     return 0;
 }

@@ -87,4 +87,25 @@ private:
     bool done_ = false;
 };
 
+// One-shot SFTP file write on the active SSH session. Completion payload is
+// "written=<N>".
+class SftpWriteOperation final : public Operation {
+public:
+    SftpWriteOperation(std::string path, uint64_t offset, std::string data);
+    ~SftpWriteOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    void cleanup() noexcept;
+
+    std::string path_;
+    uint64_t offset_ = 0;
+    std::string data_;
+    size_t offset_in_data_ = 0;
+    _LIBSSH2_SFTP* sftp_ = nullptr;
+    _LIBSSH2_SFTP_HANDLE* file_ = nullptr;
+    bool done_ = false;
+};
+
 } // namespace sshnative
