@@ -30,6 +30,10 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - runtime 支持 active authenticated SSH session 资源：
   - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
   - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
+- runtime 支持 active shell channel：
+  - `OpenShellOperation` 打开 session channel 并请求 `xterm-256color` PTY / shell；
+  - `ShellWriteOperation` / `ShellReadOperation` / `ShellResizeOperation` / `CloseShellOperation` 已实现；
+  - AsyncSSH test server 增加 `shell_requested()` + echo data 支持，native Shell/PTY E2E 通过。
   - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
     `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
     `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
@@ -102,12 +106,12 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - AsyncSSH fixture 下，libssh2 关闭第一个 channel 后再次 `libssh2_channel_open_session()` 会返回 NULL；
   但临时 OpenSSH server 下同一 session 顺序复用 channel 验证通过，因此该问题属于测试服务器兼容性，
   持久 session 开发以 OpenSSH 为权威 fixture。后续如需要可再调查 AsyncSSH 侧原因。
+- AsyncSSH 已增加 shell/echo 支持，可用作非 root Shell/PTY fixture；
+  此前记录的“OpenSSH 非 root 无法 chown pty”不再阻塞 native Shell/PTY 测试。
 
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
-- shell/PTY、持久会话接入 JNI/Kotlin。
-  - 本机临时 OpenSSH server 以非 root 运行时无法完成 PTY 分配（`chown(/dev/pts/...)` 失败），
-    Shell/PTY 的 host E2E 需要 root sshd 或 Apache SSHD 等 fixture。
+- shell/PTY 接入 JNI/Kotlin（native Shell/PTY operations 已完成）。
 - SFTP 全功能 native 化。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
@@ -116,6 +120,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `fea674d feat(ssh-native): add active shell channel with PTY operations`
 - `d3e59d7 feat(ssh): keep Libssh2SshSession persistent session for repeated exec`
 - `ae8fb9d feat(ssh-native): add active session resource and persistent exec`
 - `45e15ee refactor(ssh): remove blocking POC JNI bridge from production`
