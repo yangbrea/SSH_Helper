@@ -33,6 +33,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 已开始把真实 libssh2 调用迁入 runtime `Operation`：
   - `TcpConnectOperation`：non-blocking TCP connect（DNS 在 producer 线程，connect/poll 在 owner），host test 通过。
   - `Libssh2HandshakeOperation`：non-blocking handshake + host key 读取，E2E 通过。
+  - `TcpHandshakeOperation`：从 host:port 直连并读取 host key（不认证），E2E 通过。
   - `Libssh2PasswordAuthOperation`：non-blocking password auth，E2E 通过。
   - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
   - `Libssh2PasswordExecOperation`：non-blocking password auth + exec + stdout，E2E 通过。
@@ -96,6 +97,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `9b8fd0a feat(ssh-native): add TcpHandshakeOperation host key probe`
 - `2dde306 docs(ssh): record runtime payload parser tests`
 - `c9f4e95 test(ssh): extract and unit-test runtime exec payload parser`
 - `d1e5801 docs(ssh): record runtime keyboard-interactive fallback`
