@@ -30,6 +30,10 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
   exactly-once completion、取消、关闭、资源所有权、公平调度、背压及 sanitizer 门禁。
 - Step 4 host tests、ASan/UBSan、TSan、双 ABI `assembleDebug` 和现有 SSH E2E 均通过。
+- 已开始把真实 libssh2 调用迁入 runtime `Operation`：
+  - `Libssh2HandshakeOperation`：non-blocking handshake + host key 读取，E2E 通过。
+  - `Libssh2PasswordAuthOperation`：non-blocking password auth，E2E 通过。
+  - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
 
 ### libssh2 实际连接 POC
 - `Libssh2Session` RAII：init/session lifecycle。
@@ -60,8 +64,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - HTTP CONNECT / SOCKS5 proxy
 
 ## 尚未完成（按计划顺序）
-- Step 5 起把 DNS/TCP/proxy 和真实 libssh2 handshake/auth 等功能实现为新的 runtime
-  `Operation`；当前实际连接路径仍使用保留的 blocking POC。
+- Step 5 仍需把 DNS/TCP/proxy 和 host-key 决策实现为新的 runtime `Operation`；
+  当前 runtime operation 使用外部已连接 fd，实际连接路径仍保留 blocking POC。
 - host-key 确认流程仍为 blocking direct POC，尚未覆盖 jump、proxy 和 event-loop 状态机。
 - keyboard-interactive 仍只覆盖单密码 prompt；OTP/多因素拒绝逻辑与错误分类待 contract 级验证。
 - shell/PTY、exec 的 Kotlin `SshSession` 接入。
@@ -71,6 +75,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
-- `a31c001 feat(ssh-native): support keyboard-interactive password fallback`
-- `d7ddc59 feat(ssh-native): gate direct auth behind host key verification`
+- `338ed98 feat(ssh-native): run in-memory private key auth as runtime operation`
+- `7dc5106 feat(ssh-native): run password auth as nonblocking runtime operation`
+- `8074d67 feat(ssh-native): drive nonblocking libssh2 handshake through runtime`
+- `2667e85 feat(ssh-native): add production nonblocking runtime and event bridge`
 （里程碑建议后续打 tag `ssh-native-step-NN`。）
