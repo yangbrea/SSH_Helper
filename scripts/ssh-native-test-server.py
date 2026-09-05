@@ -15,12 +15,25 @@ class ExecSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         self._chan = chan
         self._command = ""
+        self._shell = False
+
+    def shell_requested(self):
+        self._shell = True
+        return True
 
     def exec_requested(self, command):
         self._command = command
         return True
 
+    def data_received(self, data, datatype):
+        # Minimal interactive shell used by native Shell/PTY tests: echo input
+        # back so the client can verify the channel is alive and full-duplex.
+        if self._shell:
+            self._chan.write(data)
+
     def session_started(self):
+        if self._shell:
+            return
         if self._command == "stderr-test":
             self._chan.write_stderr("native-stderr-ok")
         elif self._command.startswith("big-output:"):

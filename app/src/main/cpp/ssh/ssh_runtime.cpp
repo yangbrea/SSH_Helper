@@ -240,6 +240,9 @@ struct LoopContext::Access {
     virtual int takeTransport() = 0;
     virtual void storeSession(std::unique_ptr<RuntimeResource> session) = 0;
     virtual RuntimeResource* getActiveSession() noexcept = 0;
+    virtual void storeChannel(std::unique_ptr<RuntimeResource> channel) = 0;
+    virtual RuntimeResource* getActiveChannel() noexcept = 0;
+    virtual void clearChannel() noexcept = 0;
 };
 
 SessionState LoopContext::state() const noexcept { return access_->getState(); }
@@ -263,6 +266,19 @@ void LoopContext::storeActiveSession(std::unique_ptr<RuntimeResource> session) {
 
 RuntimeResource* LoopContext::activeSession() const noexcept {
     return access_->getActiveSession();
+}
+
+void LoopContext::storeActiveChannel(std::unique_ptr<RuntimeResource> channel) {
+    if (!channel) throw std::invalid_argument("active channel resource is null");
+    access_->storeChannel(std::move(channel));
+}
+
+RuntimeResource* LoopContext::activeChannel() const noexcept {
+    return access_->getActiveChannel();
+}
+
+void LoopContext::clearActiveChannel() noexcept {
+    access_->clearChannel();
 }
 
 class SshNativeSession::Impl final : public LoopContext::Access {
@@ -398,6 +414,25 @@ public:
 
     RuntimeResource* getActiveSession() noexcept override {
         return active_session_;
+    }
+
+    void storeChannel(std::unique_ptr<RuntimeResource> channel) override {
+        assertOwner();
+        if (!channel) throw std::invalid_argument("active channel resource is null");
+        if (active_channel_ != nullptr) {
+            throw std::logic_error("active SSH channel already exists");
+        }
+        resources_.push_back(std::move(channel));
+        active_channel_ = resources_.back().get();
+    }
+
+    RuntimeResource* getActiveChannel() noexcept override {
+        return active_channel_;
+    }
+
+    void clearChannel() noexcept override {
+        assertOwner();
+        active_channel_ = nullptr;
     }
 
 private:
@@ -756,6 +791,7 @@ private:
         }
         if (close_index_ >= resources_.size()) {
             active_session_ = nullptr;
+            active_channel_ = nullptr;
             return true;
         }
 
@@ -921,6 +957,7 @@ private:
 
     std::vector<std::unique_ptr<RuntimeResource>> resources_;
     RuntimeResource* active_session_ = nullptr;
+    RuntimeResource* active_channel_ = nullptr;
     int pending_transport_fd_ = -1;
     bool closing_started_ = false;
     size_t close_index_ = 0;

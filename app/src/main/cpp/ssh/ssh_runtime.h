@@ -109,6 +109,15 @@ public:
     // Returns the active SSH session resource, or nullptr if none is stored.
     RuntimeResource* activeSession() const noexcept;
 
+    // Stores a channel resource (for example a shell channel) as the runtime's
+    // active channel. A runtime currently supports one active shell channel.
+    void storeActiveChannel(std::unique_ptr<RuntimeResource> channel);
+    // Returns the active channel resource, or nullptr if none is stored.
+    RuntimeResource* activeChannel() const noexcept;
+    // Clears the active channel pointer without closing the resource; the
+    // resource remains owned by the runtime until shutdown.
+    void clearActiveChannel() noexcept;
+
 private:
     friend class SshNativeSession;
     struct Access;
