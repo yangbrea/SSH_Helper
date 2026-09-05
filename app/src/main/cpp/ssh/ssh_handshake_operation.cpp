@@ -177,7 +177,8 @@ StepResult TcpHandshakeOperation::step(
     }
     return StepResult::complete(
         "fingerprint=" + hostKeySha256Fingerprint(blob) +
-        "\nkeyType=" + hostKeyTypeName(key_type));
+        "\nkeyType=" + hostKeyTypeName(key_type) +
+        "\nkeyBase64=" + hostKeyBase64(blob));
 }
 
 } // namespace sshnative

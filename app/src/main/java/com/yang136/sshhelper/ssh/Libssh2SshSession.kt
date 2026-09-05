@@ -3,7 +3,6 @@ package com.yang136.sshhelper.ssh
 import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
-import com.yang136.sshhelper.ssh.native.NativeSshBridge
 import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
@@ -21,9 +20,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * libssh2-backed [SshSession] with in-memory host-key verification.
  *
- * This implementation verifies host keys during connect and, for subsequent
- * exec calls with a stored fingerprint, uses the nonblocking runtime JNI path
- * with deadline/output-limit support. Persistent channels, SFTP, forwarding,
+ * This implementation uses the nonblocking runtime JNI path for both host-key
+ * probing during connect and exec calls with a stored fingerprint, including
+ * deadline/output-limit support. Persistent channels, SFTP, forwarding,
  * proxy/jump and full runtime host-key decisions are not implemented yet.
  */
 class Libssh2SshSession(
@@ -48,7 +47,6 @@ class Libssh2SshSession(
     private var password: String? = null
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
-    @Volatile private var liveHandle = 0L
     private val nativeRuntime = NativeSshRuntime()
     @Volatile private var closed = false
 
@@ -168,6 +166,8 @@ class Libssh2SshSession(
                     privateKey = privateKey,
                     passphrase = passphrase,
                     command = command,
+                    execTimeoutMillis = timeoutMillis,
+                    maxOutputBytes = maxOutputBytes,
                 )
             }
             parseExecPayload(raw)
@@ -206,89 +206,87 @@ class Libssh2SshSession(
         privateKey: ByteArray?,
         passphrase: String?,
         command: String,
+        execTimeoutMillis: Long = 10_000L,
+        maxOutputBytes: Int = 1024 * 1024,
     ): String {
-        var handle = 0L
-        try {
-            handle = openVerifiedHandle(route)
-            mutableStage.value = ConnectionStage.TARGET_AUTH
-            return if (password != null) {
-                NativeSshBridge.nativeDirectPasswordExec(
-                    handle,
-                    username,
-                    password,
-                    command,
-                )
-            } else {
-                val key = privateKey ?: error("SSH private key unavailable")
-                NativeSshBridge.nativeDirectPrivateKeyExec(
-                    handle,
-                    username,
-                    key,
-                    passphrase,
-                    command,
-                )
-            }
-        } finally {
-            if (handle != 0L) {
-                liveHandle = 0L
-                runCatching { NativeSshBridge.nativeDirectClose(handle) }
-            }
-        }
-    }
-
-    private suspend fun openVerifiedHandle(route: SshRoute): Long {
-        val handle = NativeSshBridge.nativeOpenDirectHandshake(
-            route.target.hostname,
-            route.target.port,
-        )
-        liveHandle = handle
-        try {
-            val request = loadHostKeyRequest(route, handle) ?: return handle
+        val hostname = route.target.hostname
+        val port = route.target.port
+        val info = probeRuntimeHostKey(hostname, port)
+        val request = hostKeyRequest(hostname, port, info)
+        if (request != null) {
             if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
                 mutableHostKeyRequest.value = request
-                closeLiveHandle()
                 throw HostKeyBlockedException(request)
             }
             mutableHostKeyRequest.value = request
             val accepted = awaitHostKeyDecision()
             mutableHostKeyRequest.value = null
             if (!accepted) {
-                closeLiveHandle()
                 throw HostKeyBlockedException(request)
             }
-            saveKnownHost(route, request)
-            return handle
-        } catch (error: Throwable) {
-            if (liveHandle != 0L) {
-                closeLiveHandle()
-            }
-            throw error
+            saveKnownHost(hostname, port, info)
+        }
+        mutableStage.value = ConnectionStage.TARGET_AUTH
+        return if (password != null) {
+            nativeRuntime.runDirectPasswordExec(
+                hostname,
+                port,
+                username,
+                password,
+                command,
+                info.fingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+                execTimeoutMillis,
+                maxOutputBytes,
+            )
+        } else {
+            val key = privateKey ?: error("SSH private key unavailable")
+            nativeRuntime.runDirectPrivateKeyExec(
+                hostname,
+                port,
+                username,
+                key,
+                passphrase,
+                command,
+                info.fingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+                execTimeoutMillis,
+                maxOutputBytes,
+            )
         }
     }
 
-    private suspend fun loadHostKeyRequest(route: SshRoute, handle: Long): HostKeyRequest? {
-        val hostname = route.target.hostname
-        val port = route.target.port
+    private suspend fun probeRuntimeHostKey(hostname: String, port: Int): TcpHandshakeInfo {
         mutableStage.value = ConnectionStage.TARGET_HOST_KEY
-        val keyType = NativeSshBridge.nativeDirectHostKeyType(handle)
-        val fingerprint = NativeSshBridge.nativeDirectHostKeyFingerprint(handle)
-        val keyBase64 = NativeSshBridge.nativeDirectHostKeyBase64(handle)
+        val raw = nativeRuntime.runTcpHandshake(
+            hostname,
+            port,
+            SSH_CONNECT_TIMEOUT_MS.toLong(),
+        )
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    private suspend fun hostKeyRequest(
+        hostname: String,
+        port: Int,
+        info: TcpHandshakeInfo,
+    ): HostKeyRequest? {
         val expected = findKnownHost(hostname, port)
         return when {
             expected == null -> HostKeyRequest(
                 hostname = hostname,
                 port = port,
-                keyType = keyType,
-                fingerprint = fingerprint,
+                keyType = info.keyType,
+                fingerprint = info.fingerprint,
                 issue = HostKeyIssue.UNKNOWN,
                 subject = HostKeySubject.TARGET,
             )
-            sameKey(expected.keyBase64, keyBase64) -> null
+            sameKey(expected.keyBase64, info.keyBase64) -> null
             else -> HostKeyRequest(
                 hostname = hostname,
                 port = port,
-                keyType = keyType,
-                fingerprint = fingerprint,
+                keyType = info.keyType,
+                fingerprint = info.fingerprint,
                 previousFingerprint = expected.fingerprintSha256,
                 issue = HostKeyIssue.CHANGED,
                 subject = HostKeySubject.TARGET,
@@ -303,14 +301,14 @@ class Libssh2SshSession(
         }
     }
 
-    private suspend fun saveKnownHost(route: SshRoute, request: HostKeyRequest) {
+    private suspend fun saveKnownHost(hostname: String, port: Int, info: TcpHandshakeInfo) {
         val entity = KnownHostEntity(
-            id = "${route.target.hostname.lowercase()}:${route.target.port}",
-            hostname = route.target.hostname,
-            port = route.target.port,
-            keyType = request.keyType,
-            keyBase64 = NativeSshBridge.nativeDirectHostKeyBase64(liveHandle),
-            fingerprintSha256 = request.fingerprint,
+            id = "${hostname.lowercase()}:$port",
+            hostname = hostname,
+            port = port,
+            keyType = info.keyType,
+            keyBase64 = info.keyBase64,
+            fingerprintSha256 = info.fingerprint,
         )
         knownHostDao?.insert(entity)
         synchronized(knownHostCache) {
@@ -330,14 +328,6 @@ class Libssh2SshSession(
 
     private fun sameKey(expectedBase64: String, presentedBase64: String): Boolean =
         MessageDigest.isEqual(expectedBase64.encodeToByteArray(), presentedBase64.encodeToByteArray())
-
-    private fun closeLiveHandle() {
-        val handle = liveHandle
-        if (handle != 0L) {
-            liveHandle = 0L
-            runCatching { NativeSshBridge.nativeDirectClose(handle) }
-        }
-    }
 
     private fun cancelPendingHostKey() {
         hostKeyDecision.getAndSet(null)?.complete(false)
@@ -360,7 +350,6 @@ class Libssh2SshSession(
 
     override suspend fun disconnect() {
         cancelPendingHostKey()
-        closeLiveHandle()
         nativeRuntime.close()
         route = null
         password = null
@@ -389,7 +378,6 @@ class Libssh2SshSession(
     override fun close() {
         closed = true
         cancelPendingHostKey()
-        closeLiveHandle()
         nativeRuntime.close()
         route = null
         password = null
@@ -399,6 +387,31 @@ class Libssh2SshSession(
         mutableState.value = ConnectionState.Disconnected("应用已关闭", DisconnectCause.APP_CLOSED)
         mutableTerminalState.value = TerminalChannelState.Closed
     }
+}
+
+internal data class TcpHandshakeInfo(
+    val fingerprint: String,
+    val keyType: String,
+    val keyBase64: String,
+)
+
+internal fun parseRuntimeTcpHandshakePayload(raw: String): TcpHandshakeInfo {
+    val fields = mutableMapOf<String, String>()
+    for (line in raw.lineSequence()) {
+        if (line.isBlank()) continue
+        val separator = line.indexOf('=')
+        if (separator > 0) {
+            fields[line.substring(0, separator)] = line.substring(separator + 1)
+        }
+    }
+    return TcpHandshakeInfo(
+        fingerprint = fields["fingerprint"]
+            ?: error("runtime handshake payload missing fingerprint"),
+        keyType = fields["keyType"]
+            ?: error("runtime handshake payload missing keyType"),
+        keyBase64 = fields["keyBase64"]
+            ?: error("runtime handshake payload missing keyBase64"),
+    )
 }
 
 private class HostKeyBlockedException(

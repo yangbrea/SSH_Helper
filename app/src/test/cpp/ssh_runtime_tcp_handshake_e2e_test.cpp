@@ -31,6 +31,9 @@ int main(int argc, char** argv) {
         assert(event.completion == sshnative::CompletionKind::kSucceeded);
         assert(event.payload.find("fingerprint=SHA256:") != std::string::npos);
         assert(event.payload.find("keyType=ssh-ed25519") != std::string::npos);
+        const auto base64_marker = event.payload.find("\nkeyBase64=");
+        assert(base64_marker != std::string::npos);
+        assert(base64_marker + 11 < event.payload.size());
         std::cout << "runtime-tcp-handshake-ok\n";
         runtime->shutdown();
         return 0;

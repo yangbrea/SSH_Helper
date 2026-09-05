@@ -29,3 +29,23 @@ class RuntimeExecPayloadTest {
         assertEquals("", result.stderr)
     }
 }
+
+class RuntimeTcpHandshakePayloadTest {
+    @Test
+    fun parsesHandshakeFields() {
+        val raw = "fingerprint=SHA256:abc\nkeyType=ssh-ed25519\nkeyBase64=c2VjcmV0"
+        val info = parseRuntimeTcpHandshakePayload(raw)
+        assertEquals("SHA256:abc", info.fingerprint)
+        assertEquals("ssh-ed25519", info.keyType)
+        assertEquals("c2VjcmV0", info.keyBase64)
+    }
+
+    @Test
+    fun acceptsFieldOrderReordered() {
+        val raw = "keyBase64=c2VjcmV0\nkeyType=ssh-ed25519\nfingerprint=SHA256:abc\n"
+        val info = parseRuntimeTcpHandshakePayload(raw)
+        assertEquals("SHA256:abc", info.fingerprint)
+        assertEquals("ssh-ed25519", info.keyType)
+        assertEquals("c2VjcmV0", info.keyBase64)
+    }
+}
