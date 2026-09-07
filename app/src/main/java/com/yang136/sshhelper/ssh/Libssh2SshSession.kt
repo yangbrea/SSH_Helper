@@ -33,8 +33,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * probing and keeps an authenticated persistent session open for repeated exec
  * calls, including deadline/output-limit support. HTTP/SOCKS5 proxies are
  * supported through the runtime transport handoff path. Shell/PTY and SFTP are
- * wired to persistent native resources. Forwarding, jump hosts and full runtime
- * host-key decisions are not implemented yet.
+ * wired to persistent native resources. Jump hosts are supported through a
+ * nested direct-tcpip transport. Forwarding and full runtime host-key decisions
+ * are not implemented yet.
  */
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
@@ -59,6 +60,10 @@ class Libssh2SshSession(
     private var privateKey: ByteArray? = null
     private var passphrase: String? = null
     private var targetProxyPassword: String? = null
+    private var jumpPassword: String? = null
+    private var jumpPrivateKey: ByteArray? = null
+    private var jumpPassphrase: String? = null
+    private var jumpProxyPassword: String? = null
     private var persistentSessionOpen = false
     private val nativeRuntime = NativeSshRuntime()
     private val terminalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -83,29 +88,58 @@ class Libssh2SshSession(
         openShell: Boolean,
     ) = withContext(Dispatchers.IO) {
         if (closed) return@withContext
-        if (route.jump != null) {
-            mutableState.value = ConnectionState.Error("libssh2 POC 暂不支持跳板机")
-            return@withContext
-        }
         val targetCredential = credentials.target
         if (targetCredential !is Credential.Password && targetCredential !is Credential.PrivateKey) {
             mutableState.value = ConnectionState.Error("不支持的认证类型")
             return@withContext
         }
+        if (route.jump != null) {
+            val jumpCredential = credentials.jump
+            if (jumpCredential !is Credential.Password && jumpCredential !is Credential.PrivateKey) {
+                mutableState.value = ConnectionState.Error("缺少跳板机凭据或类型不支持")
+                return@withContext
+            }
+        }
         mutableState.value = ConnectionState.Connecting
-        mutableStage.value = ConnectionStage.TARGET_AUTH
+        mutableStage.value = if (route.jump != null) ConnectionStage.JUMP_AUTH else ConnectionStage.TARGET_AUTH
         try {
             val passwordText = (targetCredential as? Credential.Password)?.value?.concatToString()
             val privateKeyText = (targetCredential as? Credential.PrivateKey)?.bytes
             val passphraseText = (targetCredential as? Credential.PrivateKey)?.passphrase?.concatToString()
+            val jumpCredential = if (route.jump != null) credentials.jump else null
             targetProxyPassword = credentials.targetProxyPassword
-            openVerifiedPersistentSession(
-                route = route,
-                username = route.target.username,
-                password = passwordText,
-                privateKey = privateKeyText,
-                passphrase = passphraseText,
-            )
+            jumpProxyPassword = credentials.jumpProxyPassword
+            if (route.jump != null && jumpCredential != null) {
+                val jumpPasswordText = (jumpCredential as? Credential.Password)?.value?.concatToString()
+                val jumpPrivateKeyText = (jumpCredential as? Credential.PrivateKey)?.bytes
+                val jumpPassphraseText = (jumpCredential as? Credential.PrivateKey)?.passphrase?.concatToString()
+                jumpPassword = jumpPasswordText
+                if (jumpPrivateKeyText != null) {
+                    jumpPrivateKey = jumpPrivateKeyText.copyOf()
+                    jumpPassphrase = jumpPassphraseText
+                } else {
+                    jumpPrivateKey = null
+                    jumpPassphrase = null
+                }
+                openVerifiedJumpPersistentSession(
+                    route = route,
+                    username = route.target.username,
+                    password = passwordText,
+                    privateKey = privateKeyText,
+                    passphrase = passphraseText,
+                    jumpPassword = jumpPasswordText,
+                    jumpPrivateKey = jumpPrivateKeyText,
+                    jumpPassphrase = jumpPassphraseText,
+                )
+            } else {
+                openVerifiedPersistentSession(
+                    route = route,
+                    username = route.target.username,
+                    password = passwordText,
+                    privateKey = privateKeyText,
+                    passphrase = passphraseText,
+                )
+            }
             this@Libssh2SshSession.route = route
             persistentSessionOpen = true
             password = passwordText
@@ -119,6 +153,9 @@ class Libssh2SshSession(
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Connected("${route.target.username}@${route.target.hostname}")
         } catch (error: HostKeyBlockedException) {
+            nativeRuntime.close()
+            persistentSessionOpen = false
+            this@Libssh2SshSession.route = null
             if (error.request.issue == HostKeyIssue.CHANGED) {
                 mutableHostKeyRequest.value = error.request
             }
@@ -131,6 +168,9 @@ class Libssh2SshSession(
                 },
             )
         } catch (error: Throwable) {
+            nativeRuntime.close()
+            persistentSessionOpen = false
+            this@Libssh2SshSession.route = null
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Error(error.message ?: "SSH 连接失败")
         }
@@ -290,6 +330,178 @@ class Libssh2SshSession(
         )
     }
 
+    private suspend fun openVerifiedJumpPersistentSession(
+        route: SshRoute,
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        jumpPassword: String?,
+        jumpPrivateKey: ByteArray?,
+        jumpPassphrase: String?,
+    ): String {
+        openVerifiedJumpSession(
+            route = route,
+            jumpPassword = jumpPassword,
+            jumpPrivateKey = jumpPrivateKey,
+            jumpPassphrase = jumpPassphrase,
+        )
+
+        val hostname = route.target.hostname
+        val port = route.target.port
+        mutableStage.value = ConnectionStage.TARGET_HOST_KEY
+        val info = probeJumpTargetHostKey(route, hostname, port)
+        val request = hostKeyRequest(hostname, port, info, HostKeySubject.TARGET)
+        if (request != null) {
+            if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                mutableHostKeyRequest.value = request
+                throw HostKeyBlockedException(request)
+            }
+            mutableHostKeyRequest.value = request
+            val accepted = awaitHostKeyDecision()
+            mutableHostKeyRequest.value = null
+            if (!accepted) {
+                throw HostKeyBlockedException(request)
+            }
+            saveKnownHost(hostname, port, info)
+        }
+
+        mutableStage.value = ConnectionStage.TARGET_AUTH
+        return openJumpTargetPersistentSession(
+            route = route,
+            username = username,
+            password = password,
+            privateKey = privateKey,
+            passphrase = passphrase,
+            expectedFingerprint = info.fingerprint,
+        )
+    }
+
+    private suspend fun openVerifiedJumpSession(
+        route: SshRoute,
+        jumpPassword: String?,
+        jumpPrivateKey: ByteArray?,
+        jumpPassphrase: String?,
+    ): String {
+        val jump = route.jump ?: error("缺少跳板机")
+        mutableStage.value = ConnectionStage.JUMP_HOST_KEY
+        val info = probeJumpRuntimeHostKey(route, jump)
+        val request = hostKeyRequest(jump.hostname, jump.port, info, HostKeySubject.JUMP)
+        if (request != null) {
+            if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                mutableHostKeyRequest.value = request
+                throw HostKeyBlockedException(request)
+            }
+            mutableHostKeyRequest.value = request
+            val accepted = awaitHostKeyDecision()
+            mutableHostKeyRequest.value = null
+            if (!accepted) {
+                throw HostKeyBlockedException(request)
+            }
+            saveKnownHost(jump.hostname, jump.port, info)
+        }
+
+        mutableStage.value = ConnectionStage.JUMP_AUTH
+        return openJumpSession(
+            route = route,
+            jumpPassword = jumpPassword,
+            jumpPrivateKey = jumpPrivateKey,
+            jumpPassphrase = jumpPassphrase,
+            expectedFingerprint = info.fingerprint,
+        )
+    }
+
+    private suspend fun probeJumpRuntimeHostKey(
+        route: SshRoute,
+        jump: com.yang136.sshhelper.data.HostProfile,
+    ): TcpHandshakeInfo {
+        mutableStage.value = ConnectionStage.JUMP_HOST_KEY
+        val proxy = jumpProxy(route)
+        val raw = if (proxy != null) {
+            connectProxy(proxy, jump.hostname, jump.port)
+            nativeRuntime.runPendingTcpHandshake(SSH_CONNECT_TIMEOUT_MS.toLong())
+        } else {
+            nativeRuntime.runTcpHandshake(
+                jump.hostname,
+                jump.port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    private suspend fun openJumpSession(
+        route: SshRoute,
+        jumpPassword: String?,
+        jumpPrivateKey: ByteArray?,
+        jumpPassphrase: String?,
+        expectedFingerprint: String,
+    ): String {
+        val jump = route.jump ?: error("缺少跳板机")
+        val proxy = jumpProxy(route)
+        if (proxy != null) {
+            connectProxy(proxy, jump.hostname, jump.port)
+        } else {
+            nativeRuntime.runTcpConnect(
+                jump.hostname,
+                jump.port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        return if (jumpPassword != null) {
+            nativeRuntime.runOpenJumpSession(
+                jump.username,
+                jumpPassword,
+                expectedFingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        } else {
+            val key = jumpPrivateKey ?: error("跳板机私钥不可用")
+            nativeRuntime.runOpenJumpSessionWithPrivateKey(
+                jump.username,
+                key,
+                jumpPassphrase,
+                expectedFingerprint,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+    }
+
+    private suspend fun probeJumpTargetHostKey(
+        route: SshRoute,
+        hostname: String,
+        port: Int,
+    ): TcpHandshakeInfo {
+        mutableStage.value = ConnectionStage.TARGET_HOST_KEY
+        val raw = nativeRuntime.runOpenJumpTargetHandshake(
+            hostname,
+            port,
+            SSH_CONNECT_TIMEOUT_MS.toLong(),
+        )
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    private suspend fun openJumpTargetPersistentSession(
+        route: SshRoute,
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        expectedFingerprint: String,
+    ): String {
+        val target = route.target
+        return nativeRuntime.runOpenJumpTargetSession(
+            target.hostname,
+            target.port,
+            username,
+            password.orEmpty(),
+            privateKey,
+            passphrase,
+            expectedFingerprint,
+            SSH_CONNECT_TIMEOUT_MS.toLong(),
+        )
+    }
+
     private suspend fun openPersistentSession(
         route: SshRoute,
         username: String,
@@ -425,15 +637,28 @@ class Libssh2SshSession(
     }
 
     private fun targetProxy(route: SshRoute): TargetProxy? {
-        val type = route.target.proxyType ?: return null
-        val host = route.target.proxyHost ?: return null
-        val port = route.target.proxyPort ?: return null
+        // The target's device-side proxy applies only to a direct route. When a
+        // jump host is used, the jump tunnel already replaces the device-side
+        // transport and the target profile's own proxy is not applied.
+        if (route.jump != null) return null
+        return route.target.toProxy(targetProxyPassword)
+    }
+
+    private fun jumpProxy(route: SshRoute): TargetProxy? {
+        val jump = route.jump ?: return null
+        return jump.toProxy(jumpProxyPassword)
+    }
+
+    private fun com.yang136.sshhelper.data.HostProfile.toProxy(proxyPassword: String?): TargetProxy? {
+        val type = proxyType ?: return null
+        val host = proxyHost ?: return null
+        val port = proxyPort ?: return null
         return TargetProxy(
             type = type,
             host = host,
             port = port,
-            username = route.target.proxyUsername,
-            password = targetProxyPassword.orEmpty(),
+            username = proxyUsername,
+            password = proxyPassword.orEmpty(),
         )
     }
 
@@ -465,6 +690,7 @@ class Libssh2SshSession(
         hostname: String,
         port: Int,
         info: TcpHandshakeInfo,
+        subject: HostKeySubject = HostKeySubject.TARGET,
     ): HostKeyRequest? {
         val expected = findKnownHost(hostname, port)
         return when {
@@ -474,7 +700,7 @@ class Libssh2SshSession(
                 keyType = info.keyType,
                 fingerprint = info.fingerprint,
                 issue = HostKeyIssue.UNKNOWN,
-                subject = HostKeySubject.TARGET,
+                subject = subject,
             )
             sameKey(expected.keyBase64, info.keyBase64) -> null
             else -> HostKeyRequest(
@@ -484,7 +710,7 @@ class Libssh2SshSession(
                 fingerprint = info.fingerprint,
                 previousFingerprint = expected.fingerprintSha256,
                 issue = HostKeyIssue.CHANGED,
-                subject = HostKeySubject.TARGET,
+                subject = subject,
             )
         }
     }
@@ -619,6 +845,11 @@ class Libssh2SshSession(
         privateKey = null
         passphrase = null
         targetProxyPassword = null
+        jumpPassword = null
+        jumpPrivateKey?.fill(0)
+        jumpPrivateKey = null
+        jumpPassphrase = null
+        jumpProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("已断开", DisconnectCause.USER)
         mutableTerminalState.value = TerminalChannelState.Closed
     }
@@ -658,6 +889,11 @@ class Libssh2SshSession(
         privateKey = null
         passphrase = null
         targetProxyPassword = null
+        jumpPassword = null
+        jumpPrivateKey?.fill(0)
+        jumpPrivateKey = null
+        jumpPassphrase = null
+        jumpProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("应用已关闭", DisconnectCause.APP_CLOSED)
         mutableTerminalState.value = TerminalChannelState.Closed
     }

@@ -10,24 +10,50 @@
 
 namespace sshnative {
 
+// Transport context shared by a jump session and the nested target session that
+// runs over a direct-tcpip channel on the jump session. The channel is owned by
+// the target-side SshSessionResource and is freed before the jump session.
+struct JumpTunnelTransport {
+    LIBSSH2_SESSION* jump_session = nullptr;
+    LIBSSH2_CHANNEL* channel = nullptr;
+    int jump_fd = -1;
+    // Only set while keyboard-interactive authentication is in progress. The
+    // pointed-to password belongs to the active operation.
+    const std::string* keyboard_password = nullptr;
+};
+
 // An authenticated libssh2 session owned by the runtime event loop. It is stored
 // as the active SSH session and remains usable for later exec/shell/SFTP
-// requests without reconnecting or re-authenticating.
+// requests without reconnecting or re-authenticating. For jump routes the same
+// resource is reused for the target session, with a custom transport over a
+// direct-tcpip channel on the jump session.
 class SshSessionResource final : public RuntimeResource {
 public:
-    SshSessionResource(std::unique_ptr<Libssh2Session> session, int fd);
+    SshSessionResource(
+        std::unique_ptr<Libssh2Session> session,
+        int fd,
+        ResourceKind kind = ResourceKind::kLibssh2Session,
+        bool owns_fd = true);
     ~SshSessionResource() override;
 
-    ResourceKind kind() const noexcept override { return ResourceKind::kLibssh2Session; }
+    ResourceKind kind() const noexcept override { return kind_; }
     StepResult closeStep(const ReadySet& ready, MonoTime now) override;
     void forceClose() noexcept override;
 
     Libssh2Session* session() const noexcept { return session_.get(); }
     int fd() const noexcept { return fd_; }
+    bool ownsFd() const noexcept { return owns_fd_; }
+    void setJumpTunnel(std::shared_ptr<JumpTunnelTransport> tunnel);
+    std::shared_ptr<JumpTunnelTransport> jumpTunnel() const noexcept { return tunnel_; }
 
 private:
+    void closeTunnelChannel() noexcept;
+
     std::unique_ptr<Libssh2Session> session_;
     int fd_ = -1;
+    bool owns_fd_ = true;
+    ResourceKind kind_ = ResourceKind::kLibssh2Session;
+    std::shared_ptr<JumpTunnelTransport> tunnel_;
 };
 
 // Consumes the runtime's pending transport socket, performs a nonblocking SSH
@@ -40,7 +66,8 @@ public:
         std::string password,
         std::string private_key,
         std::string passphrase,
-        std::string expected_fingerprint = {});
+        std::string expected_fingerprint = {},
+        bool store_as_jump = false);
     ~OpenAuthenticatedSessionOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -55,6 +82,7 @@ private:
     std::string private_key_;
     std::string passphrase_;
     std::string expected_fingerprint_;
+    bool store_as_jump_ = false;
 
     bool handshake_started_ = false;
     bool handshake_done_ = false;

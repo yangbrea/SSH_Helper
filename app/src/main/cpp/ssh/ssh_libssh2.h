@@ -12,7 +12,7 @@ namespace sshnative {
 // the native SSH runtime and will be extended with handshake/auth/channel APIs.
 class Libssh2Session {
 public:
-    Libssh2Session();
+    explicit Libssh2Session(void* abstract = nullptr);
     ~Libssh2Session();
 
     Libssh2Session(const Libssh2Session&) = delete;
@@ -21,6 +21,13 @@ public:
     LIBSSH2_SESSION* get() const { return session_; }
 
     void setBlocking(bool enabled);
+
+    // Installs custom transport I/O callbacks. Used by the jump-host route to
+    // carry a nested target session over a direct-tcpip channel on the jump
+    // session. The callbacks receive the session's abstract pointer.
+    void setCustomIo(
+        LIBSSH2_SEND_FUNC((*send_callback)),
+        LIBSSH2_RECV_FUNC((*recv_callback)));
 
     // Perform a blocking SSH transport handshake on an already-connected socket.
     // The caller keeps ownership of the socket.

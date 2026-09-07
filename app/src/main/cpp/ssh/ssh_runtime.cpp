@@ -243,6 +243,8 @@ struct LoopContext::Access {
     virtual int takeTransport() = 0;
     virtual void storeSession(std::unique_ptr<RuntimeResource> session) = 0;
     virtual RuntimeResource* getActiveSession() noexcept = 0;
+    virtual void storeJump(std::unique_ptr<RuntimeResource> session) = 0;
+    virtual RuntimeResource* getJumpSession() noexcept = 0;
     virtual void storeChannel(std::unique_ptr<RuntimeResource> channel) = 0;
     virtual RuntimeResource* getActiveChannel() noexcept = 0;
     virtual void clearChannel() noexcept = 0;
@@ -282,6 +284,15 @@ void LoopContext::storeActiveSession(std::unique_ptr<RuntimeResource> session) {
 
 RuntimeResource* LoopContext::activeSession() const noexcept {
     return access_->getActiveSession();
+}
+
+void LoopContext::storeJumpSession(std::unique_ptr<RuntimeResource> session) {
+    if (!session) throw std::invalid_argument("jump session resource is null");
+    access_->storeJump(std::move(session));
+}
+
+RuntimeResource* LoopContext::jumpSession() const noexcept {
+    return access_->getJumpSession();
 }
 
 void LoopContext::storeActiveChannel(std::unique_ptr<RuntimeResource> channel) {
@@ -458,6 +469,20 @@ public:
 
     RuntimeResource* getActiveSession() noexcept override {
         return active_session_;
+    }
+
+    void storeJump(std::unique_ptr<RuntimeResource> session) override {
+        assertOwner();
+        if (!session) throw std::invalid_argument("jump session resource is null");
+        if (jump_session_ != nullptr) {
+            throw std::logic_error("jump SSH session already exists");
+        }
+        resources_.push_back(std::move(session));
+        jump_session_ = resources_.back().get();
+    }
+
+    RuntimeResource* getJumpSession() noexcept override {
+        return jump_session_;
     }
 
     void storeChannel(std::unique_ptr<RuntimeResource> channel) override {
@@ -835,6 +860,7 @@ private:
         }
         if (close_index_ >= resources_.size()) {
             active_session_ = nullptr;
+            jump_session_ = nullptr;
             active_channel_ = nullptr;
             return true;
         }
@@ -1003,6 +1029,7 @@ private:
     std::unordered_map<ResourceId, RuntimeResource*> indexed_resources_;
     ResourceId next_resource_id_ = 1;
     RuntimeResource* active_session_ = nullptr;
+    RuntimeResource* jump_session_ = nullptr;
     RuntimeResource* active_channel_ = nullptr;
     int pending_transport_fd_ = -1;
     bool closing_started_ = false;

@@ -60,12 +60,26 @@ void keyboardInteractiveCallback(
 
 } // namespace
 
-Libssh2Session::Libssh2Session() {
+Libssh2Session::Libssh2Session(void* abstract) {
     ensureInitialized();
-    session_ = libssh2_session_init();
+    session_ = libssh2_session_init_ex(nullptr, nullptr, nullptr, abstract);
     if (session_ == nullptr) {
-        throw std::runtime_error("libssh2_session_init failed");
+        throw std::runtime_error("libssh2_session_init_ex failed");
     }
+}
+
+void Libssh2Session::setCustomIo(
+    LIBSSH2_SEND_FUNC((*send_callback)),
+    LIBSSH2_RECV_FUNC((*recv_callback))) {
+    if (send_callback == nullptr || recv_callback == nullptr) {
+        throw std::invalid_argument("custom send/recv callbacks must not be null");
+    }
+    libssh2_session_callback_set2(
+        session_, LIBSSH2_CALLBACK_SEND,
+        reinterpret_cast<libssh2_cb_generic*>(send_callback));
+    libssh2_session_callback_set2(
+        session_, LIBSSH2_CALLBACK_RECV,
+        reinterpret_cast<libssh2_cb_generic*>(recv_callback));
 }
 
 Libssh2Session::~Libssh2Session() {

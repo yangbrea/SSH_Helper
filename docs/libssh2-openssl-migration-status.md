@@ -58,6 +58,17 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
     `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
     `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
+- jump host native 主链路已完成：
+  - 已用 host POC 验证 libssh2 custom send/recv callback 可把目标 SSH transport
+    嵌套到 jump session 的 direct-tcpip channel 上；
+  - runtime 新增 jump/aux session 资源管理：跳板 session 保存为 route session，
+    目标 session 保存为 active session，资源关闭按 target -> tunnel -> jump 顺序；
+  - `OpenJumpTargetHandshakeOperation` 经 jump 做目标 host-key 预检（不认证）；
+  - `OpenJumpTargetSessionOperation` 经 jump 完成目标 password/private key 认证后
+    成为 active persistent session；
+  - `Libssh2SshSession` 已支持 `route.jump`：跳板/目标 host-key 独立提示，
+    跳板自身 proxy 生效，目标经 tunnel 后不再套用设备侧 target proxy；
+  - native `runtime-jump-ok` E2E 覆盖 jump host-key 预检、目标认证与 persistent exec。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
@@ -134,7 +145,6 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
 - 本地/远程/动态转发 native 化。
-- jump host native 化。
 - `Libssh2SshSession` 生产接入与默认切换。
 - JSch 删除与文档/notices 清理。
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。

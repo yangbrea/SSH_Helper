@@ -53,6 +53,60 @@ class NativeSshRuntime {
         )
     }
 
+    fun runOpenJumpSession(
+        username: String,
+        password: String,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenJumpSession(
+            handle, username, password, expectedFingerprint, timeoutMillis,
+        )
+    }
+
+    fun runOpenJumpSessionWithPrivateKey(
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenJumpSessionWithPrivateKey(
+            handle, username, privateKey, passphrase, expectedFingerprint,
+            timeoutMillis,
+        )
+    }
+
+    fun runOpenJumpTargetHandshake(
+        targetHost: String,
+        targetPort: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenJumpTargetHandshake(
+            handle, targetHost, targetPort, timeoutMillis,
+        )
+    }
+
+    fun runOpenJumpTargetSession(
+        targetHost: String,
+        targetPort: Int,
+        username: String,
+        password: String,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenJumpTargetSession(
+            handle, targetHost, targetPort, username, password,
+            privateKey, passphrase, expectedFingerprint, timeoutMillis,
+        )
+    }
+
     fun runPersistentExec(
         command: String,
         maxOutputBytes: Int,

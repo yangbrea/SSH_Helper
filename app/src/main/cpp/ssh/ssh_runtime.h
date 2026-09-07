@@ -80,6 +80,7 @@ enum class ResourceKind {
     kSftpSession,
     kRemoteListener,
     kLibssh2Session,
+    kJumpSession,
     kTransportSocket,
 };
 
@@ -112,6 +113,12 @@ public:
     void storeActiveSession(std::unique_ptr<RuntimeResource> session);
     // Returns the active SSH session resource, or nullptr if none is stored.
     RuntimeResource* activeSession() const noexcept;
+
+    // Stores an authenticated jump SSH session resource that is kept alive as
+    // the route's auxiliary session while the active session is the target.
+    void storeJumpSession(std::unique_ptr<RuntimeResource> session);
+    // Returns the jump SSH session resource, or nullptr if none is stored.
+    RuntimeResource* jumpSession() const noexcept;
 
     // Stores a channel resource (for example a shell channel) as the runtime's
     // active channel. A runtime currently supports one active shell channel.

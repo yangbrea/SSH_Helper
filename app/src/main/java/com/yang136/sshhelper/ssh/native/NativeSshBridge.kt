@@ -148,6 +148,53 @@ object NativeSshBridge {
         timeoutMillis: Long,
     ): String
 
+    /** Opens the jump hop as a persistent route session, not the active target. */
+    external fun nativeRunOpenJumpSession(
+        handle: Long,
+        username: String,
+        password: String,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String
+
+    /** Opens the jump hop with an in-memory private key as a route session. */
+    external fun nativeRunOpenJumpSessionWithPrivateKey(
+        handle: Long,
+        username: String,
+        privateKey: ByteArray,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Uses the already-open jump session to open a temporary direct-tcpip tunnel
+     * and perform only the target SSH handshake, returning the target host key.
+     */
+    external fun nativeRunOpenJumpTargetHandshake(
+        handle: Long,
+        targetHost: String,
+        targetPort: Int,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Uses the already-open jump session to open a direct-tcpip tunnel to the
+     * target, then authenticates the target over that tunnel and stores it as
+     * the active persistent SSH session.
+     */
+    external fun nativeRunOpenJumpTargetSession(
+        handle: Long,
+        targetHost: String,
+        targetPort: Int,
+        username: String,
+        password: String,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        expectedFingerprint: String,
+        timeoutMillis: Long,
+    ): String
+
     /** Runs one exec on the active persistent SSH session. */
     external fun nativeRunPersistentExec(
         handle: Long,

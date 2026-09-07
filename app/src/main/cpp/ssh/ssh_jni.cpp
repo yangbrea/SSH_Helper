@@ -25,6 +25,7 @@
 #include "ssh_socks5_operation.h"
 #include "ssh_error.h"
 #include "ssh_handshake_operation.h"
+#include "ssh_jump_operation.h"
 #include "ssh_libssh2.h"
 #include "ssh_operations.h"
 #include "ssh_persistent_session.h"
@@ -790,6 +791,214 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenSessionWithPr
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunOpenSessionWithPrivateKey failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpSession(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jusername,
+    jstring jpassword,
+    jstring jexpected_fingerprint,
+    jlong timeout_millis) {
+    try {
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        const std::string expected_fingerprint = jstringToString(env, jexpected_fingerprint);
+        if (username.empty() || password.empty()) {
+            throw std::invalid_argument("username/password must not be empty");
+        }
+        if (timeout_millis <= 0) throw std::invalid_argument("invalid timeout");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenAuthenticatedSessionOperation>(
+            username, password, "", "", expected_fingerprint, /*store_as_jump=*/true);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit open jump session");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenJumpSession failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpSessionWithPrivateKey(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jusername,
+    jbyteArray jprivateKey,
+    jstring jpassphrase,
+    jstring jexpected_fingerprint,
+    jlong timeout_millis) {
+    try {
+        const std::string username = jstringToString(env, jusername);
+        const std::string private_key = jbyteArrayToString(env, jprivateKey);
+        const std::string passphrase = jstringToString(env, jpassphrase);
+        const std::string expected_fingerprint = jstringToString(env, jexpected_fingerprint);
+        if (username.empty() || private_key.empty()) {
+            throw std::invalid_argument("username/private key must not be empty");
+        }
+        if (timeout_millis <= 0) throw std::invalid_argument("invalid timeout");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenAuthenticatedSessionOperation>(
+            username, "", private_key, passphrase, expected_fingerprint, /*store_as_jump=*/true);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit open jump session with private key");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenJumpSessionWithPrivateKey failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetHandshake(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jtarget_host,
+    jint jtarget_port,
+    jlong timeout_millis) {
+    try {
+        const std::string target_host = jstringToString(env, jtarget_host);
+        if (target_host.empty()) {
+            throw std::invalid_argument("target host must not be empty");
+        }
+        if (jtarget_port <= 0 || jtarget_port > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid target port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenJumpTargetHandshakeOperation>(
+            target_host, static_cast<uint16_t>(jtarget_port));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit open jump target handshake");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenJumpTargetHandshake failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetSession(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jtarget_host,
+    jint jtarget_port,
+    jstring jusername,
+    jstring jpassword,
+    jbyteArray jprivateKey,
+    jstring jpassphrase,
+    jstring jexpected_fingerprint,
+    jlong timeout_millis) {
+    try {
+        const std::string target_host = jstringToString(env, jtarget_host);
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        const std::string private_key = jbyteArrayToString(env, jprivateKey);
+        const std::string passphrase = jstringToString(env, jpassphrase);
+        const std::string expected_fingerprint = jstringToString(env, jexpected_fingerprint);
+        if (target_host.empty() || username.empty() ||
+            (password.empty() && private_key.empty())) {
+            throw std::invalid_argument("target host/username/credential must not be empty");
+        }
+        if (jtarget_port <= 0 || jtarget_port > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid target port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenJumpTargetSessionOperation>(
+            target_host, static_cast<uint16_t>(jtarget_port),
+            username, password, private_key, passphrase, expected_fingerprint);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit open jump target session");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenJumpTargetSession failed");
         return nullptr;
     }
 }

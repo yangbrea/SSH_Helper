@@ -64,8 +64,13 @@ SshError noSessionError() {
 
 SshSessionResource::SshSessionResource(
     std::unique_ptr<Libssh2Session> session,
-    int fd)
-    : session_(std::move(session)), fd_(fd) {
+    int fd,
+    ResourceKind kind,
+    bool owns_fd)
+    : session_(std::move(session)),
+      fd_(fd),
+      owns_fd_(owns_fd),
+      kind_(kind) {
     if (!session_ || fd_ < 0) {
         throw std::invalid_argument("invalid active session resource");
     }
@@ -80,11 +85,27 @@ StepResult SshSessionResource::closeStep(const ReadySet&, MonoTime) {
     return StepResult::complete();
 }
 
-void SshSessionResource::forceClose() noexcept {
-    if (fd_ >= 0) {
-        closeFd(fd_);
-        fd_ = -1;
+void SshSessionResource::setJumpTunnel(std::shared_ptr<JumpTunnelTransport> tunnel) {
+    if (!tunnel || tunnel->channel == nullptr || tunnel->jump_session == nullptr ||
+        tunnel->jump_fd < 0) {
+        throw std::invalid_argument("invalid jump tunnel transport");
     }
+    tunnel_ = std::move(tunnel);
+}
+
+void SshSessionResource::closeTunnelChannel() noexcept {
+    if (tunnel_ && tunnel_->channel != nullptr) {
+        libssh2_channel_free(tunnel_->channel);
+        tunnel_->channel = nullptr;
+    }
+}
+
+void SshSessionResource::forceClose() noexcept {
+    closeTunnelChannel();
+    if (owns_fd_ && fd_ >= 0) {
+        closeFd(fd_);
+    }
+    fd_ = -1;
     if (session_) {
         session_.reset();
     }
@@ -95,12 +116,14 @@ OpenAuthenticatedSessionOperation::OpenAuthenticatedSessionOperation(
     std::string password,
     std::string private_key,
     std::string passphrase,
-    std::string expected_fingerprint)
+    std::string expected_fingerprint,
+    bool store_as_jump)
     : username_(std::move(username)),
       password_(std::move(password)),
       private_key_(std::move(private_key)),
       passphrase_(std::move(passphrase)),
-      expected_fingerprint_(std::move(expected_fingerprint)) {
+      expected_fingerprint_(std::move(expected_fingerprint)),
+      store_as_jump_(store_as_jump) {
     if (username_.empty()) {
         throw std::invalid_argument("username must not be empty");
     }
@@ -256,9 +279,14 @@ StepResult OpenAuthenticatedSessionOperation::step(
 
     if (auth_done_) {
         auto resource = std::make_unique<SshSessionResource>(
-            std::move(session_), fd_);
+            std::move(session_), fd_,
+            store_as_jump_ ? ResourceKind::kJumpSession : ResourceKind::kLibssh2Session);
         fd_ = -1;
-        context.storeActiveSession(std::move(resource));
+        if (store_as_jump_) {
+            context.storeJumpSession(std::move(resource));
+        } else {
+            context.storeActiveSession(std::move(resource));
+        }
         return StepResult::complete("session=ok");
     }
 
