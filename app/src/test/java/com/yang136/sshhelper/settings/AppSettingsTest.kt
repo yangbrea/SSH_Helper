@@ -10,7 +10,6 @@ class AppSettingsTest {
         assertEquals(ThemeMode.SYSTEM, AppSettings().themeMode)
         assertEquals(ThemePreset.OCEAN, AppSettings().themePreset)
         assertEquals(14, AppSettings().terminalFontSize)
-        assertEquals(TerminalBackend.XTERM, AppSettings().terminalBackend)
         assertFalse(AppSettings().terminalTransparencyEnabled)
         assertEquals(DEFAULT_TERMINAL_BACKGROUND_OPACITY, AppSettings().terminalBackgroundOpacity)
         // 锁库后活动转发隧道凭据租约默认开启（产品决策）。
@@ -28,10 +27,9 @@ class AppSettingsTest {
     }
 
     @Test
-    fun terminalBackgroundOpacityOnlyAffectsEnabledGhosttyBackend() {
-        assertEquals(1f, effectiveTerminalBackgroundOpacity(TerminalBackend.GHOSTTY, false, 0.7f))
-        assertEquals(0.7f, effectiveTerminalBackgroundOpacity(TerminalBackend.GHOSTTY, true, 0.7f))
-        assertEquals(1f, effectiveTerminalBackgroundOpacity(TerminalBackend.XTERM, true, 0.7f))
+    fun terminalBackgroundOpacityRespectsTransparencyEnabled() {
+        assertEquals(1f, effectiveTerminalBackgroundOpacity(false, 0.7f))
+        assertEquals(0.7f, effectiveTerminalBackgroundOpacity(true, 0.7f))
     }
 
     @Test
@@ -46,7 +44,5 @@ class AppSettingsTest {
         assertEquals(ThemeMode.SYSTEM, enumValueOrDefault<ThemeMode>("BROKEN", ThemeMode.SYSTEM))
         assertEquals(ThemePreset.OCEAN, enumValueOrDefault<ThemePreset>(null, ThemePreset.OCEAN))
         assertEquals(ThemePreset.VIOLET, enumValueOrDefault("VIOLET", ThemePreset.OCEAN))
-        assertEquals(TerminalBackend.XTERM, parseTerminalBackend(null))
-        assertEquals(TerminalBackend.GHOSTTY, parseTerminalBackend("GHOSTTY"))
     }
 }

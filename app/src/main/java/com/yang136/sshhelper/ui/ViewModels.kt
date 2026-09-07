@@ -19,7 +19,6 @@ import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionKind
 import com.yang136.sshhelper.settings.AppSettings
-import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.settings.ThemeMode
 import com.yang136.sshhelper.settings.ThemePreset
 import com.yang136.sshhelper.settings.ExtraKeyId
@@ -287,10 +286,6 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setTerminalFontSize(size: Int) = viewModelScope.launch {
         container.settingsRepository.setTerminalFontSize(size)
-    }
-
-    fun setTerminalBackend(backend: TerminalBackend) = viewModelScope.launch {
-        container.settingsRepository.setTerminalBackend(backend)
     }
 
     fun setTerminalTransparencyEnabled(enabled: Boolean) = viewModelScope.launch {

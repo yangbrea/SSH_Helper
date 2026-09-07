@@ -108,7 +108,6 @@ import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_BACKGROUND_OPACITY
 import com.yang136.sshhelper.settings.MAX_TERMINAL_BACKGROUND_OPACITY
 import com.yang136.sshhelper.settings.ExtraKeyId
-import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ThemeMode
@@ -220,7 +219,6 @@ fun SettingsScreen(
     onDeleteImageTheme: (String) -> Unit,
     onClearImageThemeError: () -> Unit,
     onFontSizeChange: (Int) -> Unit,
-    onTerminalBackendChange: (TerminalBackend) -> Unit,
     onTerminalTransparencyEnabledChange: (Boolean) -> Unit,
     onTerminalBackgroundOpacityChange: (Float) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
@@ -297,7 +295,6 @@ fun SettingsScreen(
             SettingsDestination.TERMINAL -> TerminalSettings(
                 settings = settings,
                 onFontSize = onFontSizeChange,
-                onBackend = onTerminalBackendChange,
                 onTransparencyEnabled = onTerminalTransparencyEnabledChange,
                 onBackgroundOpacity = onTerminalBackgroundOpacityChange,
                 onKeys = onExtraKeysChange,
@@ -667,40 +664,12 @@ private fun ImageThemeControls(
 private fun TerminalSettings(
     settings: AppSettings,
     onFontSize: (Int) -> Unit,
-    onBackend: (TerminalBackend) -> Unit,
     onTransparencyEnabled: (Boolean) -> Unit,
     onBackgroundOpacity: (Float) -> Unit,
     onKeys: (List<ExtraKeyId>) -> Unit,
     modifier: Modifier,
 ) {
     SettingsPage(modifier) {
-        item {
-            SshSectionHeader("终端引擎", summary = "实验性")
-        }
-        item {
-            PreferenceGroup {
-                TerminalBackend.entries.forEach { backend ->
-                    val label = when (backend) {
-                        TerminalBackend.XTERM -> "xterm.js（稳定）"
-                        TerminalBackend.GHOSTTY -> "Ghostty（实验）"
-                    }
-                    PreferenceAction(
-                        icon = Icons.Default.Terminal,
-                        title = label,
-                        summary = when (backend) {
-                            TerminalBackend.XTERM -> "当前 WebView 后端"
-                            TerminalBackend.GHOSTTY -> "原生 Canvas 后端"
-                        },
-                        onClick = { onBackend(backend) },
-                        trailing = if (settings.terminalBackend == backend) {
-                            { Text("✓") }
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }
-        }
         item {
             SshSectionHeader(
                 "终端背景",
@@ -715,7 +684,7 @@ private fun TerminalSettings(
             PreferenceGroup {
                 PreferenceSwitch(
                     title = "半透明背景",
-                    summary = "仅适用于 Ghostty，xterm 不受影响",
+                    summary = "可透出当前应用背景",
                     checked = settings.terminalTransparencyEnabled,
                     onCheckedChange = onTransparencyEnabled,
                 )
@@ -1065,7 +1034,7 @@ private fun AboutSettings(modifier: Modifier) {
             Icons.Default.Storage to ("文件与传输" to "SFTP、系统文件访问和安全写回"),
             Icons.Default.Security to ("连接与安全" to "保险库、主机指纹、跳板机与代理"),
         ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
-        item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("xterm.js · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
+        item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("Ghostty · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
     }
 }
 

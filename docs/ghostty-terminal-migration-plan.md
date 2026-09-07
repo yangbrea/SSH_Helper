@@ -1,10 +1,10 @@
 # Ghostty 终端迁移计划
 
-> 2026-09 Beta 状态：Ghostty 继续作为可选实验后端，xterm.js 仍为默认回退。
+> 2026-09 状态：Ghostty 已是唯一终端实现并默认启用；xterm.js/WebView 已移除。
 > 已补齐句柄安全、scrollback 上限、完整调色板、搜索高亮与大小写搜索、
 > 安全粘贴、远程剪贴板确认、HTTP(S) 链接、焦点/尺寸/配色协议、终端事件、
 > IME 预编辑和触摸鼠标策略。JVM、宿主机测试和无设备构建会实际执行；
-> Android 仪器测试源码只编译，尚未在模拟器或真机运行，因此默认切换、性能结论
+> Android 仪器测试源码只编译，尚未在模拟器或真机运行，因此性能结论
 > 和设备兼容性签字仍是后续独立发布门槛。Kitty 图形协议与内置 Nerd Font 延期。
 
 ### 2026-09 本轮交付清单
@@ -15,14 +15,14 @@
 - [x] 快照 v4、256 色/下划线色/闪烁/软换行/搜索标记及 Canvas 交互补齐。
 - [x] JVM 与宿主原生测试实际执行；Android 仪器测试已编写并仅验证编译打包。
 - [x] Java 17、NDK 29.0.14206865、Zig 0.16.0 的无设备 CI 与双 ABI ELF 校验。
-- [ ] 真机/模拟器行为、性能基线和设备兼容性验证（未来默认切换的发布门槛）。
-- [ ] Kitty 图形协议、Ghostty 默认切换、xterm/WebView 移除（不在本轮范围）。
+- [ ] 真机/模拟器行为、性能基线和设备兼容性验证（Ghostty 默认后的发布门槛）。
+- [x] Kitty 图形协议（延期）；Ghostty 默认切换、xterm/WebView 移除。
 
 ## 1. 目标与结论
 
-本项目计划使用 Ghostty 的终端核心完全取代当前的 xterm.js 终端前端，同时保留现有 JSch SSH 传输、会话管理和 Jetpack Compose 应用结构。
+本项目使用 Ghostty 的终端核心作为唯一终端实现，同时保留现有 JSch SSH 传输、会话管理和 Jetpack Compose 应用结构。
 
-迁移采用渐进式双后端方案：先让 xterm 与 Ghostty 并存，在 Ghostty 达到功能和稳定性要求后再移除 WebView、JavaScript Bridge、xterm.js 和对应的 npm 构建链。禁止一次性替换，任何阶段都必须保持项目可编译、可测试、可回退。
+迁移过程采用了渐进式双后端方案；xterm.js/WebView 已在达到默认切换条件后移除。
 
 Android 端采用以下架构：
 
@@ -31,9 +31,6 @@ JSch / SessionManager
         │ SSH PTY 字节流
         ▼
 TerminalFrontend 抽象
-        │
-        ├── XtermTerminalFrontend（迁移期间保留）
-        │       └── WebView + xterm.js
         │
         └── GhosttyTerminalFrontend
                 ├── Kotlin 生命周期与背压控制
@@ -56,7 +53,7 @@ Ghostty 的 `libghostty-vt` 负责 VT/ANSI 解析、终端状态、scrollback、
 - `targetSdk`：36
 - Java/Kotlin JVM target：17
 - Android Gradle Plugin：9.2.0
-- 当前终端：WebView + xterm.js 6.0.0
+- 当前终端：Ghostty（libghostty-vt）
 - 当前 SSH 实现：JSch 2.28.0
 - 当前 PTY 类型：`xterm-256color`
 

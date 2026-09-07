@@ -1,7 +1,6 @@
 package com.yang136.sshhelper.ui
 
 import android.content.Context
-import com.yang136.sshhelper.settings.TerminalBackend
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 
 /**
@@ -48,14 +47,5 @@ internal interface TerminalFrontend {
     fun close()
 }
 
-/**
- * Factory for the development/gray rollout switch.
- *
- * XTERM returns the WebView/xterm compatibility frontend. GHOSTTY returns the
- * native Canvas frontend. The rollout setting keeps both paths reversible.
- */
-internal fun createTerminalFrontend(backend: TerminalBackend): TerminalFrontend =
-    when (backend) {
-        TerminalBackend.XTERM -> XtermTerminalFrontend()
-        TerminalBackend.GHOSTTY -> GhosttyTerminalFrontend()
-    }
+/** Ghostty is the only terminal frontend. */
+internal fun createTerminalFrontend(): GhosttyTerminalFrontend = GhosttyTerminalFrontend()

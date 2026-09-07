@@ -1,6 +1,5 @@
 package com.yang136.sshhelper.ui
 
-import com.yang136.sshhelper.settings.TerminalBackend
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -29,15 +28,8 @@ class TerminalFrontendFactoryTest {
     }
 
     @Test
-    fun xtermBackendCreatesXtermFrontend() {
-        frontend = createTerminalFrontend(TerminalBackend.XTERM)
-
-        assertTrue(frontend is XtermTerminalFrontend)
-    }
-
-    @Test
-    fun ghosttyBackendDoesNotFallBackToXterm() {
-        frontend = createTerminalFrontend(TerminalBackend.GHOSTTY)
+    fun factoryAlwaysCreatesGhosttyFrontend() {
+        frontend = createTerminalFrontend()
 
         assertTrue(frontend is GhosttyTerminalFrontend)
     }

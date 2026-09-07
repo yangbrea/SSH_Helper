@@ -10,9 +10,11 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.text.InputType
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.InputDevice
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -60,6 +62,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var flingLastY = 0
     private var flingPixelRemainder = 0f
     private var pointerDown = false
+    /** 触摸尚未被识别为滚动/选择时，不立即发送鼠标按下，等抬起判定为点按再补发。 */
+    private var touchPendingClick = false
     private var pressedMouseButton = MOUSE_BUTTON_LEFT
     private val touchState = GhosttyTouchState()
     private var twoFingerLastY = 0f
@@ -96,6 +100,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     // GestureDetector 不保证继续回调 onScroll。
                     return true
                 }
+                // 一旦判定为滚动/拖动，就不再把它当作点按补发鼠标事件。
+                touchPendingClick = false
                 if (cellHeightPx <= 0f) return false
                 scrollAccum += distanceY
                 val delta = (scrollAccum / cellHeightPx).toInt()
@@ -248,6 +254,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var cursorBlinking = false
     private var textBlinking = false
     private var hasFocus = false
+    private var initialFocusRequested = false
     private val cursorBlinkRunnable = object : Runnable {
         override fun run() {
             if (!cursorBlinking && !textBlinking) return
@@ -348,6 +355,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     private var lastBellAtMs = 0L
 
     fun armSelectionMode() {
+        touchPendingClick = false
         if (touchState.armSelection()) {
             engine?.requestMouseEvent(
                 MOUSE_ACTION_RELEASE,
@@ -362,6 +370,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     fun clearSelectionAndResetGesture() {
+        touchPendingClick = false
         touchState.clearSelection()
     }
 
@@ -385,6 +394,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         ) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_POINTER_DOWN -> {
+                    touchPendingClick = false
                     releaseTouchMouse(event)
                     touchState.beginTwoFingerScroll()
                     twoFingerLastY = averageY(event)
@@ -418,13 +428,24 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (touchState.finishTwoFingerScroll()) {
+                        touchPendingClick = false
                         pointerDown = false
                         return true
                     }
                 }
             }
         }
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) pointerDown = true
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            pointerDown = true
+            // Touch events are ambiguous until the gesture is classified. Do not
+            // send a real mouse press on ACTION_DOWN: a drag would otherwise leak
+            // SGR press/motion sequences into the remote before scroll starts.
+            // A tap sends press+release on ACTION_UP instead.
+            touchPendingClick = currentEngine?.mouseReportingActive == true &&
+                !touchState.selectionArmed &&
+                !touchState.selectionActive &&
+                !event.isFromSource(InputDevice.SOURCE_MOUSE)
+        }
 
         // 长按进入选择后，扩选由这里直接处理；不依赖 GestureDetector 的 onScroll。
         if (event.actionMasked == MotionEvent.ACTION_MOVE && touchState.selectionActive) {
@@ -452,10 +473,32 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
                     } ?: onSelectionRelease?.invoke(-1, -1)
                     touchState.finishSelection()
                 } else {
+                    if (touchPendingClick) {
+                        touchPendingClick = false
+                        // Gesture was a tap, not a drag/scroll: now deliver the click
+                        // that TUIs using mouse reporting expect.
+                        currentEngine?.requestMouseEvent(
+                            action = MOUSE_ACTION_PRESS,
+                            button = MOUSE_BUTTON_LEFT,
+                            mods = mouseModifiers(event),
+                            x = event.x,
+                            y = event.y,
+                            anyButtonPressed = true,
+                        )
+                        currentEngine?.requestMouseEvent(
+                            action = MOUSE_ACTION_RELEASE,
+                            button = MOUSE_BUTTON_LEFT,
+                            mods = mouseModifiers(event),
+                            x = event.x,
+                            y = event.y,
+                            anyButtonPressed = false,
+                        )
+                    }
                     performClick()
                 }
             }
             MotionEvent.ACTION_CANCEL -> {
+                touchPendingClick = false
                 pointerDown = false
                 removeCallbacks(selectionAutoScrollRunnable)
                 if (touchState.selectionActive) {
@@ -494,8 +537,16 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
+        // A terminal has no editable document for autocorrect/prediction. Without
+        // these flags, some IMEs keep English hardware-key input indefinitely as
+        // composing text, while Chinese appears to work only when a candidate is
+        // confirmed through commitText.
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         return object : BaseInputConnection(this, true) {
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 imeState.setComposing(text)
@@ -544,23 +595,48 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                handleKeyEvent(event)
-                return true
+                return handleKeyEvent(event) || super.sendKeyEvent(event)
             }
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
-        handleKeyEvent(event) || super.onKeyDown(keyCode, event)
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
-        handleKeyEvent(event) || super.onKeyUp(keyCode, event)
+    // Hardware keyboards enter through View.dispatchKeyEvent. Handling at this
+    // boundary also covers devices whose events do not reach onKeyDown/onKeyUp.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        handleKeyEvent(event) || super.dispatchKeyEvent(event)
 
     private fun sendInput(text: String) {
         if (text.isNotEmpty()) onInputBytes?.invoke(text.encodeToByteArray())
     }
 
     private fun handleKeyEvent(event: KeyEvent): Boolean {
+        // Some Bluetooth keyboards and IMEs deliver already-composed text as a
+        // single ACTION_MULTIPLE/KEYCODE_UNKNOWN event instead of key down/up.
+        if (event.action == KeyEvent.ACTION_MULTIPLE) {
+            val characters = event.characters
+            if (!characters.isNullOrEmpty()) {
+                sendInput(normalizeTerminalInput(characters))
+                return true
+            }
+            return false
+        }
+        val unicode = event.unicodeChar
+        val isDeadKey = unicode and KeyCharacterMap.COMBINING_ACCENT != 0
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            unicode >= FIRST_PRINTABLE_CODEPOINT &&
+            unicode != DELETE_CODEPOINT &&
+            !isDeadKey &&
+            !event.isCtrlPressed &&
+            !event.isAltPressed &&
+            !event.isMetaPressed &&
+            Character.isValidCodePoint(unicode)
+        ) {
+            // Plain text does not need terminal key-protocol encoding. Sending it
+            // through the same raw-input path as commitText also avoids devices
+            // whose printable KeyEvents are not encoded by the native key encoder.
+            sendInput(String(Character.toChars(unicode)))
+            return true
+        }
         val currentEngine = engine ?: return fallbackHandleKeyEvent(event)
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> if (event.repeatCount > 0) KEY_ACTION_REPEAT else KEY_ACTION_PRESS
@@ -579,7 +655,6 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             KeyEvent.META_SHIFT_LEFT_ON.inv() and
             KeyEvent.META_SHIFT_RIGHT_ON.inv()
         val unshiftedCodepoint = event.getUnicodeChar(withoutShift)
-        val unicode = event.unicodeChar
         val utf8 = if (unicode != 0 && !event.isCtrlPressed && !event.isAltPressed) {
             String(Character.toChars(unicode)).encodeToByteArray()
         } else {
@@ -639,6 +714,14 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        // A terminal should be ready for a physical keyboard as soon as it is
+        // shown. requestFocus alone does not summon the software keyboard.
+        if (!initialFocusRequested) {
+            initialFocusRequested = true
+            post {
+                if (isAttachedToWindow && isShown && !hasFocus()) requestFocus()
+            }
+        }
         hasFocus = hasFocus()
         onTerminalFocusChange?.invoke(hasFocus)
         frameStore?.currentFrame()?.let {
@@ -650,6 +733,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun onDetachedFromWindow() {
         cursorBlinking = false
         textBlinking = false
+        touchPendingClick = false
         if (touchState.releaseMouse()) {
             engine?.requestMouseEvent(
                 MOUSE_ACTION_RELEASE,
@@ -676,6 +760,9 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         if (!physicalMouse && (event.pointerCount != 1 || touchState.twoFingerScrolling)) return false
         if (touchState.selectionArmed || touchState.selectionActive) return false
         if (!currentEngine.mouseReportingActive) return false
+        // A touch gesture is not a mouse click until it is classified as a tap.
+        // Do not emit press/motion from ambiguous touch drags.
+        if (!physicalMouse && touchPendingClick) return false
         val action = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> MOUSE_ACTION_PRESS
             MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE, MotionEvent.ACTION_CANCEL ->
@@ -684,8 +771,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             else -> return false
         }
         if (!physicalMouse && action != MOUSE_ACTION_PRESS && !touchState.mousePressed) return false
+        val anyButtonPressed = if (physicalMouse) event.buttonState != 0 else touchState.mousePressed
         val button = if (action == MOUSE_ACTION_MOTION) {
-            0
+            // Motion events must carry the currently pressed button when a drag is
+            // active. Sending 0/null makes remote TUIs see hover (button code 35)
+            // instead of a drag and can leak malformed mouse reporting sequences.
+            if (anyButtonPressed) pressedMouseButton else 0
         } else {
             mouseButton(event).also { pressedMouseButton = it }
         }
@@ -701,12 +792,15 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
             mods = mouseModifiers(event),
             x = event.x,
             y = event.y,
-            anyButtonPressed = if (physicalMouse) event.buttonState != 0 else touchState.mousePressed,
+            anyButtonPressed = anyButtonPressed,
         )
         return true
     }
 
     private fun releaseTouchMouse(event: MotionEvent) {
+        // This is called once a touch is known to be a scroll/selection/gesture.
+        // Even if no synthetic press was sent yet, cancel the pending tap click.
+        touchPendingClick = false
         if (!touchState.releaseMouse()) return
         engine?.requestMouseEvent(
             action = MOUSE_ACTION_RELEASE,
@@ -863,7 +957,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
 
     private fun shouldBlink(snapshot: GhosttyRenderSnapshot): Boolean =
-        // 对齐旧 xterm.js 的 cursorBlink=true：只要光标可见且 View 持有焦点就闪烁，
+        // 对齐传统桌面终端：只要光标可见且 View 持有焦点就闪烁，
         // 不依赖远端是否发送 DECSET 12。
         hasFocus && snapshot.cursorVisible
 
@@ -1153,6 +1247,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         const val KEY_MOD_ALT = 1 shl 2
         const val KEY_MOD_SUPER = 1 shl 3
         const val KEY_MOD_CAPS_LOCK = 1 shl 4
+        const val FIRST_PRINTABLE_CODEPOINT = 0x20
+        const val DELETE_CODEPOINT = 0x7f
     }
 }
 

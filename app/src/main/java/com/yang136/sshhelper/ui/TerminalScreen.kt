@@ -1,9 +1,6 @@
 package com.yang136.sshhelper.ui
 
-import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -11,14 +8,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
-import android.util.Base64
-import android.view.View
 import android.view.inputmethod.InputMethodManager
-import android.webkit.JavascriptInterface
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -93,8 +83,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -113,13 +101,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.webkit.WebViewAssetLoader
 import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.Credential
@@ -149,19 +135,8 @@ import com.yang136.sshhelper.ui.theme.TerminalPalette
 import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import com.yang136.sshhelper.ui.adaptive.hasHardwareKeyboard
 import com.yang136.sshhelper.ui.design.SshTopAppBar
-import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import android.view.WindowInsets as AndroidWindowInsets
 
 private val NullableSessionIdSaver = Saver<SessionId?, String>(
     save = { it?.value.orEmpty() },
@@ -196,11 +171,10 @@ fun TerminalScreen(
     val initialId = initialSessionId?.let(::SessionId)
     var activeId by rememberSaveable(hostId, stateSaver = NullableSessionIdSaver) { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
-    val controller = remember(settings.terminalBackend) {
-        createTerminalFrontend(settings.terminalBackend)
+    val controller = remember {
+        createTerminalFrontend()
     }
     val caseSensitiveSearchSupported = controller.supportsCaseSensitiveSearch
-    val surfaceRevision = remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var closingSession by remember { mutableStateOf<SessionId?>(null) }
@@ -251,10 +225,9 @@ fun TerminalScreen(
             persistentDialogVisible = false
         }
     }
-    // The frontend is replaced when the rollout backend changes. Keying this
-    // effect by controller guarantees the old output collector is cancelled
-    // before the new frontend is reset and receives the current snapshot.
-    LaunchedEffect(activeId, surfaceRevision.intValue, controller) {
+    // Keying by controller guarantees the old output collector is cancelled
+    // before a replacement frontend is reset and receives the current snapshot.
+    LaunchedEffect(activeId, controller) {
         val id = activeId ?: return@LaunchedEffect
         sessionsViewModel.enableFeature(id, SessionFeature.SHELL)
         controller.reset()
@@ -303,7 +276,7 @@ fun TerminalScreen(
         controller.onCtrlArmed = { ctrlArmed = it }
         controller.onRenderingDelayed = { renderingDelayed = it }
         controller.onBell = {
-            (controller as? GhosttyTerminalFrontend)?.view?.performBellFeedback()
+            controller.view?.performBellFeedback()
         }
         controller.onTitleChange = { remoteTitle = sanitizeTerminalMetadata(it) }
         controller.onPwdChange = { remoteWorkingDirectory = displayTerminalWorkingDirectory(it) }
@@ -349,46 +322,26 @@ fun TerminalScreen(
     val hasHwKeyboard = hasHardwareKeyboard()
     val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))
     val terminalBackgroundOpacity = effectiveTerminalBackgroundOpacity(
-        backend = settings.terminalBackend,
         transparencyEnabled = settings.terminalTransparencyEnabled,
         configuredOpacity = settings.terminalBackgroundOpacity,
     )
-    val transparentGhosttyBackground =
-        controller is GhosttyTerminalFrontend && terminalBackgroundOpacity < 1f
+    val transparentGhosttyBackground = terminalBackgroundOpacity < 1f
     val terminalContainerBackground = if (transparentGhosttyBackground) {
         androidx.compose.ui.graphics.Color.Transparent
     } else {
         terminalBackground
     }
     val currentSessionState = rememberUpdatedState(current)
-    // WebView keeps its JavaScript terminal state inside the View, so moving the same
-    // instance between portrait and landscape is intentional. AndroidView-backed Ghostty
-    // must instead be recreated under the destination layout constraints: moving that View
-    // can retain its old full-screen layer and cover the landscape rail. Ghostty's frontend
-    // owns the native state and render snapshot, therefore replacing only its View is safe.
-    val terminalSurface: @Composable (Modifier) -> Unit = when (controller) {
-        is XtermTerminalFrontend -> remember(controller) {
-            movableContentOf<Modifier> { modifier ->
-                TerminalWebView(
-                    controller = controller,
-                    initialBackground = terminalPalette.background,
-                    onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
-                    onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                    onSurfaceCreated = { surfaceRevision.intValue += 1 },
-                    modifier = modifier,
-                )
-            }
-        }
-        is GhosttyTerminalFrontend -> { modifier ->
-            GhosttyTerminalSurface(
-                frontend = controller,
-                backgroundOpacity = terminalBackgroundOpacity,
-                onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
-                onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                modifier = modifier,
-            )
-        }
-        else -> { _: Modifier -> error("Unsupported terminal frontend: ${controller::class.simpleName}") }
+    // Ghostty's frontend owns the native state and render snapshot, so its AndroidView
+    // can be recreated when portrait/landscape layout constraints change.
+    val terminalSurface: @Composable (Modifier) -> Unit = { modifier ->
+        GhosttyTerminalSurface(
+            frontend = controller,
+            backgroundOpacity = terminalBackgroundOpacity,
+            onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
+            onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+            modifier = modifier,
+        )
     }
 
     fun togglePanel(panel: TerminalPanel) {
@@ -1733,378 +1686,6 @@ internal fun CredentialDialog(
     )
 }
 
-internal class XtermTerminalFrontend : TerminalFrontend {
-    private sealed interface RenderCommand {
-        val generation: Long
-        data class Reset(override val generation: Long) : RenderCommand
-        data class Data(override val generation: Long, val bytes: ByteArray) : RenderCommand
-    }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val renderCommands = Channel<RenderCommand>(TERMINAL_RENDER_QUEUE_CAPACITY)
-    private var webView: WebView? = null
-    private var ready = false
-    private var readySignal = CompletableDeferred<Unit>()
-    private var appearance: Pair<TerminalPalette, Int>? = null
-    private var generation = 0L
-    private var nextBatchId = 0L
-    private var queuedBytes = 0
-    private var currentAcknowledgement: Triple<Long, Long, CompletableDeferred<Unit>>? = null
-    private var deferredCommand: RenderCommand? = null
-    override var onSelectionStateChanged: ((Boolean, Boolean) -> Unit)? = null
-    override var onCopied: ((Int) -> Unit)? = null
-    override var onSearchResults: ((Int, Int) -> Unit)? = null
-    override var onOpenLink: ((String) -> Unit)? = null
-    override var onCtrlArmed: ((Boolean) -> Unit)? = null
-    override var onRenderingDelayed: ((Boolean) -> Unit)? = null
-    override var onBell: (() -> Unit)? = null
-    override var onTitleChange: ((String) -> Unit)? = null
-    override var onPwdChange: ((String) -> Unit)? = null
-
-    init {
-        scope.launch { renderLoop() }
-    }
-
-    fun attach(view: WebView) {
-        if (webView !== view) {
-            currentAcknowledgement?.third?.complete(Unit)
-            currentAcknowledgement = null
-            ready = false
-            readySignal = CompletableDeferred()
-        }
-        webView = view
-    }
-
-    fun markReady() {
-        ready = true
-        readySignal.complete(Unit)
-        applyAppearance()
-    }
-
-    override fun close() {
-        currentAcknowledgement?.third?.complete(Unit)
-        currentAcknowledgement = null
-        webView = null
-        ready = false
-        scope.cancel()
-    }
-
-    override suspend fun write(bytes: ByteArray) {
-        val currentGeneration = generation
-        splitTerminalOutput(bytes).forEach { chunk ->
-            queuedBytes += chunk.size
-            updateRenderingDelay()
-            try {
-                renderCommands.send(RenderCommand.Data(currentGeneration, chunk))
-            } catch (error: Throwable) {
-                releaseQueuedBytes(chunk.size)
-                throw error
-            }
-        }
-    }
-
-    override suspend fun reset() {
-        generation += 1
-        renderCommands.send(RenderCommand.Reset(generation))
-    }
-
-    override fun paste(context: Context) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
-        writeInput(text, webView)
-    }
-
-    override fun pasteText(text: String) = writeInput(text, webView)
-    override fun sendInput(bytes: ByteArray) {
-        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        evaluate("window.sshTerminal.pasteBase64('$base64')")
-    }
-
-    override fun setAppearance(palette: TerminalPalette, fontSize: Int) {
-        appearance = palette to fontSize
-        applyAppearance()
-    }
-
-    override fun enterSelectionMode() = evaluate("window.sshTerminal.enterSelectionMode()")
-    override fun selectAll() = evaluate("window.sshTerminal.selectAll()")
-    override fun copySelection() = evaluate("window.sshTerminal.copySelection()")
-    override fun clearSelection() = evaluate("window.sshTerminal.clearSelection()")
-    override fun search(query: String, backwards: Boolean, caseSensitive: Boolean) =
-        evaluate("window.sshTerminal.search(${JSONObject.quote(query)},$backwards,$caseSensitive)")
-    override fun clearSearch() = evaluate("window.sshTerminal.clearSearch()")
-    override fun setImeVisible(visible: Boolean) = evaluate("window.sshTerminal.setImeVisible($visible)")
-    override fun armCtrl() {
-        evaluate("window.sshTerminal.armCtrl()")
-        focusAndShowKeyboard()
-    }
-
-    fun selectionChanged(active: Boolean, hasSelection: Boolean) {
-        onSelectionStateChanged?.invoke(active, hasSelection)
-    }
-
-    fun copied(characterCount: Int) {
-        onCopied?.invoke(characterCount)
-    }
-
-    fun searchResults(index: Int, total: Int) = onSearchResults?.invoke(index, total)
-    fun openLink(uri: String) = onOpenLink?.invoke(uri)
-    fun ctrlArmed(armed: Boolean) = onCtrlArmed?.invoke(armed)
-
-    fun outputProcessed(processedGeneration: Long, batchId: Long) {
-        val acknowledgement = currentAcknowledgement ?: return
-        if (acknowledgement.first == processedGeneration && acknowledgement.second == batchId) {
-            acknowledgement.third.complete(Unit)
-        }
-    }
-
-    override fun focusAndShowKeyboard() {
-        val view = webView ?: return
-        view.requestFocus(View.FOCUS_DOWN)
-        view.evaluateJavascript("window.sshTerminal && window.sshTerminal.focusForIme()", null)
-        view.postDelayed({
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                view.windowInsetsController?.show(AndroidWindowInsets.Type.ime())
-            }
-            val inputMethod = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            inputMethod.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
-        }, 80)
-    }
-
-    override fun hideKeyboard() {
-        val view = webView ?: return
-        setImeVisible(false)
-        view.clearFocus()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            view.windowInsetsController?.hide(AndroidWindowInsets.Type.ime())
-        }
-        val inputMethod = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        inputMethod.hideSoftInputFromWindow(view.windowToken, 0)
-    }
-
-    private suspend fun renderLoop() {
-        while (true) {
-            val command = deferredCommand?.also { deferredCommand = null } ?: renderCommands.receive()
-            if (command.generation != generation) {
-                if (command is RenderCommand.Data) releaseQueuedBytes(command.bytes.size)
-                continue
-            }
-            when (command) {
-                is RenderCommand.Reset -> {
-                    awaitReady()
-                    val acknowledgement = CompletableDeferred<Unit>()
-                    currentAcknowledgement = Triple(command.generation, RESET_BATCH_ID, acknowledgement)
-                    webView?.evaluateJavascript("window.sshTerminal.resetOutput(${command.generation})", null)
-                    acknowledgement.await()
-                    currentAcknowledgement = null
-                }
-                is RenderCommand.Data -> renderData(command)
-            }
-        }
-    }
-
-    private suspend fun renderData(first: RenderCommand.Data) {
-        val renderGeneration = first.generation
-        delay(8)
-        if (renderGeneration != generation) {
-            releaseQueuedBytes(first.bytes.size)
-            return
-        }
-        val output = ByteArrayOutputStream(MAX_TERMINAL_RENDER_BATCH_BYTES)
-        output.write(first.bytes)
-        while (output.size() < MAX_TERMINAL_RENDER_BATCH_BYTES) {
-            val next = renderCommands.tryReceive().getOrNull() ?: break
-            if (next !is RenderCommand.Data || next.generation != generation || output.size() + next.bytes.size > MAX_TERMINAL_RENDER_BATCH_BYTES) {
-                deferredCommand = next
-                break
-            }
-            output.write(next.bytes)
-        }
-        val batch = output.toByteArray()
-        awaitReady()
-        val batchId = ++nextBatchId
-        val acknowledgement = CompletableDeferred<Unit>()
-        currentAcknowledgement = Triple(renderGeneration, batchId, acknowledgement)
-        val warning = scope.launch {
-            delay(1_000)
-            onRenderingDelayed?.invoke(true)
-        }
-        val base64 = withContext(Dispatchers.Default) { Base64.encodeToString(batch, Base64.NO_WRAP) }
-        webView?.evaluateJavascript("window.sshTerminal.writeBase64($renderGeneration,$batchId,'$base64')", null)
-        acknowledgement.await()
-        warning.cancel()
-        currentAcknowledgement = null
-        releaseQueuedBytes(batch.size)
-    }
-
-    private suspend fun awaitReady() {
-        if (!ready || webView == null) readySignal.await()
-    }
-
-    private fun releaseQueuedBytes(count: Int) {
-        queuedBytes = (queuedBytes - count).coerceAtLeast(0)
-        updateRenderingDelay()
-    }
-
-    private fun updateRenderingDelay() {
-        when {
-            queuedBytes >= TERMINAL_RENDER_WARNING_BYTES -> onRenderingDelayed?.invoke(true)
-            queuedBytes <= TERMINAL_RENDER_RECOVERED_BYTES -> onRenderingDelayed?.invoke(false)
-        }
-    }
-
-    private fun writeInput(text: String, view: WebView?) {
-        val base64 = Base64.encodeToString(text.encodeToByteArray(), Base64.NO_WRAP)
-        view?.evaluateJavascript("window.sshTerminal.pasteBase64('$base64')", null)
-    }
-
-    private fun evaluate(script: String) {
-        val view = webView ?: return
-        if (ready) view.post { view.evaluateJavascript(script, null) }
-    }
-
-    private fun applyAppearance() {
-        val view = webView ?: return
-        val (palette, fontSize) = appearance ?: return
-        view.setBackgroundColor(Color.parseColor(palette.background))
-        if (!ready) return
-        val theme = JSONObject().apply {
-            put("background", palette.background)
-            put("foreground", palette.foreground)
-            put("cursor", palette.cursor)
-            put("cursorAccent", palette.cursorAccent)
-            put("selectionBackground", palette.selectionBackground)
-            put("black", palette.black)
-            put("red", palette.red)
-            put("green", palette.green)
-            put("yellow", palette.yellow)
-            put("blue", palette.blue)
-            put("magenta", palette.magenta)
-            put("cyan", palette.cyan)
-            put("white", palette.white)
-            put("brightBlack", palette.brightBlack)
-            put("brightRed", palette.brightRed)
-            put("brightGreen", palette.brightGreen)
-            put("brightYellow", palette.brightYellow)
-            put("brightBlue", palette.brightBlue)
-            put("brightMagenta", palette.brightMagenta)
-            put("brightCyan", palette.brightCyan)
-            put("brightWhite", palette.brightWhite)
-        }
-        val payload = JSONObject().put("theme", theme).put("fontSize", fontSize)
-        view.post { view.evaluateJavascript("window.sshTerminal.setAppearance($payload)", null) }
-    }
-
-    private companion object {
-        const val RESET_BATCH_ID = -1L
-    }
-}
-
-private class TerminalBridge(
-    private val view: WebView,
-    private val controller: XtermTerminalFrontend,
-    private val inputCallback: (ByteArray) -> Unit,
-    private val resizeCallback: (Int, Int) -> Unit,
-) {
-    @JavascriptInterface fun onInput(base64: String) {
-        runCatching { Base64.decode(base64, Base64.DEFAULT) }.onSuccess(inputCallback)
-    }
-    @JavascriptInterface fun onResize(columns: Int, rows: Int): Unit = resizeCallback(columns, rows)
-    @JavascriptInterface fun onRequestKeyboard() {
-        view.post(controller::focusAndShowKeyboard)
-    }
-    @JavascriptInterface fun onHideKeyboard() {
-        view.post(controller::hideKeyboard)
-    }
-    @JavascriptInterface fun onSelectionChanged(active: Boolean, hasSelection: Boolean) {
-        view.post { controller.selectionChanged(active, hasSelection) }
-    }
-    @JavascriptInterface fun onCopySelection(base64: String) {
-        runCatching { Base64.decode(base64, Base64.DEFAULT).decodeToString() }
-            .onSuccess { selection ->
-                if (selection.isEmpty()) return@onSuccess
-                val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("SSH terminal", selection))
-                view.post { controller.copied(selection.length) }
-            }
-    }
-    @JavascriptInterface fun onSearchResults(index: Int, total: Int) {
-        view.post { controller.searchResults(index, total) }
-    }
-    @JavascriptInterface fun onOpenLink(uri: String) {
-        if (uri.startsWith("https://", true) || uri.startsWith("http://", true)) {
-            view.post { controller.openLink(uri) }
-        }
-    }
-    @JavascriptInterface fun onCtrlArmed(armed: Boolean) {
-        view.post { controller.ctrlArmed(armed) }
-    }
-    @JavascriptInterface fun onOutputProcessed(generation: Long, batchId: Long) {
-        view.post { controller.outputProcessed(generation, batchId) }
-    }
-    @JavascriptInterface fun onReady(columns: Int, rows: Int) {
-        view.post {
-            controller.markReady()
-            resizeCallback(columns, rows)
-        }
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun TerminalWebView(
-    controller: XtermTerminalFrontend,
-    initialBackground: String,
-    onInput: (ByteArray) -> Unit,
-    onResize: (Int, Int) -> Unit,
-    onSurfaceCreated: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // WebView 的 JS bridge 生命周期长于一次 Compose 重组，必须间接读取最新回调；
-    // 否则切换会话后 bridge 仍会把输入和 resize 发给旧会话。
-    val inputState = rememberUpdatedState(onInput)
-    val resizeState = rememberUpdatedState(onResize)
-    val surfaceCreatedState = rememberUpdatedState(onSurfaceCreated)
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            val assetLoader = WebViewAssetLoader.Builder()
-                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                .build()
-            WebView(context).apply {
-                // WebView 绑定时立即应用已保存的终端背景色，避免首帧深色闪烁。
-                setBackgroundColor(Color.parseColor(initialBackground))
-                isFocusable = true
-                isFocusableInTouchMode = true
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = false
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                settings.setSupportMultipleWindows(false)
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                webViewClient = object : WebViewClient() {
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                        assetLoader.shouldInterceptRequest(request.url)
-
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                        request.url.host != "appassets.androidplatform.net"
-                }
-                controller.attach(this)
-                addJavascriptInterface(
-                    TerminalBridge(
-                        this,
-                        controller,
-                        { inputState.value(it) },
-                        { columns, rows -> resizeState.value(columns, rows) },
-                    ),
-                    "AndroidTerminal",
-                )
-                post { surfaceCreatedState.value() }
-                loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
-            }
-        },
-        update = { controller.attach(it) },
-    )
-}
 
 @Composable
 private fun TerminalSystemBarsEffect(isLandscape: Boolean) {

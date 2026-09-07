@@ -24,10 +24,9 @@ internal fun coerceTerminalBackgroundOpacity(value: Float): Float =
     else DEFAULT_TERMINAL_BACKGROUND_OPACITY
 
 internal fun effectiveTerminalBackgroundOpacity(
-    backend: TerminalBackend,
     transparencyEnabled: Boolean,
     configuredOpacity: Float,
-): Float = if (backend == TerminalBackend.GHOSTTY && transparencyEnabled) {
+): Float = if (transparencyEnabled) {
     coerceTerminalBackgroundOpacity(configuredOpacity)
 } else {
     1f
@@ -41,11 +40,6 @@ enum class ThemeSource { PRESET, IMAGE }
 
 fun parseThemeSource(storedValue: String?): ThemeSource =
     enumValueOrDefault(storedValue, ThemeSource.PRESET)
-
-enum class TerminalBackend { XTERM, GHOSTTY }
-
-fun parseTerminalBackend(storedValue: String?): TerminalBackend =
-    enumValueOrDefault(storedValue, TerminalBackend.XTERM)
 
 enum class ImageThemeVariant(val label: String) {
     IMMERSIVE("沉浸"),
@@ -74,8 +68,6 @@ data class AppSettings(
     val imageThemeVariant: ImageThemeVariant = ImageThemeVariant.IMMERSIVE,
     val imageOverlayStrength: Float = DEFAULT_IMAGE_OVERLAY_STRENGTH,
     val terminalFontSize: Int = DEFAULT_TERMINAL_FONT_SIZE,
-    /** Terminal backend used by the development/gray rollout switch. */
-    val terminalBackend: TerminalBackend = TerminalBackend.XTERM,
     val terminalTransparencyEnabled: Boolean = false,
     val terminalBackgroundOpacity: Float = DEFAULT_TERMINAL_BACKGROUND_OPACITY,
     val extraKeys: List<ExtraKeyId> = DEFAULT_EXTRA_KEYS,
@@ -109,7 +101,6 @@ interface SettingsRepository {
     suspend fun setImageThemeVariant(variant: ImageThemeVariant)
     suspend fun setImageOverlayStrength(strength: Float)
     suspend fun setTerminalFontSize(size: Int)
-    suspend fun setTerminalBackend(backend: TerminalBackend)
     suspend fun setTerminalTransparencyEnabled(enabled: Boolean)
     suspend fun setTerminalBackgroundOpacity(opacity: Float)
     suspend fun setExtraKeys(keys: List<ExtraKeyId>)
@@ -141,7 +132,6 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 terminalFontSize = sanitizeTerminalFontSize(
                     preferences[TERMINAL_FONT_SIZE] ?: DEFAULT_TERMINAL_FONT_SIZE,
                 ),
-                terminalBackend = parseTerminalBackend(preferences[TERMINAL_BACKEND]),
                 terminalTransparencyEnabled = preferences[TERMINAL_TRANSPARENCY_ENABLED] ?: false,
                 terminalBackgroundOpacity = coerceTerminalBackgroundOpacity(
                     preferences[TERMINAL_BACKGROUND_OPACITY] ?: DEFAULT_TERMINAL_BACKGROUND_OPACITY,
@@ -179,10 +169,6 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
 
     override suspend fun setTerminalFontSize(size: Int) {
         dataStore.edit { it[TERMINAL_FONT_SIZE] = sanitizeTerminalFontSize(size) }
-    }
-
-    override suspend fun setTerminalBackend(backend: TerminalBackend) {
-        dataStore.edit { it[TERMINAL_BACKEND] = backend.name }
     }
 
     override suspend fun setTerminalTransparencyEnabled(enabled: Boolean) {
@@ -234,7 +220,6 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val IMAGE_THEME_VARIANT = stringPreferencesKey("image_theme_variant")
         val IMAGE_OVERLAY_STRENGTH = floatPreferencesKey("image_overlay_strength")
         val TERMINAL_FONT_SIZE = intPreferencesKey("terminal_font_size")
-        val TERMINAL_BACKEND = stringPreferencesKey("terminal_backend")
         val TERMINAL_TRANSPARENCY_ENABLED = booleanPreferencesKey("terminal_transparency_enabled")
         val TERMINAL_BACKGROUND_OPACITY = floatPreferencesKey("terminal_background_opacity")
         val EXTRA_KEYS = stringPreferencesKey("extra_keys")
