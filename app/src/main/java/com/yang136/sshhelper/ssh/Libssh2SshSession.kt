@@ -4,9 +4,11 @@ import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.data.ProxyType
+import com.yang136.sshhelper.sftp.NativeSftpClient
 import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,9 +32,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * This implementation uses the nonblocking runtime JNI path for host-key
  * probing and keeps an authenticated persistent session open for repeated exec
  * calls, including deadline/output-limit support. HTTP/SOCKS5 proxies are
- * supported through the runtime transport handoff path. Shell/PTY, SFTP,
- * forwarding, jump hosts and full runtime host-key decisions are not implemented
- * yet.
+ * supported through the runtime transport handoff path. Shell/PTY and SFTP are
+ * wired to persistent native resources. Forwarding, jump hosts and full runtime
+ * host-key decisions are not implemented yet.
  */
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
@@ -60,6 +62,7 @@ class Libssh2SshSession(
     private var persistentSessionOpen = false
     private val nativeRuntime = NativeSshRuntime()
     private val terminalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val sftpClients = ConcurrentHashMap.newKeySet<NativeSftpClient>()
     @Volatile private var terminalReaderJob: Job? = null
     @Volatile private var terminalChannelOpen = false
     private var ptyColumns = 80
@@ -606,6 +609,8 @@ class Libssh2SshSession(
         terminalReaderJob = null
         terminalChannelOpen = false
         cancelPendingHostKey()
+        sftpClients.toList().forEach(NativeSftpClient::close)
+        sftpClients.clear()
         nativeRuntime.close()
         persistentSessionOpen = false
         route = null
@@ -626,7 +631,10 @@ class Libssh2SshSession(
     }
 
     override suspend fun openSftpClient(): com.yang136.sshhelper.sftp.SftpClient {
-        error("libssh2 POC 暂不支持 SFTP")
+        check(persistentSessionOpen && !closed) { "SSH 连接不可用" }
+        val clientHandle = withContext(Dispatchers.IO) { nativeRuntime.createSftpClient() }
+        return NativeSftpClient(nativeRuntime, clientHandle) { client -> sftpClients.remove(client) }
+            .also(sftpClients::add)
     }
 
     override suspend fun registerForward(request: ForwardRequest): ForwardHandle {
@@ -640,6 +648,8 @@ class Libssh2SshSession(
         terminalChannelOpen = false
         terminalScope.cancel()
         cancelPendingHostKey()
+        sftpClients.toList().forEach(NativeSftpClient::close)
+        sftpClients.clear()
         nativeRuntime.close()
         persistentSessionOpen = false
         route = null

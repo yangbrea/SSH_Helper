@@ -60,6 +60,13 @@ int main(int argc, char** argv) {
         std::cerr << "sftp list output unexpected: " << e.payload << "\n";
         return 1;
     }
+    const std::string first_line = e.payload.substr(0, e.payload.find('\n'));
+    size_t tabs = 0;
+    for (const char value : first_line) tabs += value == '\t' ? 1U : 0U;
+    if (tabs != 6) {
+        std::cerr << "sftp list metadata fields missing: " << first_line << "\n";
+        return 1;
+    }
 
     std::cout << "runtime-sftp-list-ok\n";
     runtime->shutdown();

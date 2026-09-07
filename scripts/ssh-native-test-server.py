@@ -85,6 +85,15 @@ class Server(asyncssh.SSHServer):
         return ExecSession()
 
 
+class Libssh2SFTPServer(asyncssh.SFTPServer):
+    """Adapt AsyncSSH's RFC argument order to libssh2/OpenSSH SFTP v3."""
+
+    def symlink(self, oldpath, newpath):
+        # libssh2 uses OpenSSH's historical target/link wire order. AsyncSSH's
+        # default parser presents those two fields in reverse to this method.
+        return super().symlink(newpath, oldpath)
+
+
 async def main():
     auth_mode = sys.argv[1] if len(sys.argv) > 1 else "password"
     if auth_mode not in ("password", "kbdint", "sftp"):
@@ -96,7 +105,7 @@ async def main():
             "127.0.0.1",
             0,
             server_host_keys=[key],
-            sftp_factory=True,
+            sftp_factory=Libssh2SFTPServer,
         )
     else:
         server = await asyncssh.create_server(

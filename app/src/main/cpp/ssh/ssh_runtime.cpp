@@ -236,6 +236,9 @@ struct LoopContext::Access {
     virtual SessionState getState() const noexcept = 0;
     virtual void setState(SessionState next) = 0;
     virtual void add(std::unique_ptr<RuntimeResource> resource) = 0;
+    virtual ResourceId storeIndexed(std::unique_ptr<RuntimeResource> resource) = 0;
+    virtual RuntimeResource* getIndexed(ResourceId id, ResourceKind kind) noexcept = 0;
+    virtual void releaseIndexed(ResourceId id) noexcept = 0;
     virtual void storeTransport(int fd) = 0;
     virtual int takeTransport() = 0;
     virtual void storeSession(std::unique_ptr<RuntimeResource> session) = 0;
@@ -250,6 +253,19 @@ void LoopContext::transition(SessionState next) { access_->setState(next); }
 void LoopContext::addResource(std::unique_ptr<RuntimeResource> resource) {
     if (!resource) throw std::invalid_argument("resource is null");
     access_->add(std::move(resource));
+}
+
+ResourceId LoopContext::storeIndexedResource(std::unique_ptr<RuntimeResource> resource) {
+    if (!resource) throw std::invalid_argument("indexed resource is null");
+    return access_->storeIndexed(std::move(resource));
+}
+
+RuntimeResource* LoopContext::indexedResource(ResourceId id, ResourceKind kind) const noexcept {
+    return access_->getIndexed(id, kind);
+}
+
+void LoopContext::releaseIndexedResource(ResourceId id) noexcept {
+    access_->releaseIndexed(id);
 }
 
 void LoopContext::storeTransportFd(int fd) {
@@ -384,6 +400,34 @@ public:
     void add(std::unique_ptr<RuntimeResource> resource) override {
         assertOwner();
         resources_.push_back(std::move(resource));
+    }
+
+    ResourceId storeIndexed(std::unique_ptr<RuntimeResource> resource) override {
+        assertOwner();
+        if (!resource) throw std::invalid_argument("indexed resource is null");
+        const ResourceId id = next_resource_id_++;
+        RuntimeResource* pointer = resource.get();
+        resources_.push_back(std::move(resource));
+        indexed_resources_.emplace(id, pointer);
+        return id;
+    }
+
+    RuntimeResource* getIndexed(ResourceId id, ResourceKind kind) noexcept override {
+        assertOwner();
+        const auto found = indexed_resources_.find(id);
+        if (found == indexed_resources_.end() || found->second == nullptr ||
+            found->second->kind() != kind) {
+            return nullptr;
+        }
+        return found->second;
+    }
+
+    void releaseIndexed(ResourceId id) noexcept override {
+        assertOwner();
+        const auto found = indexed_resources_.find(id);
+        if (found == indexed_resources_.end()) return;
+        if (found->second != nullptr) found->second->forceClose();
+        indexed_resources_.erase(found);
     }
 
     void storeTransport(int fd) override {
@@ -956,6 +1000,8 @@ private:
     ReadySet ready_;
 
     std::vector<std::unique_ptr<RuntimeResource>> resources_;
+    std::unordered_map<ResourceId, RuntimeResource*> indexed_resources_;
+    ResourceId next_resource_id_ = 1;
     RuntimeResource* active_session_ = nullptr;
     RuntimeResource* active_channel_ = nullptr;
     int pending_transport_fd_ = -1;

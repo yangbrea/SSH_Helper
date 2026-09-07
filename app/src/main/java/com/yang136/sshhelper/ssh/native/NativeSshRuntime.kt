@@ -101,6 +101,60 @@ class NativeSshRuntime {
         return NativeSshBridge.nativeRunCloseShell(handle)
     }
 
+    fun createSftpClient(): Long {
+        ensureCreated()
+        return NativeSshBridge.nativeCreateSftpClient(handle)
+            .substringAfter("handle=", "")
+            .toLongOrNull()
+            ?: error("native SFTP client handle missing")
+    }
+
+    fun closeSftpClient(clientHandle: Long) {
+        if (clientHandle == 0L || handle == 0L) return
+        NativeSshBridge.nativeCloseSftpClient(handle, clientHandle)
+    }
+
+    fun runSftpCommand(
+        clientHandle: Long,
+        command: Int,
+        path: String,
+        target: String = "",
+        value: Long = 0,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunSftpCommand(
+            handle, clientHandle, command, path, target, value,
+        )
+    }
+
+    fun runSftpOpen(
+        clientHandle: Long,
+        path: String,
+        offset: Long,
+        write: Boolean,
+        truncate: Boolean,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunSftpOpen(
+            handle, clientHandle, path, offset, write, truncate,
+        )
+    }
+
+    fun runSftpRead(fileHandle: Long, maxBytes: Int): ByteArray {
+        ensureCreated()
+        return NativeSshBridge.nativeRunSftpRead(handle, fileHandle, maxBytes)
+    }
+
+    fun runSftpWrite(fileHandle: Long, data: ByteArray): Int {
+        ensureCreated()
+        return NativeSshBridge.nativeRunSftpWrite(handle, fileHandle, data)
+    }
+
+    fun runSftpClose(fileHandle: Long) {
+        if (fileHandle == 0L || handle == 0L) return
+        NativeSshBridge.nativeRunSftpClose(handle, fileHandle)
+    }
+
     fun runPendingTcpHandshake(
         timeoutMillis: Long,
     ): String {

@@ -196,6 +196,33 @@ object NativeSshBridge {
         handle: Long,
     ): String
 
+    /** Runs an SFTP metadata/path command on the active authenticated session. */
+    external fun nativeCreateSftpClient(handle: Long): String
+    external fun nativeCloseSftpClient(handle: Long, clientHandle: Long)
+
+    external fun nativeRunSftpCommand(
+        handle: Long,
+        clientHandle: Long,
+        command: Int,
+        path: String,
+        target: String,
+        value: Long,
+    ): String
+
+    /** Opens a streaming SFTP file and returns its opaque handle and size. */
+    external fun nativeRunSftpOpen(
+        handle: Long,
+        clientHandle: Long,
+        path: String,
+        offset: Long,
+        write: Boolean,
+        truncate: Boolean,
+    ): String
+
+    external fun nativeRunSftpRead(handle: Long, fileHandle: Long, maxBytes: Int): ByteArray
+    external fun nativeRunSftpWrite(handle: Long, fileHandle: Long, data: ByteArray): Int
+    external fun nativeRunSftpClose(handle: Long, fileHandle: Long)
+
     /**
      * Submits a direct TCP+SSH password exec operation to the runtime handle and
      * waits for its completion. Returns the same payload as the direct exec APIs.

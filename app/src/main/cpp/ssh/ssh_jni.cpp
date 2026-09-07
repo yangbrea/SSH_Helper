@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <new>
 #include <string>
+#include <vector>
 
 #include "../handle_registry.h"
 #include "ssh_connect_operation.h"
@@ -28,6 +29,7 @@
 #include "ssh_operations.h"
 #include "ssh_persistent_session.h"
 #include "ssh_runtime.h"
+#include "ssh_sftp_operation.h"
 #include "ssh_shell_operation.h"
 #include "ssh_socket.h"
 
@@ -110,7 +112,8 @@ std::string awaitRuntimeCompletion(
     JNIEnv* env,
     const std::shared_ptr<sshnative::SshNativeSession>& session,
     sshnative::SubmitResult submit,
-    bool map_timeout_to_exit_124 = false) {
+    bool map_timeout_to_exit_124 = false,
+    bool include_error_code = false) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
         sshnative::RuntimeEvent event;
@@ -126,9 +129,12 @@ std::string awaitRuntimeCompletion(
             event.error.domain == sshnative::ErrorDomain::kTimeout) {
             return "exit=124\n";
         }
-        const std::string message = event.error.message.empty()
+        std::string message = event.error.message.empty()
             ? "native runtime operation failed"
             : event.error.message;
+        if (include_error_code && !event.error.code.empty()) {
+            message = event.error.code + ":" + message;
+        }
         jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
         if (exceptionClass != nullptr) {
             env->ThrowNew(exceptionClass, message.c_str());
@@ -190,6 +196,110 @@ std::string jstringToString(JNIEnv* env, jstring value) {
     std::string result(chars);
     env->ReleaseStringUTFChars(value, chars);
     return result;
+}
+
+// JNI's GetStringUTFChars/NewStringUTF use modified UTF-8 (CESU-8 for
+// supplementary characters), while SFTP paths are ordinary UTF-8 byte
+// strings. Keep the existing modified-UTF helpers for legacy JNI calls, but
+// use these conversions at the SFTP boundary so names containing characters
+// outside the BMP (for example emoji) round-trip correctly.
+std::string jstringToUtf8(JNIEnv* env, jstring value) {
+    if (value == nullptr) return std::string();
+    const jsize length = env->GetStringLength(value);
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (chars == nullptr) return std::string();
+
+    std::string result;
+    result.reserve(static_cast<size_t>(length));
+    for (jsize index = 0; index < length; ++index) {
+        uint32_t code_point = chars[index];
+        if (code_point >= 0xD800 && code_point <= 0xDBFF && index + 1 < length) {
+            const uint32_t low = chars[index + 1];
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                code_point = 0x10000 + ((code_point - 0xD800) << 10) +
+                    (low - 0xDC00);
+                ++index;
+            } else {
+                code_point = 0xFFFD;
+            }
+        } else if (code_point >= 0xD800 && code_point <= 0xDFFF) {
+            code_point = 0xFFFD;
+        }
+
+        if (code_point <= 0x7F) {
+            result.push_back(static_cast<char>(code_point));
+        } else if (code_point <= 0x7FF) {
+            result.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
+            result.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+        } else if (code_point <= 0xFFFF) {
+            result.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
+            result.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+        } else {
+            result.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
+            result.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
+        }
+    }
+    env->ReleaseStringChars(value, chars);
+    return result;
+}
+
+jstring utf8ToJString(JNIEnv* env, const std::string& value) {
+    std::vector<jchar> result;
+    result.reserve(value.size());
+    size_t index = 0;
+    while (index < value.size()) {
+        const uint8_t first = static_cast<uint8_t>(value[index]);
+        uint32_t code_point = 0xFFFD;
+        size_t width = 1;
+        uint32_t minimum = 0;
+        if (first <= 0x7F) {
+            code_point = first;
+        } else if ((first & 0xE0) == 0xC0) {
+            code_point = first & 0x1F;
+            width = 2;
+            minimum = 0x80;
+        } else if ((first & 0xF0) == 0xE0) {
+            code_point = first & 0x0F;
+            width = 3;
+            minimum = 0x800;
+        } else if ((first & 0xF8) == 0xF0) {
+            code_point = first & 0x07;
+            width = 4;
+            minimum = 0x10000;
+        }
+
+        bool valid = width == 1 ? first <= 0x7F : index + width <= value.size();
+        for (size_t offset = 1; valid && offset < width; ++offset) {
+            const uint8_t continuation =
+                static_cast<uint8_t>(value[index + offset]);
+            if ((continuation & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+            code_point = (code_point << 6) | (continuation & 0x3F);
+        }
+        valid = valid && code_point >= minimum && code_point <= 0x10FFFF &&
+            !(code_point >= 0xD800 && code_point <= 0xDFFF);
+        if (!valid) {
+            code_point = 0xFFFD;
+            width = 1;
+        }
+        index += width;
+
+        if (code_point <= 0xFFFF) {
+            result.push_back(static_cast<jchar>(code_point));
+        } else {
+            code_point -= 0x10000;
+            result.push_back(static_cast<jchar>(0xD800 | (code_point >> 10)));
+            result.push_back(static_cast<jchar>(0xDC00 | (code_point & 0x3FF)));
+        }
+    }
+    static constexpr jchar kEmpty = 0;
+    return env->NewString(result.empty() ? &kEmpty : result.data(),
+                          static_cast<jsize>(result.size()));
 }
 
 std::string jbyteArrayToString(JNIEnv* env, jbyteArray value) {
@@ -1177,6 +1287,326 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeClose(
         }
     } catch (...) {
         throwIllegalState(env, "nativeClose failed");
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeCreateSftpClient(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    try {
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenSftpClientOperation>();
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kNormal;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to create SFTP client");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeCreateSftpClient failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeCloseSftpClient(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong client_handle) {
+    try {
+        if (client_handle <= 0) return;
+        const auto session = gSshRegistry.get(handle);
+        if (!session) return;
+        auto operation = std::make_unique<sshnative::CloseSftpClientOperation>(
+            static_cast<sshnative::ResourceId>(client_handle));
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kNormal;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(5);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) return;
+        awaitRuntimeCompletion(env, session, submit, false, true);
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+    } catch (...) {
+        throwIllegalState(env, "nativeCloseSftpClient failed");
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSftpCommand(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong client_handle,
+    jint command,
+    jstring jpath,
+    jstring jtarget,
+    jlong value) {
+    try {
+        const std::string path = jstringToUtf8(env, jpath);
+        const std::string target = jstringToUtf8(env, jtarget);
+        if (client_handle <= 0 || path.empty() || path.size() > 32768 ||
+            target.size() > 32768 || value < 0) {
+            throw std::invalid_argument("invalid SFTP path/value");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        std::unique_ptr<sshnative::Operation> operation;
+        switch (command) {
+            case 0:
+                operation = std::make_unique<sshnative::SftpListOperation>(
+                    path, static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 1:
+                operation = std::make_unique<sshnative::SftpRealPathOperation>(
+                    path, static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 2:
+                operation = std::make_unique<sshnative::SftpStatOperation>(
+                    path, value != 0, static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 3:
+                operation = std::make_unique<sshnative::SftpMkdirOperation>(
+                    path, static_cast<long>(value),
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 4:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kRename, path, target, 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 5:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kUnlink, path, "", 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 6:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kRmdir, path, "", 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 7:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kChmod, path, std::string(),
+                    static_cast<uint64_t>(value),
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 8:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kChown, path, std::string(),
+                    static_cast<uint64_t>(value),
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 9:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kChgrp, path, std::string(),
+                    static_cast<uint64_t>(value),
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 10:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kSymlink, path, target, 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 11:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kReadlink, path, "", 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            case 12:
+                operation = std::make_unique<sshnative::SftpCommandOperation>(
+                    sshnative::SftpCommand::kStatVfs, path, "", 0,
+                    static_cast<sshnative::ResourceId>(client_handle));
+                break;
+            default:
+                throw std::invalid_argument("unknown SFTP command");
+        }
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kNormal;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit SFTP command");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return utf8ToJString(env, result);
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSftpCommand failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSftpOpen(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong client_handle,
+    jstring jpath,
+    jlong offset,
+    jboolean write,
+    jboolean truncate) {
+    try {
+        const std::string path = jstringToUtf8(env, jpath);
+        if (client_handle <= 0 || path.empty() || path.size() > 32768 || offset < 0) {
+            throw std::invalid_argument("invalid SFTP path/offset");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::SftpOpenFileOperation>(
+            path, static_cast<uint64_t>(offset), write == JNI_TRUE,
+            truncate == JNI_TRUE,
+            static_cast<sshnative::ResourceId>(client_handle));
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kBulk;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit SFTP open");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSftpOpen failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSftpRead(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong file_handle,
+    jint max_bytes) {
+    try {
+        if (file_handle <= 0 || max_bytes <= 0 || max_bytes > 256 * 1024) {
+            throw std::invalid_argument("invalid SFTP file handle/read size");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::SftpHandleReadOperation>(
+            static_cast<sshnative::ResourceId>(file_handle),
+            static_cast<size_t>(max_bytes));
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kBulk;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit SFTP read");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return stringToJByteArray(env, result);
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSftpRead failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSftpWrite(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong file_handle,
+    jbyteArray jdata) {
+    try {
+        const std::string data = jbyteArrayToString(env, jdata);
+        if (file_handle <= 0 || data.size() > 256 * 1024) {
+            throw std::invalid_argument("invalid SFTP file handle/write size");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return -1;
+        }
+        auto operation = std::make_unique<sshnative::SftpHandleWriteOperation>(
+            static_cast<sshnative::ResourceId>(file_handle), data);
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kBulk;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit SFTP write");
+        awaitRuntimeCompletion(env, session, submit, false, true);
+        if (env->ExceptionCheck()) return -1;
+        return static_cast<jint>(data.size());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return -1;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return -1;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSftpWrite failed");
+        return -1;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunSftpClose(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong file_handle) {
+    try {
+        if (file_handle <= 0) return;
+        const auto session = gSshRegistry.get(handle);
+        if (!session) return;
+        auto operation = std::make_unique<sshnative::SftpCloseHandleOperation>(
+            static_cast<sshnative::ResourceId>(file_handle));
+        sshnative::RequestOptions options;
+        options.priority = sshnative::Priority::kBulk;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(5);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) return;
+        awaitRuntimeCompletion(env, session, submit, false, true);
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+    } catch (...) {
+        throwIllegalState(env, "nativeRunSftpClose failed");
     }
 }
 

@@ -15,6 +15,7 @@
 namespace sshnative {
 
 using RequestId = uint64_t;
+using ResourceId = uint64_t;
 using MonoClock = std::chrono::steady_clock;
 using MonoTime = MonoClock::time_point;
 
@@ -95,6 +96,9 @@ public:
     SessionState state() const noexcept;
     void transition(SessionState next);
     void addResource(std::unique_ptr<RuntimeResource> resource);
+    ResourceId storeIndexedResource(std::unique_ptr<RuntimeResource> resource);
+    RuntimeResource* indexedResource(ResourceId id, ResourceKind kind) const noexcept;
+    void releaseIndexedResource(ResourceId id) noexcept;
 
     // Transfers ownership of an established non-blocking transport socket to
     // the runtime. The socket is stored between requests so a later operation

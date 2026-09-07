@@ -30,10 +30,21 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - runtime 支持 active authenticated SSH session 资源：
   - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
   - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
-- SFTP 起点已打通：
-  - `SftpListOperation` 在 active SSH session 上初始化 SFTP、opendir/readdir 并输出 `name\ttype\tsize`；
-  - `SftpRealPathOperation` / `SftpStatOperation` / `SftpReadOperation` / `SftpWriteOperation` 已实现；
-  - AsyncSSH 测试服务器新增 `sftp` mode（`sftp_factory=True`），native `runtime-sftp-list-ok` / `runtime-sftp-meta-ok` E2E 通过。
+- SFTP native/JNI/Kotlin 主链路已完成：
+  - runtime 使用 opaque resource ID 管理持久 SFTP client 与 open file handle；child handle 先于
+    SFTP session 关闭，共享 SSH transport 不受 client close 影响；
+  - `NativeSftpClient` 已实现 `home`、realpath、list、stat/lstat、statvfs、mkdir、rename、
+    delete（含 Kotlin 递归）、chmod/chown/chgrp、symlink/readlink；目录列表返回 type、size、
+    mtime、permissions、uid、gid，并过滤 `.` / `..`；
+  - download、upload、续传和 `openRead()` 使用 256 KiB 上限分块与 64 位 offset；Kotlin 保持
+    SAF stream 所有权，传输检查协程/进度取消并及时关闭 remote handle；预览流 close 非阻塞；
+  - JNI 对 SFTP 路径使用标准 UTF-8 与 Java UTF-16 显式转换，支持 supplementary Unicode
+    文件名；native SFTP 状态映射到现有本地化错误类型；
+  - rename 优先 POSIX extension 并回退标准 rename；AsyncSSH fixture 显式适配
+    libssh2/OpenSSH SFTP v3 的 symlink wire order；
+  - `runtime-sftp-list-ok` 与定向 `runtime-sftp-meta-ok` E2E 通过，覆盖二进制分块读写、
+    offset/EOF、重复 close、属性操作、symlink/readlink、statvfs、错误映射以及超过 2 GiB
+    的稀疏文件；Kotlin payload parser JVM test 已覆盖转义和非法 handle。
 - runtime 支持 active shell channel：
   - `OpenShellOperation` 打开 session channel 并请求 `xterm-256color` PTY / shell；
   - `ShellWriteOperation` / `ShellReadOperation` / `ShellResizeOperation` / `CloseShellOperation` 已实现；
@@ -122,7 +133,6 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 ## 尚未完成（按计划顺序）
 - runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
-- SFTP 全功能 native 化（当前已有 list/realpath/stat/read/write；需扩展 streaming/取消与 Kotlin 接入）。
 - 本地/远程/动态转发 native 化。
 - jump host native 化。
 - `Libssh2SshSession` 生产接入与默认切换。
