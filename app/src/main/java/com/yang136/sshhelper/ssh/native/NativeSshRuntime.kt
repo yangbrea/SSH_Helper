@@ -107,6 +107,11 @@ class NativeSshRuntime {
         )
     }
 
+    fun runKeepalive(timeoutMillis: Long): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunKeepalive(handle, timeoutMillis)
+    }
+
     fun runPersistentExec(
         command: String,
         maxOutputBytes: Int,

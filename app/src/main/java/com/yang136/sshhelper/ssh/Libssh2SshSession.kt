@@ -4,7 +4,16 @@ import com.yang136.sshhelper.data.Credential
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.data.ProxyType
+import com.yang136.sshhelper.diagnosticlog.DiagnosticEventLevel
+import com.yang136.sshhelper.diagnosticlog.DiagnosticEventStage
+import com.yang136.sshhelper.diagnosticlog.DiagnosticHop
+import com.yang136.sshhelper.diagnosticlog.DiagnosticSink
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceContext
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceSource
+import com.yang136.sshhelper.diagnosticlog.DiagnosticTraceStatus
+import com.yang136.sshhelper.diagnosticlog.NoOpDiagnosticSink
 import com.yang136.sshhelper.sftp.NativeSftpClient
+import com.yang136.sshhelper.ssh.native.NativeSshException
 import com.yang136.sshhelper.ssh.native.NativeSshRuntime
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
@@ -15,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +50,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class Libssh2SshSession(
     private val knownHostDao: KnownHostDao? = null,
     private val allowHostKeyPrompt: Boolean = true,
+    private val diagnostics: DiagnosticSink = NoOpDiagnosticSink,
 ) : SshSession, SftpCapableSession, PortForwardCapableSession {
     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     private val mutableOutput = MutableSharedFlow<ByteArray>(extraBufferCapacity = 128)
@@ -70,6 +81,8 @@ class Libssh2SshSession(
     private val sftpClients = ConcurrentHashMap.newKeySet<NativeSftpClient>()
     @Volatile private var terminalReaderJob: Job? = null
     @Volatile private var terminalChannelOpen = false
+    @Volatile private var keepaliveJob: Job? = null
+    private var activeTraceId: String? = null
     private var ptyColumns = 80
     private var ptyRows = 24
     @Volatile private var closed = false
@@ -102,6 +115,23 @@ class Libssh2SshSession(
         }
         mutableState.value = ConnectionState.Connecting
         mutableStage.value = if (route.jump != null) ConnectionStage.JUMP_AUTH else ConnectionStage.TARGET_AUTH
+        activeTraceId = diagnostics.startTrace(
+            DiagnosticTraceContext(
+                source = DiagnosticTraceSource.SSH_CONNECTION,
+                target = "${route.target.username}@${route.target.hostname}:${route.target.port}",
+                hostId = route.target.id.takeIf { it > 0 },
+                sessionId = route.diagnosticSessionId,
+                feature = route.diagnosticFeature ?: if (openShell) "SHELL" else "HEADLESS",
+            ),
+        )
+        diagnostics.record(
+            activeTraceId.orEmpty(),
+            DiagnosticEventStage.LIFECYCLE,
+            "ssh.connect_started",
+            "开始建立 SSH 连接",
+            hop = if (route.jump == null) DiagnosticHop.DIRECT else DiagnosticHop.JUMP,
+            details = mapOf("route" to if (route.jump == null) "direct" else "jump"),
+        )
         try {
             val passwordText = (targetCredential as? Credential.Password)?.value?.concatToString()
             val privateKeyText = (targetCredential as? Credential.PrivateKey)?.bytes
@@ -152,6 +182,14 @@ class Libssh2SshSession(
             }
             mutableStage.value = ConnectionStage.READY
             mutableState.value = ConnectionState.Connected("${route.target.username}@${route.target.hostname}")
+            diagnostics.record(
+                activeTraceId.orEmpty(),
+                DiagnosticEventStage.LIFECYCLE,
+                "ssh.connected",
+                "SSH 连接已就绪",
+                hop = if (route.jump == null) DiagnosticHop.DIRECT else DiagnosticHop.TARGET,
+            )
+            startKeepalive()
         } catch (error: HostKeyBlockedException) {
             nativeRuntime.close()
             persistentSessionOpen = false
@@ -167,12 +205,19 @@ class Libssh2SshSession(
                     "主机密钥未确认"
                 },
             )
+            finishActiveTrace(DiagnosticTraceStatus.FAILED, "主机密钥未确认")
         } catch (error: Throwable) {
             nativeRuntime.close()
             persistentSessionOpen = false
             this@Libssh2SshSession.route = null
+            val message = if (error is NativeSshException) {
+                error.toUserMessage()
+            } else {
+                sanitizeNativeSshMessage(error.message ?: "SSH 连接失败")
+            }
             mutableStage.value = ConnectionStage.READY
-            mutableState.value = ConnectionState.Error(error.message ?: "SSH 连接失败")
+            mutableState.value = ConnectionState.Error(message)
+            finishActiveTrace(DiagnosticTraceStatus.FAILED, message)
         }
     }
 
@@ -237,7 +282,11 @@ class Libssh2SshSession(
                 stderr = error.message ?: "主机密钥验证失败",
             )
         } catch (error: Throwable) {
-            val message = error.message ?: "native exec failed"
+            val message = if (error is NativeSshException) {
+                error.toUserMessage()
+            } else {
+                sanitizeNativeSshMessage(error.message ?: "native exec failed")
+            }
             if (message.contains("host key does not match", ignoreCase = true) ||
                 message.contains("host_key_mismatch", ignoreCase = true)
             ) {
@@ -750,6 +799,92 @@ class Libssh2SshSession(
     private fun sameKey(expectedBase64: String, presentedBase64: String): Boolean =
         MessageDigest.isEqual(expectedBase64.encodeToByteArray(), presentedBase64.encodeToByteArray())
 
+    private fun startKeepalive() {
+        stopKeepalive()
+        if (!persistentSessionOpen || closed) return
+        keepaliveJob = terminalScope.launch {
+            while (persistentSessionOpen && !closed && terminalScope.isActive) {
+                try {
+                    nativeRuntime.runKeepalive(SSH_KEEPALIVE_INTERVAL_MS * 2L)
+                } catch (error: Throwable) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    if (persistentSessionOpen && mutableState.value is ConnectionState.Connected) {
+                        val cause = if (error is NativeSshException) {
+                            error.toDisconnectCause()
+                        } else {
+                            DisconnectCause.UNKNOWN
+                        }
+                        val message = if (error is NativeSshException) {
+                            error.toUserMessage("SSH keepalive 失败")
+                        } else {
+                            sanitizeNativeSshMessage(error.message ?: "SSH keepalive 失败")
+                        }
+                        failTransport(cause, message)
+                    }
+                    break
+                }
+                delay(SSH_KEEPALIVE_INTERVAL_MS.toLong())
+            }
+        }
+    }
+
+    private fun stopKeepalive() {
+        keepaliveJob?.cancel()
+        keepaliveJob = null
+    }
+
+    private suspend fun failTransport(cause: DisconnectCause, message: String) {
+        if (mutableState.value !is ConnectionState.Connected) return
+        terminalReaderJob?.cancel()
+        terminalReaderJob = null
+        terminalChannelOpen = false
+        cancelPendingHostKey()
+        sftpClients.toList().forEach(NativeSftpClient::close)
+        sftpClients.clear()
+        nativeRuntime.close()
+        persistentSessionOpen = false
+        this@Libssh2SshSession.route = null
+        password = null
+        privateKey?.fill(0)
+        privateKey = null
+        passphrase = null
+        targetProxyPassword = null
+        jumpPassword = null
+        jumpPrivateKey?.fill(0)
+        jumpPrivateKey = null
+        jumpPassphrase = null
+        jumpProxyPassword = null
+        mutableTerminalState.value = TerminalChannelState.Closed
+        mutableState.value = ConnectionState.Disconnected(message, cause)
+        diagnostics.record(
+            activeTraceId.orEmpty(),
+            DiagnosticEventStage.DISCONNECT,
+            "ssh.unexpected_disconnect",
+            message,
+            level = DiagnosticEventLevel.ERROR,
+            details = mapOf("cause" to cause.name),
+        )
+        finishActiveTrace(DiagnosticTraceStatus.FAILED, message)
+    }
+
+    private suspend fun finishActiveTrace(status: DiagnosticTraceStatus, summary: String?) {
+        val traceId = activeTraceId
+        activeTraceId = null
+        if (traceId != null && traceId != "noop") {
+            diagnostics.finishTrace(traceId, status, summary)
+        }
+    }
+
+    private fun finishActiveTraceAsync(status: DiagnosticTraceStatus, summary: String?) {
+        val traceId = activeTraceId
+        activeTraceId = null
+        if (traceId != null && traceId != "noop") {
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                diagnostics.finishTrace(traceId, status, summary)
+            }
+        }
+    }
+
     private suspend fun readShellLoop() {
         try {
             while (terminalChannelOpen && terminalScope.isActive) {
@@ -831,6 +966,7 @@ class Libssh2SshSession(
     }
 
     override suspend fun disconnect() {
+        stopKeepalive()
         terminalReaderJob?.cancel()
         terminalReaderJob = null
         terminalChannelOpen = false
@@ -852,6 +988,13 @@ class Libssh2SshSession(
         jumpProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("已断开", DisconnectCause.USER)
         mutableTerminalState.value = TerminalChannelState.Closed
+        diagnostics.record(
+            activeTraceId.orEmpty(),
+            DiagnosticEventStage.DISCONNECT,
+            "ssh.user_disconnect",
+            "用户主动断开 SSH 连接",
+        )
+        finishActiveTrace(DiagnosticTraceStatus.SUCCEEDED, "用户主动断开连接")
     }
 
     override fun respondToHostKey(accept: Boolean) {
@@ -874,6 +1017,7 @@ class Libssh2SshSession(
 
     override fun close() {
         closed = true
+        stopKeepalive()
         terminalReaderJob?.cancel()
         terminalReaderJob = null
         terminalChannelOpen = false
@@ -896,6 +1040,13 @@ class Libssh2SshSession(
         jumpProxyPassword = null
         mutableState.value = ConnectionState.Disconnected("应用已关闭", DisconnectCause.APP_CLOSED)
         mutableTerminalState.value = TerminalChannelState.Closed
+        diagnostics.record(
+            activeTraceId.orEmpty(),
+            DiagnosticEventStage.DISCONNECT,
+            "ssh.app_closed",
+            "应用已关闭连接",
+        )
+        finishActiveTraceAsync(DiagnosticTraceStatus.SUCCEEDED, "应用已关闭连接")
     }
 }
 

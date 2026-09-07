@@ -49,6 +49,7 @@ using IoInterest = std::vector<PollInterest>;
 class ReadySet {
 public:
     bool ready(int fd, short events) const noexcept;
+    bool errored(int fd) const noexcept;
 
 private:
     friend class SshNativeSession;

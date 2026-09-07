@@ -46,6 +46,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$poc_binary" "$runtime_bina
     "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_jump_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_keepalive_operation.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \

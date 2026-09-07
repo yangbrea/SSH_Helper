@@ -195,6 +195,12 @@ object NativeSshBridge {
         timeoutMillis: Long,
     ): String
 
+    /** Sends an SSH keepalive on active/jump sessions and waits for a readable reply. */
+    external fun nativeRunKeepalive(
+        handle: Long,
+        timeoutMillis: Long,
+    ): String
+
     /** Runs one exec on the active persistent SSH session. */
     external fun nativeRunPersistentExec(
         handle: Long,

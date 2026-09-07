@@ -69,6 +69,16 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - `Libssh2SshSession` 已支持 `route.jump`：跳板/目标 host-key 独立提示，
     跳板自身 proxy 生效，目标经 tunnel 后不再套用设备侧 target proxy；
   - native `runtime-jump-ok` E2E 覆盖 jump host-key 预检、目标认证与 persistent exec。
+- keepalive / 断线检测 / 错误映射主链路已完成：
+  - native `KeepaliveOperation` 对 active session 与 jump session 周期发送 keepalive，
+    通过 socket HUP/ERR/readable 探测远端断开（近似语义，不承诺纯网络黑盒精确 timeout）；
+  - `Libssh2SshSession` 连接成功后启动 keepalive/disconnect watcher，headless session
+    不再只依赖 shell reader 感知断线；
+  - JNI 失败改为抛结构化 `NativeSshException`（domain/code/libssh2Code/systemErrno），
+    Kotlin 映射到 `DisconnectCause` 与用户文案；
+  - 错误消息经 `DiagnosticRedactor` 脱敏，控制字符/密钥/代理凭据不进入 UI；
+  - `Libssh2SshSession` 接入 `DiagnosticSink`，记录 connect/connected/disconnect trace；
+  - host `keepalive-live-ok` / `keepalive-disconnect-ok` E2E 覆盖正常连接与远端关闭。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、

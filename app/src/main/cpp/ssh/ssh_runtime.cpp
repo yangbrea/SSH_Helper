@@ -142,6 +142,15 @@ bool ReadySet::ready(int fd, short events) const noexcept {
     return false;
 }
 
+bool ReadySet::errored(int fd) const noexcept {
+    for (const auto& item : items_) {
+        if (item.fd == fd && (item.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 StepResult StepResult::complete(std::string payload) {
     StepResult result;
     result.kind = StepKind::kComplete;

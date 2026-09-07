@@ -55,6 +55,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_http_proxy.cpp
     ssh/ssh_jni.cpp
     ssh/ssh_jump_operation.cpp
+    ssh/ssh_keepalive_operation.cpp
     ssh/ssh_libssh2.cpp
     ssh/ssh_libssh2_nonblocking.cpp
     ssh/ssh_operations.cpp

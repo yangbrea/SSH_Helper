@@ -1,5 +1,6 @@
 #include "ssh/ssh_connect_operation.h"
 #include "ssh/ssh_jump_operation.h"
+#include "ssh/ssh_keepalive_operation.h"
 #include "ssh/ssh_persistent_session.h"
 #include "ssh/ssh_runtime.h"
 
@@ -78,6 +79,16 @@ int main(int argc, char** argv) {
     assert(waitForEvent(*runtime, open_target, &event));
     if (event.completion != sshnative::CompletionKind::kSucceeded) {
         std::cerr << "open jump target failed: " << event.error.message << "\n";
+        return 1;
+    }
+
+    auto keepalive = runtime->submit(
+        std::make_unique<sshnative::KeepaliveOperation>(3s));
+    assert(keepalive && "runtime must accept keepalive on jump route");
+    assert(waitForEvent(*runtime, keepalive, &event));
+    if (event.completion != sshnative::CompletionKind::kSucceeded) {
+        std::cerr << "keepalive over jump route failed: "
+                  << event.error.message << "\n";
         return 1;
     }
 

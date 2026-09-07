@@ -26,6 +26,7 @@
 #include "ssh_error.h"
 #include "ssh_handshake_operation.h"
 #include "ssh_jump_operation.h"
+#include "ssh_keepalive_operation.h"
 #include "ssh_libssh2.h"
 #include "ssh_operations.h"
 #include "ssh_persistent_session.h"
@@ -49,6 +50,29 @@ void throwOutOfMemory(JNIEnv* env) {
     jclass exceptionClass = env->FindClass("java/lang/OutOfMemoryError");
     if (exceptionClass != nullptr) {
         env->ThrowNew(exceptionClass, "SshNativeSession allocation failed");
+    }
+}
+
+void throwNativeRuntimeError(JNIEnv* env, const sshnative::SshError& error) {
+    jclass exceptionClass = env->FindClass(
+        "com/yang136/sshhelper/ssh/native/NativeSshException");
+    if (exceptionClass == nullptr) return;
+    jmethodID constructor = env->GetMethodID(
+        exceptionClass, "<init>",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)V");
+    if (constructor == nullptr) return;
+    jstring domain = env->NewStringUTF(sshnative::errorDomainName(error.domain));
+    jstring code = env->NewStringUTF(error.code.c_str());
+    const std::string message = error.message.empty()
+        ? "native runtime operation failed"
+        : error.message;
+    jstring jmessage = env->NewStringUTF(message.c_str());
+    if (domain == nullptr || code == nullptr || jmessage == nullptr) return;
+    jthrowable exception = static_cast<jthrowable>(env->NewObject(
+        exceptionClass, constructor, domain, code, jmessage,
+        error.libssh2_code, error.system_errno));
+    if (exception != nullptr) {
+        env->Throw(exception);
     }
 }
 
@@ -130,22 +154,17 @@ std::string awaitRuntimeCompletion(
             event.error.domain == sshnative::ErrorDomain::kTimeout) {
             return "exit=124\n";
         }
-        std::string message = event.error.message.empty()
-            ? "native runtime operation failed"
-            : event.error.message;
         if (include_error_code && !event.error.code.empty()) {
-            message = event.error.code + ":" + message;
+            event.error.message = event.error.code + ":" + event.error.message;
         }
-        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
-        if (exceptionClass != nullptr) {
-            env->ThrowNew(exceptionClass, message.c_str());
-        }
+        throwNativeRuntimeError(env, event.error);
         return {};
     }
-    jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
-    if (exceptionClass != nullptr) {
-        env->ThrowNew(exceptionClass, "native runtime operation timed out");
-    }
+    sshnative::SshError timeout_error;
+    timeout_error.domain = sshnative::ErrorDomain::kTimeout;
+    timeout_error.code = "jni_wait_timeout";
+    timeout_error.message = "native runtime operation timed out";
+    throwNativeRuntimeError(env, timeout_error);
     return {};
 }
 
@@ -173,13 +192,7 @@ bool awaitRuntimeCompletionWithDeadline(
         if (event.error.domain == sshnative::ErrorDomain::kTimeout) {
             return false;
         }
-        const std::string message = event.error.message.empty()
-            ? "native runtime operation failed"
-            : event.error.message;
-        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
-        if (exceptionClass != nullptr) {
-            env->ThrowNew(exceptionClass, message.c_str());
-        }
+        throwNativeRuntimeError(env, event.error);
         return false;
     }
     return false;
@@ -999,6 +1012,46 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetSes
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunOpenJumpTargetSession failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunKeepalive(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong timeout_millis) {
+    try {
+        if (timeout_millis <= 0) throw std::invalid_argument("invalid keepalive timeout");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::KeepaliveOperation>(
+            std::chrono::milliseconds(timeout_millis));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit keepalive");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunKeepalive failed");
         return nullptr;
     }
 }
