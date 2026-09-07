@@ -150,6 +150,10 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。
 
 ## 当前 Git 检查点
+- `b2a3f83 feat(ssh-native): add jump host routing`
+- `7ec6be3 feat(ssh-native): prove nested libssh2 direct-tcpip transport for jump host`
+- `4b654c2 refactor(terminal): remove WebView/xterm.js and make Ghostty the only backend`
+- `f067856 feat(ssh-native): complete SFTP native/JNI/Kotlin main path`
 - `6566258 feat(ssh-native): add one-shot SFTP file write`
 - `07d9334 feat(ssh-native): add one-shot SFTP file read`
 - `925d579 feat(ssh-native): add SFTP realpath and stat operations`
