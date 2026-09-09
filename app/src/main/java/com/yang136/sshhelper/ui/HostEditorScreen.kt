@@ -385,6 +385,7 @@ private fun RouteSection(
     onJumpChange: (Long?) -> Unit,
 ) {
     val jump = hosts.firstOrNull { it.id == state.jumpHostId }
+    val jumpCandidates = hosts.filter { it.id != state.id && it.jumpHostId == null }
     var expanded by remember { mutableStateOf(false) }
     var jumpMenuOpen by remember { mutableStateOf(false) }
 
@@ -415,9 +416,29 @@ private fun RouteSection(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Switch(
                             checked = state.jumpHostId != null,
-                            onCheckedChange = { enabled -> onJumpChange(if (enabled) state.jumpHostId else null) },
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    // 新建主机时还没有 jumpHostId；打开开关应自动选中第一个可用跳板并弹出选择菜单。
+                                    if (state.jumpHostId == null) {
+                                        jumpCandidates.firstOrNull()?.let {
+                                            onJumpChange(it.id)
+                                            jumpMenuOpen = true
+                                        }
+                                    }
+                                } else {
+                                    onJumpChange(null)
+                                    jumpMenuOpen = false
+                                }
+                            },
                         )
                         Text("通过跳板机连接", Modifier.padding(start = 10.dp))
+                    }
+                    if (state.jumpHostId == null && jumpCandidates.isEmpty()) {
+                        Text(
+                            "没有可用的直连主机作为跳板机，请先添加并保存一台不使用跳板机的主机。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     if (state.jumpHostId != null) {
                         Box(Modifier.fillMaxWidth()) {
@@ -429,7 +450,7 @@ private fun RouteSection(
                                 )
                             }
                             DropdownMenu(expanded = jumpMenuOpen, onDismissRequest = { jumpMenuOpen = false }) {
-                                hosts.filter { it.id != state.id && it.jumpHostId == null }.forEach { host ->
+                                jumpCandidates.forEach { host ->
                                     DropdownMenuItem(
                                         text = { Text("${host.name}（${host.username}@${host.hostname}）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         onClick = { onJumpChange(host.id); jumpMenuOpen = false },

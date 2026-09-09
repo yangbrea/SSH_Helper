@@ -1,0 +1,219 @@
+#include "ssh_libssh2.h"
+
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <stdexcept>
+
+namespace sshnative {
+
+namespace {
+
+std::once_flag gInitFlag;
+
+void initializeLibssh2() {
+    if (libssh2_init(0) != 0) {
+        throw std::runtime_error("libssh2_init failed");
+    }
+}
+
+void ensureInitialized() {
+    std::call_once(gInitFlag, initializeLibssh2);
+}
+
+bool hasAuthMethod(const char* methods, const char* wanted) {
+    if (methods == nullptr) return false;
+    const std::string list(methods);
+    const std::string needle(wanted);
+    size_t start = 0;
+    while (start <= list.size()) {
+        const size_t end = list.find(',', start);
+        const std::string token = list.substr(
+            start, end == std::string::npos ? std::string::npos : end - start);
+        if (token == needle) return true;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return false;
+}
+
+void keyboardInteractiveCallback(
+    const char* /* name */,
+    int /* name_len */,
+    const char* /* instruction */,
+    int /* instruction_len */,
+    int num_prompts,
+    const LIBSSH2_USERAUTH_KBDINT_PROMPT* /* prompts */,
+    LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses,
+    void** abstract) {
+    if (num_prompts != 1 || abstract == nullptr || *abstract == nullptr) {
+        return;
+    }
+    const auto* password = static_cast<const std::string*>(*abstract);
+    char* copy = static_cast<char*>(std::malloc(password->size() + 1));
+    if (copy == nullptr) return;
+    std::memcpy(copy, password->data(), password->size());
+    copy[password->size()] = '\0';
+    responses[0].text = copy;
+    responses[0].length = static_cast<unsigned int>(password->size());
+}
+
+} // namespace
+
+Libssh2Session::Libssh2Session(void* abstract) {
+    ensureInitialized();
+    session_ = libssh2_session_init_ex(nullptr, nullptr, nullptr, abstract);
+    if (session_ == nullptr) {
+        throw std::runtime_error("libssh2_session_init_ex failed");
+    }
+}
+
+void Libssh2Session::setCustomIo(
+    LIBSSH2_SEND_FUNC((*send_callback)),
+    LIBSSH2_RECV_FUNC((*recv_callback))) {
+    if (send_callback == nullptr || recv_callback == nullptr) {
+        throw std::invalid_argument("custom send/recv callbacks must not be null");
+    }
+    libssh2_session_callback_set2(
+        session_, LIBSSH2_CALLBACK_SEND,
+        reinterpret_cast<libssh2_cb_generic*>(send_callback));
+    libssh2_session_callback_set2(
+        session_, LIBSSH2_CALLBACK_RECV,
+        reinterpret_cast<libssh2_cb_generic*>(recv_callback));
+}
+
+Libssh2Session::Libssh2Session(Libssh2Session&& other) noexcept
+    : session_(other.session_) {
+    other.session_ = nullptr;
+}
+
+Libssh2Session& Libssh2Session::operator=(Libssh2Session&& other) noexcept {
+    if (this != &other) {
+        if (session_ != nullptr) {
+            libssh2_session_free(session_);
+        }
+        session_ = other.session_;
+        other.session_ = nullptr;
+    }
+    return *this;
+}
+
+Libssh2Session::~Libssh2Session() {
+    if (session_ != nullptr) {
+        libssh2_session_free(session_);
+        session_ = nullptr;
+    }
+}
+
+
+void Libssh2Session::setBlocking(bool enabled) {
+    libssh2_session_set_blocking(session_, enabled ? 1 : 0);
+}
+
+void Libssh2Session::handshake(int socket_fd) {
+    const int result = libssh2_session_handshake(session_, socket_fd);
+    if (result != 0) {
+        char* message = nullptr;
+        libssh2_session_last_error(session_, &message, nullptr, 0);
+        throw std::runtime_error(message != nullptr ? message : "libssh2 handshake failed");
+    }
+}
+
+bool Libssh2Session::passwordAuth(
+    const std::string& username,
+    const std::string& password) {
+    return libssh2_userauth_password(
+        session_, username.c_str(), password.c_str()) == 0;
+}
+
+bool Libssh2Session::passwordOrKeyboardAuth(
+    const std::string& username,
+    const std::string& password) {
+    char* methods = libssh2_userauth_list(
+        session_, username.c_str(), static_cast<unsigned int>(username.size()));
+    if (hasAuthMethod(methods, "password")) {
+        return passwordAuth(username, password);
+    }
+    if (!hasAuthMethod(methods, "keyboard-interactive")) {
+        return false;
+    }
+    const std::string password_storage = password;
+    void** abstract_slot = libssh2_session_abstract(session_);
+    if (abstract_slot != nullptr) {
+        *abstract_slot = const_cast<std::string*>(&password_storage);
+    }
+    const int result = libssh2_userauth_keyboard_interactive(
+        session_, username.c_str(), keyboardInteractiveCallback);
+    if (abstract_slot != nullptr) {
+        *abstract_slot = nullptr;
+    }
+    return result == 0;
+}
+
+
+
+bool Libssh2Session::publicKeyAuth(
+    const std::string& username,
+    const std::string& private_key,
+    const std::string& passphrase) {
+    const int result = libssh2_userauth_publickey_frommemory(
+        session_,
+        username.c_str(),
+        username.size(),
+        nullptr,
+        0,
+        private_key.data(),
+        private_key.size(),
+        passphrase.empty() ? nullptr : passphrase.c_str());
+    return result == 0;
+}
+
+std::vector<uint8_t> Libssh2Session::hostKey(int* type_out) {
+    size_t length = 0;
+    int type = 0;
+    const char* key = libssh2_session_hostkey(session_, &length, &type);
+    if (key == nullptr) {
+        throw std::runtime_error("libssh2_session_hostkey failed");
+    }
+    if (type_out != nullptr) {
+        *type_out = type;
+    }
+    return std::vector<uint8_t>(key, key + length);
+}
+
+int Libssh2Session::execCommand(const std::string& command, std::string& output) {
+    LIBSSH2_CHANNEL* channel = libssh2_channel_open_session(session_);
+    if (channel == nullptr) {
+        throw std::runtime_error("libssh2_channel_open_session failed");
+    }
+    const int exec_result = libssh2_channel_exec(channel, command.c_str());
+    if (exec_result != 0) {
+        libssh2_channel_free(channel);
+        throw std::runtime_error("libssh2_channel_exec failed");
+    }
+
+    output.clear();
+    char buffer[4096];
+    while (true) {
+        const ssize_t count = libssh2_channel_read(channel, buffer, sizeof(buffer));
+        if (count > 0) {
+            output.append(buffer, static_cast<size_t>(count));
+            continue;
+        }
+        if (count == LIBSSH2_ERROR_EAGAIN) {
+            continue;
+        }
+        break;
+    }
+    const int exit_status = libssh2_channel_get_exit_status(channel);
+    libssh2_channel_close(channel);
+    libssh2_channel_free(channel);
+    return exit_status;
+}
+
+std::string Libssh2Session::libraryVersion() {
+    const char* version = libssh2_version(0);
+    return version == nullptr ? std::string() : std::string(version);
+}
+
+} // namespace sshnative

@@ -18,7 +18,7 @@ import com.yang136.sshhelper.sftp.RemoteFileType
 import com.yang136.sshhelper.sftp.SftpClient
 import com.yang136.sshhelper.sftp.joinRemotePath
 import com.yang136.sshhelper.ssh.ConnectionState
-import com.yang136.sshhelper.ssh.JschSshSession
+import com.yang136.sshhelper.ssh.Libssh2SshSession
 import com.yang136.sshhelper.ssh.clearCredential
 import java.io.File
 import java.io.FileInputStream
@@ -272,7 +272,7 @@ private class DocumentsSessionPool(
     private val access: DocumentAccessManager,
     private val diagnostics: DiagnosticSink,
 ) {
-    private data class Slot(val session: JschSshSession, var leases: Int = 0, var lastUsed: Long = 0)
+    private data class Slot(val session: Libssh2SshSession, var leases: Int = 0, var lastUsed: Long = 0)
     private val mutex = Mutex()
     private val slots = linkedMapOf<Long, Slot>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -305,7 +305,7 @@ private class DocumentsSessionPool(
             check(slots.size < MAX_SESSIONS) { "系统文件连接数已达到上限，请稍后重试" }
         }
         val authorized = access.authorizedRoute(hostId)
-        val session = JschSshSession(database.knownHostDao(), allowHostKeyPrompt = false, diagnostics = diagnostics)
+        val session = Libssh2SshSession(database.knownHostDao(), allowHostKeyPrompt = false, diagnostics = diagnostics)
         try {
             session.connect(authorized.route.copy(diagnosticFeature = "DOCUMENTS"), authorized.credentials, openShell = false)
         } finally {
@@ -345,7 +345,7 @@ private class DocumentsSessionPool(
                 else listOfNotNull(slots.remove(hostId)?.session)
             }
         }
-        closing.forEach(JschSshSession::close)
+        closing.forEach(Libssh2SshSession::close)
     }
 
     private companion object {

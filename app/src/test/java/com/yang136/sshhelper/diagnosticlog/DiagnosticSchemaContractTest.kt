@@ -14,10 +14,12 @@ class DiagnosticSchemaContractTest {
         assertTrue(text.contains("index_diagnostic_events_traceId_sequence"))
     }
 
-    @Test fun databaseRegistersExplicitV6ToV7Migration() {
+    @Test fun databaseRegistersExplicitMigrationsThroughV9() {
         val source = File("src/main/java/com/yang136/sshhelper/data/AppDatabase.kt").readText()
-        assertTrue(source.contains("version = 7"))
+        assertTrue(source.contains("version = 9"))
         assertTrue(source.contains("MIGRATION_6_7"))
+        assertTrue(source.contains("MIGRATION_7_8"))
+        assertTrue(source.contains("MIGRATION_8_9"))
         assertTrue(source.contains("FOREIGN KEY(traceId) REFERENCES diagnostic_traces(id)"))
     }
 

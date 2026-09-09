@@ -2,6 +2,7 @@ package com.yang136.sshhelper
 
 import android.net.Uri
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -12,16 +13,19 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,7 +73,9 @@ import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ui.theme.LocalTerminalPalette
 import com.yang136.sshhelper.ui.theme.SshHelperTheme
+import com.yang136.sshhelper.ui.theme.resolveDarkMode
 import com.yang136.sshhelper.settings.ImageThemeVariant
+import com.yang136.sshhelper.settings.effectiveThemeMode
 import com.yang136.sshhelper.settings.ThemeSource
 import kotlinx.coroutines.launch
 
@@ -81,6 +87,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Let Compose surfaces draw continuously behind the status/navigation bars.
+        // TopAppBar and NavigationBar already consume their respective safe insets.
+        enableEdgeToEdge()
         biometricPrompt = BiometricPrompt(
             this,
             ContextCompat.getMainExecutor(this),
@@ -124,6 +133,13 @@ class MainActivity : FragmentActivity() {
             val vaultState = container.credentialVault.state.collectAsStateWithLifecycle().value
             val imageTheme = settingsViewModel.imageThemeState.collectAsStateWithLifecycle().value
             val imageActive = settings.themeSource == ThemeSource.IMAGE && imageTheme.hasImage
+            val darkSystemBars = resolveDarkMode(settings.effectiveThemeMode, isSystemInDarkTheme())
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !darkSystemBars
+                    isAppearanceLightNavigationBars = !darkSystemBars
+                }
+            }
             SshHelperTheme(settings, imageTheme.palette.takeIf { imageActive }) {
                 val cropDraft = imageTheme.cropDraft
                 if (cropDraft != null) {
@@ -172,38 +188,26 @@ class MainActivity : FragmentActivity() {
                                 onDiagnostics = { hostId -> navController.navigate(networkDiagnosticsRoute(hostId)) },
                                 onEdit = { navController.navigate("edit/${it.id}") },
                                 onOpenHost = { navController.navigate("host/${it.id}") },
-                                onConnect = { host ->
-                                    sessionsViewModel.create(host, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${host.id}/${id.value}")
-                                        true
-                                    } ?: false
-                                },
+                                onQuickNewSession = { host -> navController.navigate("host/${host.id}?createSession=1") },
                                 onForwards = { hostId -> navController.navigate("forwards/$hostId") },
-                                onTerminal = { profile ->
-                                    sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${profile.id}/${id.value}")
-                                        true
-                                    } ?: false
+                                onNewSession = { profile, kind -> sessionsViewModel.create(profile, SessionFeature.SHELL, kind) },
+                                onOpenTerminal = { id ->
+                                    sessions.firstOrNull { it.id == id }?.let { session ->
+                                        navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                    }
                                 },
-                                onFiles = { profile ->
-                                    sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
-                                        navController.navigate("files/${id.value}")
-                                        true
-                                    } ?: false
-                                },
-                                onNewSession = { profile ->
-                                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
-                                        navController.navigate("terminal/${profile.id}/${id.value}")
-                                        true
-                                    } ?: false
-                                },
+                                onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                onRenameSession = sessionsViewModel::rename,
                                 sessions = sessions,
                                 onOpenSession = { id ->
                                     sessions.firstOrNull { it.id == id }?.let { session ->
-                                        if (SessionFeature.SFTP in session.features) {
-                                            navController.navigate("files/${id.value}")
-                                        } else {
-                                            navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        when {
+                                            session.features == setOf(SessionFeature.PORT_FORWARD) ->
+                                                navController.navigate("forwards/${session.profile.id}")
+                                            SessionFeature.SFTP in session.features ->
+                                                navController.navigate("files/${id.value}")
+                                            else ->
+                                                navController.navigate("terminal/${session.profile.id}/${id.value}")
                                         }
                                     }
                                 },
@@ -226,8 +230,14 @@ class MainActivity : FragmentActivity() {
                                     sessions = sessions,
                                     onOpenSession = { id ->
                                         sessions.firstOrNull { it.id == id }?.let { session ->
-                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
-                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                            when {
+                                                session.features == setOf(SessionFeature.PORT_FORWARD) ->
+                                                    navController.navigate("forwards/${session.profile.id}")
+                                                SessionFeature.SFTP in session.features ->
+                                                    navController.navigate("files/${id.value}")
+                                                else ->
+                                                    navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                            }
                                         }
                                     },
                                     onCloseSession = sessionsViewModel::close,
@@ -257,6 +267,8 @@ class MainActivity : FragmentActivity() {
                                     onDeleteImageTheme = settingsViewModel::deleteImageTheme,
                                     onClearImageThemeError = settingsViewModel::clearImageThemeError,
                                     onFontSizeChange = settingsViewModel::setTerminalFontSize,
+                                    onTerminalTransparencyEnabledChange = settingsViewModel::setTerminalTransparencyEnabled,
+                                    onTerminalBackgroundOpacityChange = settingsViewModel::setTerminalBackgroundOpacity,
                                     onExtraKeysChange = settingsViewModel::setExtraKeys,
                                     onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
                                     onAiApiKeyChange = settingsViewModel::setAiApiKey,
@@ -306,6 +318,8 @@ class MainActivity : FragmentActivity() {
                                 onDeleteImageTheme = settingsViewModel::deleteImageTheme,
                                 onClearImageThemeError = settingsViewModel::clearImageThemeError,
                                 onFontSizeChange = settingsViewModel::setTerminalFontSize,
+                                onTerminalTransparencyEnabledChange = settingsViewModel::setTerminalTransparencyEnabled,
+                                onTerminalBackgroundOpacityChange = settingsViewModel::setTerminalBackgroundOpacity,
                                 onExtraKeysChange = settingsViewModel::setExtraKeys,
                                 onAiBaseUrlChange = settingsViewModel::setAiBaseUrl,
                                 onAiApiKeyChange = settingsViewModel::setAiApiKey,
@@ -421,41 +435,30 @@ class MainActivity : FragmentActivity() {
                             DiagnosticLogScreen(onBack = navController::popBackStack)
                         }
                         composable(
-                            route = "host/{hostId}",
-                            arguments = listOf(navArgument("hostId") { type = NavType.LongType }),
+                            route = "host/{hostId}?createSession={createSession}",
+                            arguments = listOf(
+                                navArgument("hostId") { type = NavType.LongType },
+                                navArgument("createSession") { type = NavType.BoolType; defaultValue = false },
+                            ),
                         ) { entry ->
                             val hostId = entry.arguments?.getLong("hostId") ?: 0L
+                            val createSession = entry.arguments?.getBoolean("createSession") ?: false
                             hosts.firstOrNull { it.id == hostId }?.let { host ->
                                 HostWorkspaceScreen(
                                     host = host,
                                     sessions = sessions,
-                                    onTerminal = { profile ->
-                                        sessionsViewModel.openFor(profile, SessionFeature.SHELL)?.let { id ->
-                                            navController.navigate("terminal/${profile.id}/${id.value}")
-                                            true
-                                        } ?: false
+                                    createSession = createSession,
+                                    onNewSession = { profile, kind -> sessionsViewModel.create(profile, SessionFeature.SHELL, kind) },
+                                    onOpenTerminal = { id ->
+                                        sessions.firstOrNull { it.id == id }?.let { session ->
+                                            navController.navigate("terminal/${session.profile.id}/${id.value}")
+                                        }
                                     },
-                                    onFiles = { profile ->
-                                        sessionsViewModel.openFor(profile, SessionFeature.SFTP)?.let { id ->
-                                            navController.navigate("files/${id.value}")
-                                            true
-                                        } ?: false
-                                    },
-                                    onNewSession = { profile ->
-                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { id ->
-                                            navController.navigate("terminal/${profile.id}/${id.value}")
-                                            true
-                                        } ?: false
-                                    },
+                                    onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                    onRenameSession = sessionsViewModel::rename,
                                     onForwards = { navController.navigate("forwards/$it") },
                                     onDiagnostics = { navController.navigate(networkDiagnosticsRoute(it)) },
                                     onEdit = { navController.navigate("edit/${it.id}") },
-                                    onOpenSession = { id ->
-                                        sessions.firstOrNull { it.id == id }?.let { session ->
-                                            if (SessionFeature.SFTP in session.features) navController.navigate("files/${id.value}")
-                                            else navController.navigate("terminal/${session.profile.id}/${id.value}")
-                                        }
-                                    },
                                     onCloseSession = sessionsViewModel::close,
                                     onBack = navController::popBackStack,
                                 )

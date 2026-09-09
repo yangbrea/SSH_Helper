@@ -153,6 +153,10 @@ class TerminalCommandRunner internal constructor(
                         if (!snapshotReady.isCompleted) snapshotReady.complete(event.sequence - 1)
                         if (event.sequence > baseline) signals.send(Signal.Bytes(event.bytes))
                     }
+                    is TerminalOutputEvent.Reset -> {
+                        baseline = event.sequence
+                        if (!snapshotReady.isCompleted) snapshotReady.complete(baseline)
+                    }
                 }
             }
         }
@@ -262,6 +266,10 @@ class TerminalCommandRunner internal constructor(
                                 found.complete(normalizeShell(line.removePrefix(prefix)))
                             }
                         }
+                    }
+                    is TerminalOutputEvent.Reset -> {
+                        baseline = event.sequence
+                        lineBuffer.clear()
                     }
                 }
             }

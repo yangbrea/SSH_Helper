@@ -1,0 +1,1144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.2.0" type="baseline" client="gradle" dependencies="false" name="AGP (9.2.0)" variant="all" version="9.2.0">
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="        prefs.edit().clear().commit()"
+        errorLine2="                             ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="262"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 28 (current min is 26): `android.content.Context#getMainExecutor`"
+        errorLine1="    private val callbackExecutor = context.mainExecutor"
+        errorLine2="                                           ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/discovery/AndroidDiscoveryAdapters.kt"
+            line="122"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="        targetSdk = 36"
+        errorLine2="        ~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="18"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `enableOnBackInvokedCallback` is only used in API level 33 and higher (current min is 26)"
+        errorLine1="            android:enableOnBackInvokedCallback=&quot;true&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="27"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 9.6.1 is available: 9.7.1"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-9.6.1-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/Project/AndroidStudioProjects/SH-Helper/gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of `compileSdk` than 36 is available: 37"
+        errorLine1="    compileSdk = 36"
+        errorLine2="    ~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="12"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.17.0 is available: 1.19.0"
+        errorLine1="    implementation(&quot;androidx.core:core-ktx:1.17.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="117"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.11.0 is available: 1.13.0"
+        errorLine1="    implementation(&quot;androidx.activity:activity-compose:1.11.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="118"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.9.3 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-runtime-ktx:2.9.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="119"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.9.3 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-viewmodel-compose:2.9.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="120"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.9.3 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-runtime-compose:2.9.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="121"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-process than 2.9.3 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-process:2.9.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="122"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.fragment:fragment-ktx than 1.8.9 is available: 1.9.0"
+        errorLine1="    implementation(&quot;androidx.fragment:fragment-ktx:1.8.9&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="123"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation:navigation-compose than 2.9.3 is available: 2.10.0"
+        errorLine1="    implementation(&quot;androidx.navigation:navigation-compose:2.9.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="124"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.7.2 is available: 2.8.4"
+        errorLine1="    implementation(&quot;androidx.room:room-runtime:2.7.2&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="133"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.7.2 is available: 2.8.4"
+        errorLine1="    implementation(&quot;androidx.room:room-ktx:2.7.2&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="134"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.7.2 is available: 2.8.4"
+        errorLine1="    ksp(&quot;androidx.room:room-compiler:2.7.2&quot;)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="135"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.webkit:webkit than 1.14.0 is available: 1.17.0"
+        errorLine1="    implementation(&quot;androidx.webkit:webkit:1.14.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="136"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media3:media3-exoplayer than 1.9.0 is available: 1.11.0"
+        errorLine1="    implementation(&quot;androidx.media3:media3-exoplayer:1.9.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="148"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media3:media3-datasource than 1.9.0 is available: 1.11.0"
+        errorLine1="    implementation(&quot;androidx.media3:media3-datasource:1.9.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="149"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media3:media3-ui than 1.9.0 is available: 1.11.0"
+        errorLine1="    implementation(&quot;androidx.media3:media3-ui:1.9.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="150"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-testing than 2.7.2 is available: 2.8.4"
+        errorLine1="    androidTestImplementation(&quot;androidx.room:room-testing:2.7.2&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="161"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-test than 1.10.2 is available: 1.11.0"
+        errorLine1="    testImplementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2&quot;)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="154"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.apache.sshd:sshd-sftp than 2.14.0 is available: 2.19.0"
+        errorLine1="    testImplementation(&quot;org.apache.sshd:sshd-sftp:2.14.0&quot;)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="155"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.json:json than 20240303 is available: 20260814"
+        errorLine1="    testImplementation(&quot;org.json:json:20240303&quot;)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="156"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.squareup.okhttp3:mockwebserver than 4.12.0 is available: 5.5.0"
+        errorLine1="    testImplementation(&quot;com.squareup.okhttp3:mockwebserver:4.12.0&quot;)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="157"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    private val evictor = LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES)"
+        errorLine2="                ~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewCache.kt"
+            line="17"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    private val evictor = LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES)"
+        errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewCache.kt"
+            line="17"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    val cache: Cache = SimpleCache("
+        errorLine2="               ~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewCache.kt"
+            line="18"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    val cache: Cache = SimpleCache("
+        errorLine2="                       ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewCache.kt"
+            line="18"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    private val cache: Cache,"
+        errorLine2="                       ~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="41"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        val cacheFactory = CacheDataSource.Factory()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="55"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        val cacheFactory = CacheDataSource.Factory()"
+        errorLine2="                                           ~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="55"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .setCache(cache)"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="56"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .setUpstreamDataSourceFactory(newFactory)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="57"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(cache))"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="58"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(cache))"
+        errorLine2="                                                        ~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="58"
+            column="57"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(cache))"
+        errorLine2="                                                                  ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="58"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        val mediaSource = ProgressiveMediaSource.Factory(cacheFactory)"
+        errorLine2="            ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="63"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        val mediaSource = ProgressiveMediaSource.Factory(cacheFactory)"
+        errorLine2="                                                 ~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="63"
+            column="50"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="            .createMediaSource(MediaItem.fromUri(cacheAwareUri(file, hostName)))"
+        errorLine2="             ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="64"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        newPlayer.setMediaSource(mediaSource)"
+        errorLine2="                  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="65"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun addTransferListener(transferListener: TransferListener) {"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="34"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun addTransferListener(transferListener: TransferListener) {"
+        errorLine2="                                                       ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="34"
+            column="56"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun open(dataSpec: DataSpec): Long = open(dataSpec.position, dataSpec.length)"
+        errorLine2="                 ~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="38"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun open(dataSpec: DataSpec): Long = open(dataSpec.position, dataSpec.length)"
+        errorLine2="                                ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="38"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun open(dataSpec: DataSpec): Long = open(dataSpec.position, dataSpec.length)"
+        errorLine2="                                                                ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="38"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun open(dataSpec: DataSpec): Long = open(dataSpec.position, dataSpec.length)"
+        errorLine2="                                                                                   ~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="38"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {"
+        errorLine2="                 ~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="66"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        if (bytesRemaining == 0L) return C.RESULT_END_OF_INPUT"
+        errorLine2="                                           ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="68"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="        if (read == -1) return C.RESULT_END_OF_INPUT"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="75"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun getUri(): Uri = Uri.parse(&quot;sftp://$displayHost$path&quot;)"
+        errorLine2="                 ~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="80"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun getResponseHeaders(): Map&lt;String, List&lt;String>> = emptyMap()"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="82"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun close() {"
+        errorLine2="                 ~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="84"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="    override fun createDataSource(): DataSource = SftpDataSource("
+        errorLine2="                 ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSourceFactory.kt"
+            line="21"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT"
+        errorLine2="                                    ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpScreen.kt"
+            line="923"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT"
+        errorLine2="                                    ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpScreen.kt"
+            line="923"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT"
+        errorLine2="                                                                        ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpScreen.kt"
+            line="923"
+            column="73"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    val targetAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1))"
+        errorLine2="                                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SettingsScreen.kt"
+            line="443"
+            column="70"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    val targetAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1))"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SettingsScreen.kt"
+            line="443"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="    screenModifier: Modifier,"
+        errorLine2="    ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/AppShellScreen.kt"
+            line="121"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SettingsScreen.kt"
+            line="242"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="fun PreferenceWarning(title: String, summary: String, action: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier) {"
+        errorLine2="                                                                                                ~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/design/SshDesignSystem.kt"
+            line="329"
+            column="97"/>
+    </issue>
+
+    <issue
+        id="CustomX509TrustManager"
+        message="Implementing a custom `X509TrustManager` is error-prone and likely to be insecure. It is likely to disable certificate validation altogether, and is non-trivial to implement correctly without calling Android&apos;s default implementation."
+        errorLine1="private class CapturingTrustManager : X509TrustManager {"
+        errorLine2="              ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/scanner/AndroidPortScanBackend.kt"
+            line="154"
+            column="15"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is never &lt; 26"
+        errorLine1="    if (Build.VERSION.SDK_INT &lt; Build.VERSION_CODES.M) return true"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/settings/BatteryGuard.kt"
+            line="55"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 26"
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/documents/DocumentAccessManager.kt"
+            line="246"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 26"
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/documents/DocumentsBackend.kt"
+            line="238"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 26"
+        errorLine1="            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/forward/ForwardService.kt"
+            line="184"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 26"
+        errorLine1="    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/sftp/TransferManager.kt"
+            line="507"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 26. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableLongStateOf` instead of `mutableStateOf`"
+        errorLine1="    var positionMs by remember(player) { mutableStateOf(0L) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpScreen.kt"
+            line="892"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var attempt by remember(file.path) { mutableStateOf(0) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpScreen.kt"
+            line="968"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    Uri.parse(&quot;package:${context.packageName}&quot;),"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/settings/BatteryGuard.kt"
+            line="65"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="                permissionPreferences.edit().putBoolean(&quot;notification_prompted&quot;, true).apply()"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/ForwardScreen.kt"
+            line="110"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }"
+        errorLine2="                                                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/ForwardScreen.kt"
+            line="122"
+            column="72"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="    ansi.forEachIndexed { index, value -> values[index] = Color.parseColor(value) }"
+        errorLine2="                                                          ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyPalette.kt"
+            line="13"
+            column="59"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        val background = Color.parseColor(palette.background)"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalFrontend.kt"
+            line="148"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="            foregroundArgb = Color.parseColor(palette.foreground),"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalFrontend.kt"
+            line="151"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="            cursorArgb = Color.parseColor(palette.cursor),"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalFrontend.kt"
+            line="152"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        backgroundArgb = Color.parseColor(palette.background)"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalView.kt"
+            line="256"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        foregroundArgb = Color.parseColor(palette.foreground)"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalView.kt"
+            line="257"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        selectionArgb = Color.parseColor(palette.selectionBackground)"
+        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalView.kt"
+            line="258"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        cursorAccentArgb = Color.parseColor(palette.cursorAccent)"
+        errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/GhosttyTerminalView.kt"
+            line="259"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="        return Bitmap.createScaledBitmap("
+        errorLine2="               ^">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImagePaletteExtractor.kt"
+            line="22"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="254"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().clear().commit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="262"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        val editor = prefs.edit()"
+        errorLine2="                     ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="379"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="    val scaled = Bitmap.createScaledBitmap("
+        errorLine2="                 ^">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="585"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="    return Bitmap.createScaledBitmap("
+        errorLine2="           ^">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="602"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="    return Bitmap.createScaledBitmap("
+        errorLine2="           ^">
+        <location
+            file="src/main/java/com/yang136/sshhelper/theme/ImageThemeRepository.kt"
+            line="614"
+            column="12"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }"
+        errorLine2="                                                                                   ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/LanDiscoveryScreen.kt"
+            line="293"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }"
+        errorLine2="                                                                                   ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/PortScannerScreen.kt"
+            line="295"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        Uri.parse(&quot;sftp://$hostName${file.path}&quot; + if (file.size >= 0) &quot;?size=${file.size}&quot; else &quot;&quot;)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/PreviewPlaybackManager.kt"
+            line="98"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    override fun getUri(): Uri = Uri.parse(&quot;sftp://$displayHost$path&quot;)"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/preview/SftpDataSource.kt"
+            line="80"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(root.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }"
+        errorLine2="                                                                              ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/sftp/SftpRepository.kt"
+            line="52"
+            column="79"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        mutableState.value = mutableState.value.copy(localRoot = root, localUri = Uri.parse(root.uri), localBackStack = emptyList(), selectedLocal = emptySet())"
+        errorLine2="                                                                                  ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpViewModel.kt"
+            line="173"
+            column="83"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        runCatching { mutableState.value.selectedLocal.forEach { container.sftpRepository.deleteLocal(Uri.parse(it)) } }"
+        errorLine2="                                                                                                      ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/SftpViewModel.kt"
+            line="376"
+            column="103"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    return runCatching { Uri.parse(cleaned).path.orEmpty() }.getOrDefault(&quot;&quot;)"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/TerminalMetadata.kt"
+            line="25"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="    val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))"
+        errorLine2="                                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/TerminalScreen.kt"
+            line="324"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) }"
+        errorLine2="                                                                               ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/TerminalScreen.kt"
+            line="681"
+            column="80"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="        view.setBackgroundColor(Color.parseColor(palette.background))"
+        errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/TerminalScreen.kt"
+            line="1775"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="                setBackgroundColor(Color.parseColor(initialBackground))"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/ui/TerminalScreen.kt"
+            line="1882"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val sourceUri = Uri.parse(job.source)"
+        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/sftp/TransferManager.kt"
+            line="272"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val root = asDocumentUri(context, Uri.parse(job.destination))"
+        errorLine2="                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/yang136/sshhelper/sftp/TransferManager.kt"
+            line="294"
+            column="43"/>
+    </issue>
+
+</issues>

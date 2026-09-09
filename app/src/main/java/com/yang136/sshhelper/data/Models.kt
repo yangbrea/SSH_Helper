@@ -10,6 +10,9 @@ enum class AuthType { PASSWORD, PRIVATE_KEY }
 
 enum class ProxyType { HTTP, SOCKS5 }
 
+/** Remote PTY persistence backend. The executable always lives on the SSH target. */
+enum class MultiplexerType { NONE, TMUX, ZMX }
+
 @Entity(
     tableName = "hosts",
     foreignKeys = [ForeignKey(
@@ -292,8 +295,20 @@ sealed interface Credential {
 }
 
 fun HostEntity.toProfile() = HostProfile(
-    id, name, hostname, port, username, authType, rememberCredential, privateKeyName,
-    autoReconnect, jumpHostId, proxyType, proxyHost, proxyPort, proxyUsername,
+    id = id,
+    name = name,
+    hostname = hostname,
+    port = port,
+    username = username,
+    authType = authType,
+    rememberCredential = rememberCredential,
+    privateKeyName = privateKeyName,
+    autoReconnect = autoReconnect,
+    jumpHostId = jumpHostId,
+    proxyType = proxyType,
+    proxyHost = proxyHost,
+    proxyPort = proxyPort,
+    proxyUsername = proxyUsername,
 )
 
 fun HostProfile.toEntity(existing: HostEntity? = null) = HostEntity(

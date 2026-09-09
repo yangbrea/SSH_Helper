@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -73,6 +75,7 @@ fun ActivityScreen(
     val state = buildActivityUiState(sessions, transfers, rules, forwardStates, writebacks.size)
     val hostNames = hosts.associate { it.id to it.name }
     var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
+    var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
     BackHandler(onBack = onBack)
 
     Scaffold(
@@ -110,7 +113,9 @@ fun ActivityScreen(
                 item { SshSectionHeader("活动会话", summary = "${state.sessions.size}") }
                 items(state.sessions, key = { it.id.value }) { session ->
                     ActivityRow(
-                        icon = if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal,
+                        icon = if (SessionFeature.SFTP in session.features) Icons.Default.Folder
+                        else if (session.features == setOf(SessionFeature.PORT_FORWARD)) Icons.Default.Public
+                        else Icons.Default.Terminal,
                         title = session.displayName,
                         summary = "${session.profile.name} · ${session.connection.presentation().first}",
                         badge = session.connection.presentation(),
@@ -118,7 +123,7 @@ fun ActivityScreen(
                         onLongClick = { deleteArmedSessionId = session.id },
                         deleteArmed = deleteArmedSessionId == session.id,
                         onDelete = {
-                            onCloseSession(session.id)
+                            closingSession = session
                             deleteArmedSessionId = null
                         },
                     )
@@ -153,6 +158,27 @@ fun ActivityScreen(
         }
     }
 
+    closingSession?.let { session ->
+        val activeForwardCount = app.container.forwardManager.activeForwardCount(session.id)
+        AlertDialog(
+            onDismissRequest = { closingSession = null },
+            title = { Text("关闭会话？") },
+            text = {
+                if (activeForwardCount > 0) {
+                    Text("“${session.displayName}”正承载 $activeForwardCount 条转发，关闭也会停止这些转发。确认关闭并断开该会话？")
+                } else {
+                    Text("将断开并关闭“${session.displayName}”。")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCloseSession(session.id)
+                    closingSession = null
+                }) { Text(if (activeForwardCount > 0) "关闭并停止转发" else "断开并关闭", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
@@ -171,12 +197,14 @@ private fun ActivityRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            colors = CardDefaults.cardColors(
+                containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+            ),
         ) {
             ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
         }
     } else {
-        Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
             ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
         }
     }

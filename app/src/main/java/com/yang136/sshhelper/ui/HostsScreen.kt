@@ -36,11 +36,12 @@ fun HostsScreen(
     onDiagnostics: (Long) -> Unit,
     onEdit: (HostProfile) -> Unit,
     onOpenHost: (HostProfile) -> Unit,
-    onConnect: (HostProfile) -> Boolean,
+    onQuickNewSession: (HostProfile) -> Unit,
     onForwards: (Long) -> Unit,
-    onTerminal: (HostProfile) -> Boolean,
-    onFiles: (HostProfile) -> Boolean,
-    onNewSession: (HostProfile) -> Boolean,
+    onNewSession: (HostProfile, SessionKind) -> SessionId?,
+    onOpenTerminal: (SessionId) -> Unit,
+    onOpenFiles: (SessionId) -> Unit,
+    onRenameSession: (SessionId, String) -> Unit,
     sessions: List<ManagedSessionState>,
     onOpenSession: (SessionId) -> Unit,
     onCloseSession: (SessionId) -> Unit,
@@ -62,7 +63,6 @@ fun HostsScreen(
     var deleting by remember { mutableStateOf<HostProfile?>(null) }
     var hostMenu by remember { mutableStateOf<Long?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
-    var sessionLimitReached by remember { mutableStateOf(false) }
     var closingSession by remember { mutableStateOf<ManagedSessionState?>(null) }
     var deleteArmedSessionId by remember { mutableStateOf<SessionId?>(null) }
     // 大窗口与手机横屏内联工作区中选中的主机；窗口缩放时保留选择。
@@ -116,11 +116,10 @@ fun HostsScreen(
                     sessionsExpanded = sessionsExpanded,
                     onToggleSessions = { sessionsExpanded = !sessionsExpanded },
                     onOpenHost = { host -> selectedHostId = host.id },
-                    onConnect = { host -> if (!onConnect(host)) sessionLimitReached = true },
+                    onQuickNewSession = { host -> onQuickNewSession(host) },
                     onAdd = onAdd,
                     onSessionClick = onOpenSession,
                     onAskCloseSession = { closingSession = it },
-                    onDeleteSessionNow = onCloseSession,
                     onHostMenu = { hostMenu = it },
                     hostMenu = hostMenu,
                     onForwards = onForwards,
@@ -135,13 +134,12 @@ fun HostsScreen(
                         HostWorkspacePane(
                             host = selectedHost,
                             sessions = sessions,
-                            onTerminal = onTerminal,
-                            onFiles = onFiles,
                             onNewSession = onNewSession,
+                            onOpenTerminal = onOpenTerminal,
+                            onOpenFiles = onOpenFiles,
+                            onRenameSession = onRenameSession,
                             onForwards = onForwards,
                             onDiagnostics = onDiagnostics,
-                            onEdit = onEdit,
-                            onOpenSession = onOpenSession,
                             onCloseSession = onCloseSession,
                         )
                     }
@@ -173,13 +171,12 @@ fun HostsScreen(
                 HostWorkspacePane(
                     host = selectedHost,
                     sessions = sessions,
-                    onTerminal = onTerminal,
-                    onFiles = onFiles,
                     onNewSession = onNewSession,
+                    onOpenTerminal = onOpenTerminal,
+                    onOpenFiles = onOpenFiles,
+                    onRenameSession = onRenameSession,
                     onForwards = onForwards,
                     onDiagnostics = onDiagnostics,
-                    onEdit = onEdit,
-                    onOpenSession = onOpenSession,
                     onCloseSession = onCloseSession,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
@@ -196,11 +193,10 @@ fun HostsScreen(
                 onOpenHost = if (adaptive.isLargeScreen) {
                     { host -> selectedHostId = host.id }
                 } else onOpenHost,
-                onConnect = { host -> if (!onConnect(host)) sessionLimitReached = true },
+                onQuickNewSession = { host -> onQuickNewSession(host) },
                 onAdd = if (adaptive.isLargeScreen) onAdd else null,
                 onSessionClick = onOpenSession,
                 onAskCloseSession = { closingSession = it },
-                onDeleteSessionNow = onCloseSession,
                 onHostMenu = { hostMenu = it },
                 hostMenu = hostMenu,
                 onForwards = onForwards,
@@ -232,11 +228,27 @@ fun HostsScreen(
     if (confirmExit) AlertDialog(onDismissRequest = { confirmExit = false }, title = { Text("退出 SSH Helper？") },
         text = { Text(if (sessions.isEmpty()) "确认退出应用吗？" else "退出将断开 ${sessions.size} 个活动 SSH 会话。") },
         confirmButton = { TextButton(onClick = onExit) { Text("退出") } }, dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("取消") } })
-    if (sessionLimitReached) AlertDialog(onDismissRequest = { sessionLimitReached = false }, title = { Text("已达到会话上限") },
-        text = { Text("最多可同时保留 8 个会话，请先关闭一个会话。") }, confirmButton = { TextButton(onClick = { sessionLimitReached = false }) { Text("知道了") } })
-    closingSession?.let { session -> AlertDialog(onDismissRequest = { closingSession = null }, title = { Text("关闭会话？") },
-        text = { Text("将断开并关闭“${session.displayName}”。") }, confirmButton = { TextButton(onClick = { onCloseSession(session.id); closingSession = null }) { Text("断开并关闭") } },
-        dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } }) }
+    closingSession?.let { session ->
+        val activeForwardCount = app.container.forwardManager.activeForwardCount(session.id)
+        AlertDialog(
+            onDismissRequest = { closingSession = null },
+            title = { Text("关闭会话？") },
+            text = {
+                if (activeForwardCount > 0) {
+                    Text("“${session.displayName}”正承载 $activeForwardCount 条转发，关闭也会停止这些转发。确认关闭并断开该会话？")
+                } else {
+                    Text("将断开并关闭“${session.displayName}”。")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCloseSession(session.id)
+                    closingSession = null
+                }) { Text(if (activeForwardCount > 0) "关闭并停止转发" else "断开并关闭", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { closingSession = null }) { Text("取消") } },
+        )
+    }
 }
 
 /** 主机列表内容：搜索、活动会话与主机卡片；横屏下自动限宽居中。 */
@@ -251,11 +263,10 @@ private fun HostsList(
     sessionsExpanded: Boolean,
     onToggleSessions: () -> Unit,
     onOpenHost: (HostProfile) -> Unit,
-    onConnect: (HostProfile) -> Unit,
+    onQuickNewSession: (HostProfile) -> Unit,
     onAdd: (() -> Unit)?,
     onSessionClick: (SessionId) -> Unit,
     onAskCloseSession: (ManagedSessionState) -> Unit,
-    onDeleteSessionNow: (SessionId) -> Unit,
     onHostMenu: (Long?) -> Unit,
     hostMenu: Long?,
     onForwards: (Long) -> Unit,
@@ -298,7 +309,13 @@ private fun HostsList(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f)),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(if (SessionFeature.SFTP in session.features) Icons.Default.Folder else Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(
+                                if (SessionFeature.SFTP in session.features) Icons.Default.Folder
+                                else if (session.features == setOf(SessionFeature.PORT_FORWARD)) Icons.Default.Public
+                                else Icons.Default.Terminal,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(session.displayName, fontWeight = FontWeight.SemiBold)
@@ -311,7 +328,7 @@ private fun HostsList(
                             SshStatusBadge(presentation.first, presentation.second)
                             if (deleteArmedSessionId == session.id) {
                                 TextButton(onClick = {
-                                    onDeleteSessionNow(session.id)
+                                    onAskCloseSession(session)
                                     onDeleteArmedSession(null)
                                 }) {
                                     Text("删除", color = MaterialTheme.colorScheme.error)
@@ -337,7 +354,7 @@ private fun HostsList(
                         Text("${host.username}@${host.hostname}:${host.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         host.jumpHostId?.let { Text("经跳板机连接", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
                     }
-                    IconButton(onClick = { onConnect(host) }) { Icon(Icons.Default.Terminal, "新建终端") }
+                    IconButton(onClick = { onQuickNewSession(host) }) { Icon(Icons.Default.Add, "新建会话") }
                     Box {
                         IconButton(onClick = { onHostMenu(host.id) }) { Icon(Icons.Default.MoreVert, "更多操作") }
                         DropdownMenu(expanded = hostMenu == host.id, onDismissRequest = { onHostMenu(null) }) {

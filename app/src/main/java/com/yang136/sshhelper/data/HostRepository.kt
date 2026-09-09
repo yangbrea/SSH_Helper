@@ -122,6 +122,11 @@ class HostRepository(
         }
     }
 
+    /** 删除某主机已保存的加密凭据（例如签名变化导致旧密文无法解密时）。 */
+    suspend fun deleteStoredCredential(profile: HostProfile) {
+        database.secretDao().deleteForHost(profile.id)
+    }
+
     suspend fun delete(profile: HostProfile) {
         val dependents = database.hostDao().jumpDependentCount(profile.id)
         if (dependents > 0) {

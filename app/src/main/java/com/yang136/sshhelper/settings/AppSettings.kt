@@ -15,6 +15,22 @@ import kotlinx.coroutines.flow.map
 const val DEFAULT_TERMINAL_FONT_SIZE = 14
 const val MIN_TERMINAL_FONT_SIZE = 10
 const val MAX_TERMINAL_FONT_SIZE = 28
+const val DEFAULT_TERMINAL_BACKGROUND_OPACITY = 0.80f
+const val MIN_TERMINAL_BACKGROUND_OPACITY = 0.40f
+const val MAX_TERMINAL_BACKGROUND_OPACITY = 0.95f
+
+internal fun coerceTerminalBackgroundOpacity(value: Float): Float =
+    if (value.isFinite()) value.coerceIn(MIN_TERMINAL_BACKGROUND_OPACITY, MAX_TERMINAL_BACKGROUND_OPACITY)
+    else DEFAULT_TERMINAL_BACKGROUND_OPACITY
+
+internal fun effectiveTerminalBackgroundOpacity(
+    transparencyEnabled: Boolean,
+    configuredOpacity: Float,
+): Float = if (transparencyEnabled) {
+    coerceTerminalBackgroundOpacity(configuredOpacity)
+} else {
+    1f
+}
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -52,6 +68,8 @@ data class AppSettings(
     val imageThemeVariant: ImageThemeVariant = ImageThemeVariant.IMMERSIVE,
     val imageOverlayStrength: Float = DEFAULT_IMAGE_OVERLAY_STRENGTH,
     val terminalFontSize: Int = DEFAULT_TERMINAL_FONT_SIZE,
+    val terminalTransparencyEnabled: Boolean = false,
+    val terminalBackgroundOpacity: Float = DEFAULT_TERMINAL_BACKGROUND_OPACITY,
     val extraKeys: List<ExtraKeyId> = DEFAULT_EXTRA_KEYS,
     val aiBaseUrl: String = "https://api.deepseek.com/v1",
     val aiApiKey: String = "",
@@ -83,6 +101,8 @@ interface SettingsRepository {
     suspend fun setImageThemeVariant(variant: ImageThemeVariant)
     suspend fun setImageOverlayStrength(strength: Float)
     suspend fun setTerminalFontSize(size: Int)
+    suspend fun setTerminalTransparencyEnabled(enabled: Boolean)
+    suspend fun setTerminalBackgroundOpacity(opacity: Float)
     suspend fun setExtraKeys(keys: List<ExtraKeyId>)
     suspend fun setAiBaseUrl(url: String)
     suspend fun setAiApiKey(key: String)
@@ -111,6 +131,10 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
                 imageOverlayStrength = coerceImageOverlayStrength(preferences[IMAGE_OVERLAY_STRENGTH] ?: DEFAULT_IMAGE_OVERLAY_STRENGTH),
                 terminalFontSize = sanitizeTerminalFontSize(
                     preferences[TERMINAL_FONT_SIZE] ?: DEFAULT_TERMINAL_FONT_SIZE,
+                ),
+                terminalTransparencyEnabled = preferences[TERMINAL_TRANSPARENCY_ENABLED] ?: false,
+                terminalBackgroundOpacity = coerceTerminalBackgroundOpacity(
+                    preferences[TERMINAL_BACKGROUND_OPACITY] ?: DEFAULT_TERMINAL_BACKGROUND_OPACITY,
                 ),
                 extraKeys = decodeExtraKeys(preferences[EXTRA_KEYS]),
                 aiBaseUrl = preferences[AI_BASE_URL] ?: "https://api.deepseek.com/v1",
@@ -145,6 +169,14 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
 
     override suspend fun setTerminalFontSize(size: Int) {
         dataStore.edit { it[TERMINAL_FONT_SIZE] = sanitizeTerminalFontSize(size) }
+    }
+
+    override suspend fun setTerminalTransparencyEnabled(enabled: Boolean) {
+        dataStore.edit { it[TERMINAL_TRANSPARENCY_ENABLED] = enabled }
+    }
+
+    override suspend fun setTerminalBackgroundOpacity(opacity: Float) {
+        dataStore.edit { it[TERMINAL_BACKGROUND_OPACITY] = coerceTerminalBackgroundOpacity(opacity) }
     }
 
     override suspend fun setExtraKeys(keys: List<ExtraKeyId>) {
@@ -188,6 +220,8 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         val IMAGE_THEME_VARIANT = stringPreferencesKey("image_theme_variant")
         val IMAGE_OVERLAY_STRENGTH = floatPreferencesKey("image_overlay_strength")
         val TERMINAL_FONT_SIZE = intPreferencesKey("terminal_font_size")
+        val TERMINAL_TRANSPARENCY_ENABLED = booleanPreferencesKey("terminal_transparency_enabled")
+        val TERMINAL_BACKGROUND_OPACITY = floatPreferencesKey("terminal_background_opacity")
         val EXTRA_KEYS = stringPreferencesKey("extra_keys")
         val AI_BASE_URL = stringPreferencesKey("ai_base_url")
         val AI_API_KEY = stringPreferencesKey("ai_api_key")

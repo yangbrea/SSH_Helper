@@ -28,4 +28,12 @@ class ModelsTest {
     @Test fun defaultSshPortIs22() {
         assertEquals(22, valid().port)
     }
+
+    @Test fun profileRoundTripsThroughEntity() {
+        val profile = valid().copy(name = " 新名字 ")
+        val entity = profile.toEntity()
+        val restored = entity.toProfile()
+        assertEquals("新名字", restored.name)
+        assertEquals(profile.hostname, restored.hostname)
+    }
 }

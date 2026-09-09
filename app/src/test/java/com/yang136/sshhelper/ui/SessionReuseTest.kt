@@ -6,6 +6,7 @@ import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.SessionFeature
 import com.yang136.sshhelper.ssh.SessionId
+import com.yang136.sshhelper.ssh.SessionKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -18,12 +19,18 @@ class SessionReuseTest {
         authType = AuthType.PASSWORD,
     )
 
-    private fun session(id: String, hostId: Long, vararg features: SessionFeature) = ManagedSessionState(
+    private fun session(
+        id: String,
+        hostId: Long,
+        vararg features: SessionFeature,
+        kind: SessionKind = SessionKind.SSH,
+    ) = ManagedSessionState(
         id = SessionId(id),
         profile = host(hostId),
         displayName = id,
         connection = ConnectionState.Connected("t"),
         features = features.toSet(),
+        kind = kind,
     )
 
     @Test
@@ -56,6 +63,16 @@ class SessionReuseTest {
     fun onlyForwardSession_isNotReusable() {
         val list = listOf(session("fwd", 1, SessionFeature.PORT_FORWARD))
         assertNull(selectReusableSession(list, 1L))
+    }
+
+    @Test
+    fun tmuxSession_isNotReusedForFilesOrSftp() {
+        val list = listOf(
+            session("tmux", 1, SessionFeature.SHELL, kind = SessionKind.TMUX),
+            session("ssh", 1, SessionFeature.SHELL),
+        )
+        assertEquals("ssh", selectReusableSession(list, 1L)?.id?.value)
+        assertNull(selectReusableSession(listOf(session("tmux", 1, SessionFeature.SHELL, kind = SessionKind.TMUX)), 1L))
     }
 
     @Test

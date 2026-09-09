@@ -85,10 +85,10 @@ class DesignSystemTest {
         val dark = colorScheme(ThemePreset.EMERALD, true)
         val light = colorScheme(ThemePreset.EMERALD, false)
 
-        assertEquals(Color(0xFF35E07F), dark.primary)
-        assertEquals(Color(0xFFC1E86B), dark.tertiary)
-        assertEquals(Color(0xFF08783B), light.primary)
-        assertEquals(Color(0xFF4F6800), light.tertiary)
+        assertEquals(Color(0xFF34D399), dark.primary)
+        assertEquals(Color(0xFF5EEAD4), dark.tertiary)
+        assertEquals(Color(0xFF0D7A55), light.primary)
+        assertEquals(Color(0xFF0E7490), light.tertiary)
         assertTrue(dark.primaryContainer != dark.secondaryContainer)
         assertTrue(light.primaryContainer != light.secondaryContainer)
     }
@@ -98,8 +98,8 @@ class DesignSystemTest {
         val expected = mapOf(
             (ThemePreset.OCEAN to true) to Triple("#07131f", "#dff8fb", "#22d3ee"),
             (ThemePreset.OCEAN to false) to Triple("#f8fbfc", "#15242b", "#22d3ee"),
-            (ThemePreset.EMERALD to true) to Triple("#06130e", "#e2ffe9", "#35e07f"),
-            (ThemePreset.EMERALD to false) to Triple("#f8fbfc", "#15242b", "#35e07f"),
+            (ThemePreset.EMERALD to true) to Triple("#0b0f0d", "#e6ede9", "#34d399"),
+            (ThemePreset.EMERALD to false) to Triple("#f8fbfc", "#15242b", "#34d399"),
             (ThemePreset.AMBER to true) to Triple("#0b0b0d", "#f2ecdd", "#d9b45f"),
             (ThemePreset.AMBER to false) to Triple("#faf8f2", "#29251d", "#765b12"),
             (ThemePreset.VIOLET to true) to Triple("#0d1117", "#e9eef5", "#b8c4d6"),

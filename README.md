@@ -10,7 +10,7 @@
 - **网络诊断** — 查看当前网络、DNS 与路由信息，对自定义目标或已保存主机执行网络绑定的 TCP/SSH 延迟测试和故障判断
 - **诊断日志** — 记录 SSH 连接阶段、DNS/TCP 探测与端口扫描过程，支持查看、筛选和导出
 - **连接方式** — 直连、单层跳板机、HTTP/SOCKS5 代理，目标机与跳板机的主机密钥独立校验
-- **多会话终端** — 同一台主机可运行多个会话；终端与文件系统共享同一条 SSH 连接；支持搜索、快捷命令、选择复制
+- **多会话终端** — 同一台主机可运行多个会话；终端与文件系统共享同一条 SSH 连接；默认使用原生 Ghostty 渲染终端
 - **文件管理** — 内置 SFTP 文件浏览器与传输队列；图片/音频可在线流式预览（图片经 Coil 流式加载，音频经 Media3/ExoPlayer 边下边播并带磁盘缓存）
 - **端口转发** — 本地 / 远程 / 动态（SOCKS5）隧道，支持锁屏后自动重连；运行中的本地转发可一键在浏览器打开
 - **凭据安全** — 密码、私钥、私钥口令与代理密码经 Android Keystore（AES-256-GCM）加密，可启用生物识别保险库
@@ -27,6 +27,21 @@
 ./scripts/build-debug.sh         # 构建 Debug APK 并运行单元测试
 ./scripts/build-and-install.sh   # 测试、构建并安装到已连接的 Android 设备
 ```
+
+原生 Ghostty 后端固定使用 `libghostty-vt`、Zig 0.16.0 与 Android NDK
+29.0.14206865。首次构建或清理 `app/build` 后执行：
+
+```bash
+git submodule update --init --recursive
+ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865" ./scripts/build-libghostty-android.sh
+./scripts/run-ghostty-host-tests.sh
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
+./scripts/verify-ghostty-packaging.sh
+```
+
+`assembleDebugAndroidTest` 只编译仪器测试 APK，不会启动设备。本项目当前不把 Ghostty
+标记为已完成真机兼容性或性能验证。终端已移除 WebView/xterm.js 回退，统一使用 Ghostty。
+CI 同样不运行 `connectedAndroidTest` 或任何设备矩阵任务。
 
 ## 文档
 
@@ -47,4 +62,4 @@ Release 构建的签名凭据保存在本机 `~/.android`，不进入仓库。
 
 ## 第三方组件
 
-[xterm.js](https://xtermjs.org/) · [JSch](http://www.jcraft.com/jsch/) · Bouncy Castle · CommonMark · OkHttp · Room · Jetpack Compose
+[Ghostty/libghostty-vt](https://ghostty.org/) · [JSch](http://www.jcraft.com/jsch/) · Bouncy Castle · CommonMark · OkHttp · Room · Jetpack Compose

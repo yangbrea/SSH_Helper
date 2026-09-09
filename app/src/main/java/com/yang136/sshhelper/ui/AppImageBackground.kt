@@ -21,13 +21,36 @@ import kotlin.math.roundToInt
 
 val LocalImageBackgroundActive = staticCompositionLocalOf { false }
 
+internal enum class StructuralSurfaceRole { CONTENT, NAVIGATION }
+
+internal const val PRESET_CONTENT_SURFACE_ALPHA = 0.80f
+internal const val PRESET_NAVIGATION_SURFACE_ALPHA = 0.86f
+internal const val IMAGE_CONTENT_SURFACE_ALPHA = 0.78f
+internal const val IMAGE_NAVIGATION_SURFACE_ALPHA = 0.84f
+
+internal fun structuralSurfaceAlpha(imageBackgroundActive: Boolean, role: StructuralSurfaceRole): Float =
+    when (role) {
+        StructuralSurfaceRole.CONTENT -> if (imageBackgroundActive) {
+            IMAGE_CONTENT_SURFACE_ALPHA
+        } else {
+            PRESET_CONTENT_SURFACE_ALPHA
+        }
+        StructuralSurfaceRole.NAVIGATION -> if (imageBackgroundActive) {
+            IMAGE_NAVIGATION_SURFACE_ALPHA
+        } else {
+            PRESET_NAVIGATION_SURFACE_ALPHA
+        }
+    }
+
 @Composable
 fun imageAwareScaffoldColor(): Color =
     if (LocalImageBackgroundActive.current) Color.Transparent else MaterialTheme.colorScheme.background
 
 @Composable
-fun imageAwareContainerColor(color: Color, alpha: Float = 0.86f): Color =
-    if (LocalImageBackgroundActive.current) color.copy(alpha = alpha) else color
+internal fun structuralSurfaceColor(
+    color: Color,
+    role: StructuralSurfaceRole = StructuralSurfaceRole.CONTENT,
+): Color = color.copy(alpha = structuralSurfaceAlpha(LocalImageBackgroundActive.current, role))
 
 @Composable
 fun imageAwareContentColor(): Color = MaterialTheme.colorScheme.onSurface

@@ -10,6 +10,7 @@ plugins {
 android {
     namespace = "com.yang136.sshhelper"
     compileSdk = 36
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.yang136.sshhelper"
@@ -19,6 +20,23 @@ android {
         versionName = "1.9.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        ndk {
+            // libghostty-vt is currently built for these two ABIs only.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_static"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // Release signing reads credentials from ~/.android/ssh_helper-release.properties
@@ -27,7 +45,20 @@ android {
         val file = File(System.getProperty("user.home"), ".android/ssh_helper-release.properties")
         if (file.isFile) FileInputStream(file).use { load(it) }
     }
+    // 固定项目内 debug keystore（不提交仓库），避免 ANDROID_USER_HOME / ~/.android
+    // 变化导致 debug 签名漂移。签名一变 Android 就会把 App 当成另一个应用，
+    // Keystore 中的已保存凭据全部失效。文件不存在时回退 AGP 默认 debug 签名，
+    // 保证新克隆仓库仍可直接构建。
+    val projectDebugKeystore = rootProject.file("keystore/debug.keystore")
     signingConfigs {
+        getByName("debug") {
+            if (projectDebugKeystore.isFile) {
+                storeFile = projectDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (releaseSigning.isNotEmpty()) {
             create("release") {
                 storeFile = file(releaseSigning.getProperty("storeFile"))
@@ -39,6 +70,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -56,6 +90,11 @@ android {
         "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
     )
     testOptions.unitTests.isIncludeAndroidResources = true
+    lint {
+        // The existing non-terminal debt is tracked separately. New lint
+        // findings still fail CI and must not grow this baseline.
+        baseline = file("lint-baseline.xml")
+    }
 }
 
 kotlin {
@@ -94,7 +133,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("androidx.room:room-ktx:2.7.2")
     ksp("androidx.room:room-compiler:2.7.2")
-    implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("androidx.exifinterface:exifinterface:1.4.2")

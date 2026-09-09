@@ -15,6 +15,14 @@ sealed interface ConnectionState {
     data class Error(val message: String) : ConnectionState
 }
 
+sealed interface TerminalChannelState {
+    data object Closed : TerminalChannelState
+    data object Opening : TerminalChannelState
+    data class Active(val target: TerminalTarget) : TerminalChannelState
+    data class Ended(val reason: String, val exitCode: Int? = null) : TerminalChannelState
+    data class Error(val message: String) : TerminalChannelState
+}
+
 enum class DisconnectCause {
     USER,
     REMOTE_SHELL_EXIT,
@@ -42,10 +50,14 @@ data class HostKeyRequest(
 interface SshSession {
     val state: StateFlow<ConnectionState>
     val output: Flow<ByteArray>
+    val terminalState: StateFlow<TerminalChannelState>
     val hostKeyRequest: StateFlow<HostKeyRequest?>
     val stage: StateFlow<ConnectionStage>
 
     suspend fun connect(route: SshRoute, credentials: RouteCredentials, openShell: Boolean = true)
+    suspend fun execute(command: String, timeoutMillis: Long = 10_000, maxOutputBytes: Int = 1024 * 1024): RemoteCommandResult
+    suspend fun openTerminal(target: TerminalTarget)
+    suspend fun closeTerminal()
     suspend fun write(data: ByteArray)
     suspend fun resize(columns: Int, rows: Int)
     suspend fun disconnect()

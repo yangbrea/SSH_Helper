@@ -105,6 +105,8 @@ import com.yang136.sshhelper.security.VaultState
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_EXTRA_KEYS
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
+import com.yang136.sshhelper.settings.MIN_TERMINAL_BACKGROUND_OPACITY
+import com.yang136.sshhelper.settings.MAX_TERMINAL_BACKGROUND_OPACITY
 import com.yang136.sshhelper.settings.ExtraKeyId
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
@@ -197,7 +199,7 @@ internal data class AiSettingsDraft(val baseUrl: String, val apiKey: String, val
 private data class ThemePreview(val preset: ThemePreset, val background: Color, val accent: Color)
 private val themePreviews = listOf(
     ThemePreview(ThemePreset.OCEAN, Color(0xFF07131F), Color(0xFF22D3EE)),
-    ThemePreview(ThemePreset.EMERALD, Color(0xFF06130E), Color(0xFF35E07F)),
+    ThemePreview(ThemePreset.EMERALD, Color(0xFF0B0F0D), Color(0xFF34D399)),
     ThemePreview(ThemePreset.AMBER, Color(0xFF0B0B0D), Color(0xFFD9B45F)),
     ThemePreview(ThemePreset.VIOLET, Color(0xFF0D1117), Color(0xFFB8C4D6)),
 )
@@ -217,6 +219,8 @@ fun SettingsScreen(
     onDeleteImageTheme: (String) -> Unit,
     onClearImageThemeError: () -> Unit,
     onFontSizeChange: (Int) -> Unit,
+    onTerminalTransparencyEnabledChange: (Boolean) -> Unit,
+    onTerminalBackgroundOpacityChange: (Float) -> Unit,
     onExtraKeysChange: (List<ExtraKeyId>) -> Unit,
     onAiBaseUrlChange: (String) -> Unit,
     onAiApiKeyChange: (String) -> Unit,
@@ -288,7 +292,14 @@ fun SettingsScreen(
                 onClearError = onClearImageThemeError,
                 modifier = contentModifier,
             )
-            SettingsDestination.TERMINAL -> TerminalSettings(settings, onFontSizeChange, onExtraKeysChange, contentModifier)
+            SettingsDestination.TERMINAL -> TerminalSettings(
+                settings = settings,
+                onFontSize = onFontSizeChange,
+                onTransparencyEnabled = onTerminalTransparencyEnabledChange,
+                onBackgroundOpacity = onTerminalBackgroundOpacityChange,
+                onKeys = onExtraKeysChange,
+                modifier = contentModifier,
+            )
             SettingsDestination.AI -> AiSettings(settings, aiBaseUrl, { aiBaseUrl = it }, aiApiKey, { aiApiKey = it }, aiModel, { aiModel = it }, onAiSendContextChange, onAiShowBubbleChange, contentModifier)
             SettingsDestination.CONNECTIONS -> ConnectionsSettings(settings, onForwardReconnectAfterLockChange, contentModifier)
             SettingsDestination.SECURITY -> SecuritySettings(vaultState, canAuthenticate, onEnableVault, onUnlockVault, onDisableVault, onLockVault, { confirmVaultReset = true }, contentModifier)
@@ -397,7 +408,9 @@ private fun SettingsHome(
         state.categories.forEach { category ->
             item(category.destination.id) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    colors = CardDefaults.cardColors(
+                        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                    ),
                     border = if (selected == category.destination) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                 ) {
                     PreferenceAction(category.destination.icon, category.destination.title, category.summary, { onDestination(category.destination) })
@@ -478,7 +491,7 @@ private fun AppearanceSettings(
                     Card(
                         onClick = { onPreset(preview.preset) },
                         colors = CardDefaults.cardColors(
-                            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainer),
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
                             contentColor = imageAwareContentColor(),
                         ),
                         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
@@ -534,7 +547,7 @@ private fun ImageThemeControls(
     val light = settings.imageThemeVariant == ImageThemeVariant.BRIGHT
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Card(colors = CardDefaults.cardColors(
-            containerColor = imageAwareContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh),
+            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentColor = imageAwareContentColor(),
         )) {
             Box(Modifier.fillMaxWidth().height(190.dp)) {
@@ -603,6 +616,9 @@ private fun ImageThemeControls(
                     Card(
                         onClick = { onVariant(variant) },
                         modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        ),
                         border = if (settings.imageThemeVariant == variant) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
                         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -645,8 +661,56 @@ private fun ImageThemeControls(
 }
 
 @Composable
-private fun TerminalSettings(settings: AppSettings, onFontSize: (Int) -> Unit, onKeys: (List<ExtraKeyId>) -> Unit, modifier: Modifier) {
+private fun TerminalSettings(
+    settings: AppSettings,
+    onFontSize: (Int) -> Unit,
+    onTransparencyEnabled: (Boolean) -> Unit,
+    onBackgroundOpacity: (Float) -> Unit,
+    onKeys: (List<ExtraKeyId>) -> Unit,
+    modifier: Modifier,
+) {
     SettingsPage(modifier) {
+        item {
+            SshSectionHeader(
+                "终端背景",
+                summary = if (settings.terminalTransparencyEnabled) {
+                    "${(settings.terminalBackgroundOpacity * 100).roundToInt()}% 不透明"
+                } else {
+                    "不透明"
+                },
+            )
+        }
+        item {
+            PreferenceGroup {
+                PreferenceSwitch(
+                    title = "半透明背景",
+                    summary = "可透出当前应用背景",
+                    checked = settings.terminalTransparencyEnabled,
+                    onCheckedChange = onTransparencyEnabled,
+                )
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("背景不透明度", fontWeight = FontWeight.Medium)
+                        Text(
+                            "降低后可透出当前应用背景",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "${(settings.terminalBackgroundOpacity * 100).roundToInt()}%",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Slider(
+                    value = settings.terminalBackgroundOpacity,
+                    onValueChange = onBackgroundOpacity,
+                    valueRange = MIN_TERMINAL_BACKGROUND_OPACITY..MAX_TERMINAL_BACKGROUND_OPACITY,
+                    enabled = settings.terminalTransparencyEnabled,
+                )
+            }
+        }
         item { SshSectionHeader("终端字体", summary = "${settings.terminalFontSize} px") }
         item {
             PreferenceGroup {
@@ -969,8 +1033,8 @@ private fun AboutSettings(modifier: Modifier) {
             Icons.Default.Terminal to ("终端与会话" to "多会话、快捷命令、搜索和 AI 助手"),
             Icons.Default.Storage to ("文件与传输" to "SFTP、系统文件访问和安全写回"),
             Icons.Default.Security to ("连接与安全" to "保险库、主机指纹、跳板机与代理"),
-        ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
-        item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("xterm.js · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
+        ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
+        item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("Ghostty · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
     }
 }
 

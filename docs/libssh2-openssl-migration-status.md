@@ -1,0 +1,234 @@
+# libssh2 + OpenSSL 迁移进度记录
+
+Branch: `feat/libssh2-openssl`
+Base: `2ea89ff`（commit current workspace checkpoint 后创建）
+
+## 已完成
+
+### 构建与依赖
+- `toolchains/ssh-native.lock` 固定 OpenSSL 3.5.8 / libssh2 commit / NDK 29 / API 26 / 双 ABI。
+- `scripts/build-libssh2-android.sh` 可复现构建双 ABI 静态库并生成 SHA256SUMS/BUILD_INFO。
+- `scripts/verify-ssh-native-packaging.sh` 校验架构、16 KB alignment、无第三方 `.so`。
+- CI 已接入 OpenSSL/libssh2 构建与 SSH host tests。
+
+### Native runtime / transport
+- `libsshhelper_ssh.so` 独立 shared library。
+- Step 4 production runtime 已实现：每 transport 单 owner thread、`Operation::step()`
+  continuation、wake fd + socket `poll()`、monotonic deadline、active/queued cancel、
+  exactly-once completion 与有界 shutdown。
+- 三档 weighted scheduler 防止 bulk 饿死 interactive；command/completion obligation 和
+  `WatermarkedBuffer` 提供可恢复背压。
+- 资源按 SFTP handle、channel、SFTP session、listener、libssh2 session、socket 的依赖
+  顺序关闭；graceful close 超时后执行有界 force-close。
+- `ssh_libssh2_nonblocking.*` 统一分类 int/count/pointer API 的 success、EAGAIN 与 failure，
+  EAGAIN 后立即复制 `libssh2_session_block_directions()`，失败后立即复制 last-error。
+- JNI/Kotlin 已提供 `nativeCancel()`、`nativeAwaitEvent()` 和不可变 `NativeSshEvent`，owner
+  thread 不直接回调 JVM。
+- non-blocking TCP connect、HTTP CONNECT、SOCKS5 CONNECT、统一 transport 选择。
+- runtime 支持跨请求 transport fd 交接：TCP/proxy CONNECT 成功后将同一个 non-blocking socket 存入 pending slot，
+  后续 handshake/auth/exec operation 可取回继续，不再每次 operation 结束就丢弃 fd。
+- runtime 支持 active authenticated SSH session 资源：
+  - `OpenAuthenticatedSessionOperation` 消费 pending transport 完成 handshake/auth 后存入 active session；
+  - `PersistentExecOperation` 在同一 session 上顺序执行多条命令，OpenSSH E2E 通过。
+- SFTP native/JNI/Kotlin 主链路已完成：
+  - runtime 使用 opaque resource ID 管理持久 SFTP client 与 open file handle；child handle 先于
+    SFTP session 关闭，共享 SSH transport 不受 client close 影响；
+  - `NativeSftpClient` 已实现 `home`、realpath、list、stat/lstat、statvfs、mkdir、rename、
+    delete（含 Kotlin 递归）、chmod/chown/chgrp、symlink/readlink；目录列表返回 type、size、
+    mtime、permissions、uid、gid，并过滤 `.` / `..`；
+  - download、upload、续传和 `openRead()` 使用 256 KiB 上限分块与 64 位 offset；Kotlin 保持
+    SAF stream 所有权，传输检查协程/进度取消并及时关闭 remote handle；预览流 close 非阻塞；
+  - JNI 对 SFTP 路径使用标准 UTF-8 与 Java UTF-16 显式转换，支持 supplementary Unicode
+    文件名；native SFTP 状态映射到现有本地化错误类型；
+  - rename 优先 POSIX extension 并回退标准 rename；AsyncSSH fixture 显式适配
+    libssh2/OpenSSH SFTP v3 的 symlink wire order；
+  - `runtime-sftp-list-ok` 与定向 `runtime-sftp-meta-ok` E2E 通过，覆盖二进制分块读写、
+    offset/EOF、重复 close、属性操作、symlink/readlink、statvfs、错误映射以及超过 2 GiB
+    的稀疏文件；Kotlin payload parser JVM test 已覆盖转义和非法 handle。
+- runtime 支持 active shell channel：
+  - `OpenShellOperation` 打开 session channel 并请求 `xterm-256color` PTY / shell；
+  - `ShellWriteOperation` / `ShellReadOperation` / `ShellResizeOperation` / `CloseShellOperation` 已实现；
+  - AsyncSSH test server 增加 `shell_requested()` + echo data 支持，native Shell/PTY E2E 通过。
+  - JNI/Kotlin 已接入：`Libssh2SshSession.openTerminal(PlainShell)` 可打开 PTY shell，
+    `write()` / `resize()` / `closeTerminal()` 走 native shell channel，输出通过 reader coroutine 发布到 `Flow<ByteArray>`。
+  - shell read 使用带 deadline 的轮询，`closeTerminal()` 不再被无输出的阻塞 read 卡死。
+  - 支持 PTY exec 终端：`OpenShellOperation` 可执行指定命令，Kotlin 对 `TerminalTarget.Persistent` 使用
+    `MultiplexerRegistry` 生成 tmux/zellij create/attach 命令后走同一 shell channel 数据通路；
+    native `runtime-pty-exec-ok` E2E 已覆盖。
+  - JNI/Kotlin 已暴露 `nativeRunTcpConnect()` / `nativeRunOpenSession()` /
+    `nativeRunOpenSessionWithPrivateKey()` / `nativeRunPersistentExec()`；
+    `Libssh2SshSession` 连接后保持同一 session，后续 exec 不再每次重连。
+- jump host native 主链路已完成：
+  - 已用 host POC 验证 libssh2 custom send/recv callback 可把目标 SSH transport
+    嵌套到 jump session 的 direct-tcpip channel 上；
+  - runtime 新增 jump/aux session 资源管理：跳板 session 保存为 route session，
+    目标 session 保存为 active session，资源关闭按 target -> tunnel -> jump 顺序；
+  - `OpenJumpTargetHandshakeOperation` 经 jump 做目标 host-key 预检（不认证）；
+  - `OpenJumpTargetSessionOperation` 经 jump 完成目标 password/private key 认证后
+    成为 active persistent session；
+  - `Libssh2SshSession` 已支持 `route.jump`：跳板/目标 host-key 独立提示，
+    跳板自身 proxy 生效，目标经 tunnel 后不再套用设备侧 target proxy；
+  - native `runtime-jump-ok` E2E 覆盖 jump host-key 预检、目标认证与 persistent exec。
+- keepalive / 断线检测 / 错误映射主链路已完成：
+  - native `KeepaliveOperation` 对 active session 与 jump session 周期发送 keepalive，
+    使用 send-only 语义并通过 socket HUP/ERR/RDHUP 与实际 I/O 错误探测远端断开；
+    不再把 socket readable 当作心跳应答，也不等待被发送间隔限流的请求产生应答。
+    这不是带应答计数的探活，纯丢包/黑洞网络的检测时间仍取决于实际 I/O/TCP，
+    尚不等价于 JSch 的 serverAliveCountMax；
+  - keepalive 请求 deadline 只结束本次请求，不直接关闭 transport；JNI 消费 runtime
+    完成事件，避免后台恢复后用第二套超时丢弃已完成结果。Kotlin 连续 6 次发送超时
+    才断开，成功发送重置计数，明确的传输错误仍立即处理；
+  - `Libssh2SshSession` 连接成功后启动 keepalive/disconnect watcher，headless session
+    不再只依赖 shell reader 感知断线；
+  - JNI 失败改为抛结构化 `NativeSshException`（domain/code/libssh2Code/systemErrno），
+    Kotlin 映射到 `DisconnectCause` 与用户文案；
+  - 错误消息经 `DiagnosticRedactor` 脱敏，控制字符/密钥/代理凭据不进入 UI；
+  - `Libssh2SshSession` 接入 `DiagnosticSink`，记录 connect/connected/disconnect trace；
+  - host E2E 覆盖正常连接、远端关闭、Shell 读走回复后的间隔内重复调用，
+    以及过期 keepalive 请求后同一 Shell 仍可收发。后台锁屏行为仍需手机手测。
+- native 单连接 host-key 确认状态机已完成：
+  - runtime 新增 pending session 槽：握手后、认证前保持未认证连接等待 host-key 决策；
+  - `TcpHandshakeOperation` / `Libssh2HandshakeOperation` / `OpenJumpTargetHandshakeOperation`
+    支持 `hold_pending`，可把已握手未认证连接保留在 runtime；
+  - `AuthenticatePendingSessionOperation` 在同一连接上继续认证并成为 active/jump session；
+  - `AbortPendingSessionOperation` 处理拒绝/变化/超时后的连接关闭；
+  - JNI/Kotlin 已暴露 host-key hold probe、continue、abort 调用；
+  - `Libssh2SshSession` 直连、代理、跳板目标均改为“单连接探测 → 确认 → 同一连接认证”；
+  - host E2E `runtime-hostkey-hold-ok` 与 `runtime-jump-hostkey-hold-ok` 覆盖接受后认证执行
+    与拒绝后关闭。
+- native 本地/远程端口转发主链路已完成（动态转发延后）：
+  - runtime 新增 background operation 支持，用于 accept loop 与每条转发的双向数据泵；
+  - `StartLocalForwardOperation` / `LocalForwardAcceptOperation` 实现 `-L`：native 本地监听 +
+    `direct-tcpip`，支持监听端口 0 自动分配；
+  - `StartRemoteForwardOperation` / `RemoteForwardAcceptOperation` 实现 `-R`：libssh2 remote
+    forward listener + forwarded channel 回连本机目标；
+  - `CloseForwardOperation` 按 group 幂等关闭 listener 与其 child connection；
+  - JNI/Kotlin 已暴露 `nativeRunStartLocalForward` / `nativeRunStartRemoteForward` /
+    `nativeRunCloseForward`，`Libssh2SshSession.registerForward` 已接入 LOCAL/REMOTE；
+  - DYNAMIC 在 native 路径明确报“延后未实现”，能力串标记 `dynamic=deferred`；
+  - AsyncSSH test server 支持 direct-tcpip 与 remote forward，host E2E `runtime-forward-ok`
+    覆盖本地/远程 echo roundtrip、端口分配、重复安全关闭。
+- 现代算法策略 helper。
+- Step 4 的 production runtime 设计已固化在
+  `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
+  exactly-once completion、取消、关闭、资源所有权、公平调度、背压及 sanitizer 门禁。
+- Step 4 host tests、ASan/UBSan、TSan、双 ABI `assembleDebug` 和现有 SSH E2E 均通过。
+- 已开始把真实 libssh2 调用迁入 runtime `Operation`：
+  - `TcpConnectOperation`：non-blocking TCP connect（DNS 在 producer 线程，connect/poll 在 owner），host test 通过。
+  - `Libssh2HandshakeOperation`：non-blocking handshake + host key 读取，E2E 通过。
+  - `TcpHandshakeOperation`：从 host:port 直连并读取 host key（不认证），E2E 通过。
+  - completion 已包含 `fingerprint` / `keyType` / `keyBase64` 三字段。
+  - `Libssh2PasswordAuthOperation`：non-blocking password auth，E2E 通过。
+  - `Libssh2PrivateKeyAuthOperation`：non-blocking in-memory private key auth，E2E 通过。
+  - `Libssh2PasswordExecOperation`：non-blocking password auth + exec + stdout，E2E 通过。
+  - `TcpPasswordExecOperation`：从 host:port 到 exec 的完整 direct runtime 路径（TCP connect + handshake + password auth + exec），E2E 通过。
+  - `TcpPrivateKeyExecOperation`：从 host:port 到 exec 的完整 direct runtime 路径（TCP connect + handshake + in-memory private key auth + exec），E2E 通过。
+  - direct runtime exec 已同时读取 stdout/stderr，E2E 覆盖 stderr-only 命令。
+  - direct runtime exec 已支持 max_output_bytes 输出上限，超限返回 exit=125，E2E 通过。
+  - `HttpProxyConnectOperation`：non-blocking HTTP CONNECT runtime operation，host test 通过。
+  - `Socks5ProxyConnectOperation`：non-blocking SOCKS5 CONNECT runtime operation（no-auth/user-pass），host test 通过。
+  - 代理完整路径已串通：HTTP CONNECT / SOCKS5 CONNECT operation 把 socket 存入 runtime pending slot，
+    随后 `TcpPasswordExecOperation` / `TcpPrivateKeyExecOperation` 以 `take_pending_transport` 模式复用同一 socket
+    完成 handshake/auth/exec；HTTP 与 SOCKS5 的密码/私钥 E2E 均通过。
+  - 代理路径同样执行 expected fingerprint 校验，host-key mismatch 在认证前失败（E2E）。
+
+### libssh2 实际连接 POC（已逐步退役）
+- `Libssh2Session` RAII：init/session lifecycle。
+- blocking handshake、password auth、publicKeyAuth()、hostKey()、execCommand()。
+- `BlockingSshConnection` 保持“已完成 handshake 但未认证”的连接，供 host-key 确认后再发送凭据。
+- AsyncSSH E2E host test 已跑通：
+  `TCP -> SSH handshake -> password auth -> host key read -> exec -> output`.
+- host-key gate E2E 已跑通：先读取 type/fingerprint/keyBase64，通过后再 password auth + exec。
+- 生产 JNI 已移除 `nativeOpenDirectHandshake()` / `nativeDirectHostKey*` / `nativeDirectPasswordExec()` /
+  `nativeDirectPrivateKeyExec()` / `nativeDirectClose()` / `nativeConnectExec*()`；
+  这些 blocking POC 仍保留在 host C++ tests 中作为协议基线。
+- host-key 确认已全面切换到 runtime host-key hold + same-connection continue（旧 blocking POC 退役）。
+
+### runtime Operation 当前覆盖（direct/proxy/exec）
+- non-blocking TCP connect
+- non-blocking HTTP CONNECT（含 Basic auth）
+- non-blocking SOCKS5 CONNECT（no-auth / user-pass）
+- direct runtime 完整链路：password / private key → handshake → exec
+  - stdout/stderr/exit code
+  - output limit → exit=125
+  - JNI runtime exec 支持 deadline，超时映射 exit=124
+  - direct runtime exec 支持 expected fingerprint：不匹配认证前失败（E2E），匹配可正常 exec（E2E）
+  - direct runtime password exec 支持 keyboard-interactive fallback（kbdint-only E2E 通过）
+- host tests 与 Android assembleDebug 均通过
+- JNI 已暴露 `nativeRunTcpHandshake()` / `nativeRunDirectPasswordExec()` / `nativeRunDirectPrivateKeyExec()`（含 expected fingerprint、deadline）/ `nativeRunHttpProxyConnect()` / `nativeRunSocks5ProxyConnect()`，Kotlin 可直接调用 runtime 路径。
+- JNI/Kotlin 新增 pending-transport 调用：`nativeRunPendingTcpHandshake()`、`nativeRunPendingDirectPasswordExec()`、`nativeRunPendingDirectPrivateKeyExec()`；
+  `Libssh2SshSession` 对配置了 HTTP/SOCKS5 的 target 先执行 proxy CONNECT，再在同一个 runtime pending socket 上完成 host-key 探测/认证/exec。
+- `Libssh2SshSession` 的 host-key 探测已从 blocking direct-handshake POC 切换到 runtime `TcpHandshakeOperation`：
+  - connect/首次确认前先 `runTcpHandshake()` 读取 fingerprint/keyType/keyBase64。
+  - 确认/匹配后使用 `runDirectPasswordExec` / `runDirectPrivateKeyExec` 执行 `true` 验证认证。
+  - Kotlin 新增 `parseRuntimeTcpHandshakePayload()` 纯函数解析，JVM unit test 覆盖。
+
+### 后端无关 contract suite（JSch 侧）
+- 已有 14 个共享 contract tests 通过：
+  - direct connect + host-key UNKNOWN/MATCH/CHANGED
+  - wrong password 单次尝试
+  - headless exec stdout、timeout、output limit
+  - shell transport stability
+  - SFTP lifecycle
+  - local / remote / dynamic forwarding
+  - HTTP CONNECT / SOCKS5 proxy
+
+## 已记录风险 / 待验证
+- AsyncSSH fixture 下，libssh2 关闭第一个 channel 后再次 `libssh2_channel_open_session()` 会返回 NULL；
+  但临时 OpenSSH server 下同一 session 顺序复用 channel 验证通过，因此该问题属于测试服务器兼容性，
+  持久 session 开发以 OpenSSH 为权威 fixture。后续如需要可再调查 AsyncSSH 侧原因。
+- AsyncSSH 已增加 shell/echo 支持，可用作非 root Shell/PTY fixture；
+  此前记录的“OpenSSH 非 root 无法 chown pty”不再阻塞 native Shell/PTY 测试。
+
+## 尚未完成（按计划顺序）
+- Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
+- 动态转发 native 化（延后）。本地/远程 native 化已完成主链路。
+- `Libssh2SshSession` 生产接入与默认切换。
+- JSch 删除与文档/notices 清理。
+- 稳定性/安全/性能验收与真机/模拟器 release 门禁。
+
+## 当前 Git 检查点
+- `cf5891b feat(ssh-native): add keepalive diagnostics and disconnect mapping`
+- `b2a3f83 feat(ssh-native): add jump host routing`
+- `7ec6be3 feat(ssh-native): prove nested libssh2 direct-tcpip transport for jump host`
+- `4b654c2 refactor(terminal): remove WebView/xterm.js and make Ghostty the only backend`
+- `f067856 feat(ssh-native): complete SFTP native/JNI/Kotlin main path`
+- `6566258 feat(ssh-native): add one-shot SFTP file write`
+- `07d9334 feat(ssh-native): add one-shot SFTP file read`
+- `925d579 feat(ssh-native): add SFTP realpath and stat operations`
+- `906eea2 feat(ssh-native): add one-shot SFTP directory listing`
+- `a6e3184 test(ssh-native): cover PTY exec channel used by persistent sessions`
+- `94d7a83 feat(ssh): support PTY exec terminal for persistent sessions`
+- `b2819f9 feat(ssh): make shell reads poll with deadline for prompt close`
+- `9451398 feat(ssh): wire Shell/PTY operations into Libssh2SshSession`
+- `fea674d feat(ssh-native): add active shell channel with PTY operations`
+- `d3e59d7 feat(ssh): keep Libssh2SshSession persistent session for repeated exec`
+- `ae8fb9d feat(ssh-native): add active session resource and persistent exec`
+- `45e15ee refactor(ssh): remove blocking POC JNI bridge from production`
+- `95fd300 test(ssh-native): verify proxy path blocks host key mismatch`
+- `aaae54f feat(ssh): route Libssh2SshSession through HTTP and SOCKS5 proxies`
+- `35c6984 test(ssh-native): cover proxied runtime exec over HTTP and SOCKS5`
+- `c6250b6 feat(ssh-native): store transport fd between runtime operations`
+- `72682d7 feat(ssh): route Libssh2SshSession host key probe through runtime`
+- `835cf7c feat(ssh-native): expose TcpHandshakeOperation through JNI and NativeSshRuntime`
+- `9b8fd0a feat(ssh-native): add TcpHandshakeOperation host key probe`
+- `2dde306 docs(ssh): record runtime payload parser tests`
+- `c9f4e95 test(ssh): extract and unit-test runtime exec payload parser`
+- `d1e5801 docs(ssh): record runtime keyboard-interactive fallback`
+- `7311e7c feat(ssh-native): add keyboard-interactive fallback to direct runtime password exec`
+- `cf7aa5e docs(ssh): record NativeSshRuntime wrapper`
+- `257931f refactor(ssh): add NativeSshRuntime handle wrapper`
+- `0978b77 docs(ssh): record host key match E2E coverage`
+- `c986e81 test(ssh-native): verify expected host key match allows runtime exec`
+- `8abb172 feat(ssh): surface runtime host key mismatch as changed-key error in exec`
+- `3031661 feat(ssh): route Libssh2SshSession exec through runtime JNI when host key known`
+- `069efac docs(ssh): record Libssh2SshSession runtime exec routing`
+- `22a1858 feat(ssh-native): expose expected host key fingerprint through JNI exec bridge`
+- `896c8f9 feat(ssh-native): enforce expected host key in direct runtime exec`
+- `6ef9dee feat(ssh-native): map runtime exec deadline to exit 124 in JNI`
+- `c73e952 feat(ssh-native): expose proxy connect operations through JNI bridge`
+- `140fd44 docs(ssh): record JNI direct runtime bridge`
+- `d633bd1 feat(ssh-native): expose direct runtime exec through JNI bridge`
+- `d6194dc feat(ssh-native): add nonblocking SOCKS5 CONNECT runtime operation`
+- `ec12616 feat(ssh-native): add nonblocking HTTP CONNECT runtime operation`
+（里程碑建议后续打 tag `ssh-native-step-NN`。）

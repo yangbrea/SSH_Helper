@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Stop
@@ -168,6 +169,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                                 state = states[rule.id] ?: ForwardState.Stopped,
                                 onStart = { startForward(rule.id) },
                                 onStop = { vm.stop(rule.id) },
+                                onEdit = { editing = rule; showEditor = true },
                                 onDelete = { deleting = rule },
                                 onOpenBrowser = openBrowser,
                             )
@@ -181,6 +183,7 @@ fun ForwardScreen(hostId: Long, onBack: () -> Unit) {
                                 state = states[rule.id] ?: ForwardState.Stopped,
                                 onStart = { startForward(rule.id) },
                                 onStop = { vm.stop(rule.id) },
+                                onEdit = { editing = rule; showEditor = true },
                                 onDelete = { deleting = rule },
                                 onOpenBrowser = openBrowser,
                             )
@@ -224,11 +227,12 @@ private fun ForwardRuleCard(
     state: ForwardState,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     onOpenBrowser: (String) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -246,6 +250,7 @@ private fun ForwardRuleCard(
                 Box {
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "规则菜单") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("编辑规则") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menuOpen = false; onEdit() })
                         DropdownMenuItem(text = { Text("删除规则") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menuOpen = false; onDelete() })
                     }
                 }

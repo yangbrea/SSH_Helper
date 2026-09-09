@@ -52,6 +52,12 @@ interface ForwardManager {
 
     /** 当前有活动转发（Running/Starting/Reconnecting）所绑定的会话 ID 集合。 */
     fun activeForwardSessionIds(): Set<SessionId>
+
+    /** 指定会话当前承载的活动转发规则数量（用于关闭会话前的风险提示）。 */
+    fun activeForwardCount(sessionId: SessionId): Int
+
+    /** 所有会话当前承载的活动转发规则数量映射。 */
+    fun activeForwardCounts(): Map<SessionId, Int>
 }
 
 /**
@@ -203,8 +209,19 @@ class DefaultForwardManager(
     }
 
     override suspend fun save(rule: PortForwardRule): Long =
-        if (rule.id == 0L) dao.insert(rule.toEntity()) else {
+        if (rule.id == 0L) dao.insert(rule.toEntity()) else withRuleLock(rule.id) {
+            val previous = dao.get(rule.id)?.toModel()
             dao.update(rule.toEntity())
+            // 编辑运行中的规则时，旧句柄仍按旧参数监听。如果转发的实际参数有变化，
+            // 先注销再用新参数在同一条绑定会话上注册，让修改立即生效；仅改名或
+            // 调整 autoStart 时不需要中断正在运行的隧道。
+            if (previous != null &&
+                handles.containsKey(rule.id) &&
+                previous.toRequest() != rule.toRequest()
+            ) {
+                closeHandle(rule.id)
+                startRuleLocked(rule)
+            }
             rule.id
         }
 
@@ -498,10 +515,21 @@ class DefaultForwardManager(
 
     /** 当前有活动转发（Running/Starting/Reconnecting）所绑定的会话 ID 集合。 */
     override fun activeForwardSessionIds(): Set<SessionId> =
-        mutableStates.value.entries
-            .filter { (ruleId, state) -> state.isActive() }
-            .mapNotNull { (ruleId, _) -> bindings[ruleId] }
-            .toSet()
+        activeForwardCounts().keys
+
+    override fun activeForwardCount(sessionId: SessionId): Int =
+        activeForwardCounts()[sessionId] ?: 0
+
+    override fun activeForwardCounts(): Map<SessionId, Int> {
+        val counts = mutableMapOf<SessionId, Int>()
+        for ((ruleId, state) in mutableStates.value) {
+            if (state.isActive()) {
+                val sessionId = bindings[ruleId] ?: continue
+                counts[sessionId] = (counts[sessionId] ?: 0) + 1
+            }
+        }
+        return counts
+    }
 
     private fun ensureForegroundServiceStarted() {
         if (serviceWanted.compareAndSet(false, true)) {

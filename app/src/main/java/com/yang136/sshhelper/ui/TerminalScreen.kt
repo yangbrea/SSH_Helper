@@ -1,9 +1,6 @@
 package com.yang136.sshhelper.ui
 
-import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -11,18 +8,12 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
-import android.util.Base64
-import android.view.View
 import android.view.inputmethod.InputMethodManager
-import android.webkit.JavascriptInterface
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -92,8 +83,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -103,6 +92,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -111,13 +101,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.webkit.WebViewAssetLoader
 import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.AuthType
 import com.yang136.sshhelper.data.Credential
@@ -132,31 +120,23 @@ import com.yang136.sshhelper.ssh.HostKeyIssue
 import com.yang136.sshhelper.ssh.HostKeyRequest
 import com.yang136.sshhelper.ssh.HostKeySubject
 import com.yang136.sshhelper.ssh.ManagedSessionState
+import com.yang136.sshhelper.ssh.MultiplexerSessionState
 import com.yang136.sshhelper.settings.AppSettings
 import com.yang136.sshhelper.settings.DEFAULT_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MAX_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.MIN_TERMINAL_FONT_SIZE
 import com.yang136.sshhelper.settings.ExtraKeyId
+import com.yang136.sshhelper.settings.effectiveTerminalBackgroundOpacity
 import com.yang136.sshhelper.ssh.SessionId
 import com.yang136.sshhelper.ssh.SessionFeature
+import com.yang136.sshhelper.ssh.SessionKind
 import com.yang136.sshhelper.ssh.TerminalOutputEvent
 import com.yang136.sshhelper.ui.theme.TerminalPalette
 import com.yang136.sshhelper.ui.adaptive.currentAdaptiveInfo
 import com.yang136.sshhelper.ui.adaptive.hasHardwareKeyboard
 import com.yang136.sshhelper.ui.design.SshTopAppBar
-import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import android.view.WindowInsets as AndroidWindowInsets
 
 private val NullableSessionIdSaver = Saver<SessionId?, String>(
     save = { it?.value.orEmpty() },
@@ -191,8 +171,10 @@ fun TerminalScreen(
     val initialId = initialSessionId?.let(::SessionId)
     var activeId by rememberSaveable(hostId, stateSaver = NullableSessionIdSaver) { mutableStateOf(initialId) }
     val current = hostSessions.firstOrNull { it.id == activeId }
-    val controller = remember { TerminalController() }
-    val surfaceRevision = remember { mutableIntStateOf(0) }
+    val controller = remember {
+        createTerminalFrontend()
+    }
+    val caseSensitiveSearchSupported = controller.supportsCaseSensitiveSearch
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var closingSession by remember { mutableStateOf<SessionId?>(null) }
@@ -212,13 +194,40 @@ fun TerminalScreen(
     var sessionLimitReached by remember { mutableStateOf(false) }
     var renderingDelayed by remember { mutableStateOf(false) }
     var aiHidden by rememberSaveable { mutableStateOf(false) }
+    var remoteTitle by remember { mutableStateOf("") }
+    var remoteWorkingDirectory by remember { mutableStateOf("") }
+    var persistentDialogVisible by remember { mutableStateOf(false) }
+    var deleteRemoteSessionName by remember { mutableStateOf<String?>(null) }
+    var showNewSessionDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessions) {
         if (hostSessions.isNotEmpty() && (activeId == null || hostSessions.none { it.id == activeId })) {
             activeId = hostSessions.first().id
         }
     }
-    LaunchedEffect(activeId, surfaceRevision.intValue) {
+    LaunchedEffect(activeId, controller) {
+        remoteTitle = ""
+        remoteWorkingDirectory = ""
+    }
+    LaunchedEffect(activeId, current?.multiplexerState, current?.connection) {
+        val actionable = when (current?.multiplexerState) {
+            MultiplexerSessionState.Checking,
+            is MultiplexerSessionState.AwaitingSelection,
+            is MultiplexerSessionState.FallbackPrompt,
+            is MultiplexerSessionState.RecoveryRequired -> true
+            else -> false
+        }
+        if (current?.connection is ConnectionState.Connected && actionable) {
+            persistentDialogVisible = true
+        } else if (current?.multiplexerState is MultiplexerSessionState.Opening ||
+            current?.multiplexerState is MultiplexerSessionState.Active
+        ) {
+            persistentDialogVisible = false
+        }
+    }
+    // Keying by controller guarantees the old output collector is cancelled
+    // before a replacement frontend is reset and receives the current snapshot.
+    LaunchedEffect(activeId, controller) {
         val id = activeId ?: return@LaunchedEffect
         sessionsViewModel.enableFeature(id, SessionFeature.SHELL)
         controller.reset()
@@ -227,7 +236,7 @@ fun TerminalScreen(
             when (event) {
                 is TerminalOutputEvent.Snapshot -> {
                     if (event.sequence >= lastSequence) {
-                        controller.write(event.bytes)
+                        controller.restore(event.bytes)
                         lastSequence = event.sequence
                     }
                 }
@@ -237,14 +246,21 @@ fun TerminalScreen(
                         lastSequence = event.sequence
                     }
                 }
+                is TerminalOutputEvent.Reset -> {
+                    controller.reset()
+                    lastSequence = event.sequence
+                }
             }
         }
     }
-    LaunchedEffect(terminalPalette, settings.terminalFontSize) {
+    LaunchedEffect(terminalPalette, settings.terminalFontSize, controller) {
         controller.setAppearance(terminalPalette, settings.terminalFontSize)
     }
-    LaunchedEffect(imeVisible) {
+    LaunchedEffect(imeVisible, controller) {
         controller.setImeVisible(imeVisible)
+    }
+    LaunchedEffect(controller) {
+        if (!controller.supportsCaseSensitiveSearch) searchCaseSensitive = false
     }
     DisposableEffect(controller) {
         controller.onSelectionStateChanged = { active, selected ->
@@ -259,6 +275,11 @@ fun TerminalScreen(
         controller.onOpenLink = { pendingLink = it }
         controller.onCtrlArmed = { ctrlArmed = it }
         controller.onRenderingDelayed = { renderingDelayed = it }
+        controller.onBell = {
+            controller.view?.performBellFeedback()
+        }
+        controller.onTitleChange = { remoteTitle = sanitizeTerminalMetadata(it) }
+        controller.onPwdChange = { remoteWorkingDirectory = displayTerminalWorkingDirectory(it) }
         onDispose {
             controller.onSelectionStateChanged = null
             controller.onCopied = null
@@ -266,6 +287,9 @@ fun TerminalScreen(
             controller.onOpenLink = null
             controller.onCtrlArmed = null
             controller.onRenderingDelayed = null
+            controller.onBell = null
+            controller.onTitleChange = null
+            controller.onPwdChange = null
             controller.close()
         }
     }
@@ -297,18 +321,27 @@ fun TerminalScreen(
 
     val hasHwKeyboard = hasHardwareKeyboard()
     val terminalBackground = androidx.compose.ui.graphics.Color(Color.parseColor(terminalPalette.background))
+    val terminalBackgroundOpacity = effectiveTerminalBackgroundOpacity(
+        transparencyEnabled = settings.terminalTransparencyEnabled,
+        configuredOpacity = settings.terminalBackgroundOpacity,
+    )
+    val transparentGhosttyBackground = terminalBackgroundOpacity < 1f
+    val terminalContainerBackground = if (transparentGhosttyBackground) {
+        androidx.compose.ui.graphics.Color.Transparent
+    } else {
+        terminalBackground
+    }
     val currentSessionState = rememberUpdatedState(current)
-    val terminalSurface = remember(controller) {
-        movableContentOf<Modifier> { modifier ->
-            TerminalWebView(
-                controller = controller,
-                initialBackground = terminalPalette.background,
-                onInput = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
-                onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
-                onSurfaceCreated = { surfaceRevision.intValue += 1 },
-                modifier = modifier,
-            )
-        }
+    // Ghostty's frontend owns the native state and render snapshot, so its AndroidView
+    // can be recreated when portrait/landscape layout constraints change.
+    val terminalSurface: @Composable (Modifier) -> Unit = { modifier ->
+        GhosttyTerminalSurface(
+            frontend = controller,
+            backgroundOpacity = terminalBackgroundOpacity,
+            onPtyWrite = { bytes -> currentSessionState.value?.let { sessionsViewModel.send(it.id, bytes) } },
+            onResize = { columns, rows -> currentSessionState.value?.let { sessionsViewModel.resize(it.id, columns, rows) } },
+            modifier = modifier,
+        )
     }
 
     fun togglePanel(panel: TerminalPanel) {
@@ -332,7 +365,7 @@ fun TerminalScreen(
     }
 
     TerminalSystemBarsEffect(isLandscape)
-    Box(Modifier.fillMaxSize().background(terminalBackground)) {
+    Box(Modifier.fillMaxSize().background(terminalContainerBackground)) {
         if (useSideRail) {
             LandscapeTerminalLayout(
                 hostSessions = hostSessions,
@@ -344,12 +377,18 @@ fun TerminalScreen(
                 searchText = searchText,
                 searchResult = searchResult,
                 searchCaseSensitive = searchCaseSensitive,
+                caseSensitiveSearchSupported = caseSensitiveSearchSupported,
                 selectionMode = selectionMode,
                 hasSelection = hasSelection,
                 ctrlArmed = ctrlArmed,
                 renderingDelayed = renderingDelayed,
                 showMoreMenu = showMoreMenu,
-                terminalBackground = terminalBackground,
+                terminalBackground = terminalContainerBackground,
+                remoteStatus = listOf(
+                    current?.remoteSessionName?.let { "${current.kind.name.lowercase()}:$it" },
+                    remoteTitle.takeIf(String::isNotBlank),
+                    remoteWorkingDirectory.takeIf(String::isNotBlank),
+                ).filterNotNull().joinToString(" · "),
                 statusBarHidden = isLandscape,
                 expandedWindow = adaptive.useTwoPane,
                 onBack = onBack,
@@ -362,9 +401,7 @@ fun TerminalScreen(
                     layoutState = reduceTerminalLayout(layoutState, TerminalLayoutAction.ClosePanel)
                 },
                 onNewSession = {
-                    val profile = current?.profile ?: return@LandscapeTerminalLayout
-                    sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
-                        ?: run { sessionLimitReached = true }
+                    if (current?.profile != null) showNewSessionDialog = true
                 },
                 onCloseSession = { closingSession = it },
                 onReconnect = sessionsViewModel::reconnect,
@@ -380,7 +417,7 @@ fun TerminalScreen(
                 onCopy = controller::copySelection,
                 onSelectAll = controller::selectAll,
                 onCancelSelection = controller::clearSelection,
-                onSendKey = { bytes -> current?.let { sessionsViewModel.send(it.id, bytes) } },
+                onSendKey = controller::sendInput,
                 onShowKeyboard = controller::focusAndShowKeyboard,
                 onArmCtrl = controller::armCtrl,
                 onPaste = { controller.paste(context) },
@@ -388,25 +425,36 @@ fun TerminalScreen(
                 onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                 onFont = { showFontDialog = true },
                 onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
-                terminal = { modifier -> TerminalViewport(current, terminalBackground, modifier, terminalSurface) },
+                onPersistentSessions = {
+                    current?.let {
+                        persistentDialogVisible = true
+                        sessionsViewModel.refreshPersistentSessions(it.id)
+                    }
+                },
+                terminal = { modifier -> TerminalViewport(current, terminalContainerBackground, modifier, terminalSurface) },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
+                containerColor = if (transparentGhosttyBackground) {
+                    imageAwareScaffoldColor()
+                } else {
+                    MaterialTheme.colorScheme.background
+                },
                 topBar = {
                     Column {
                         SshTopAppBar(
                             title = current?.displayName ?: "SSH 终端",
-                            subtitle = connectionLabel(current?.connection ?: ConnectionState.Idle),
+                            subtitle = terminalSubtitle(
+                                current?.connection ?: ConnectionState.Idle,
+                                current?.remoteSessionName,
+                                remoteTitle,
+                                remoteWorkingDirectory,
+                            ),
                             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                             actions = {
                                 IconButton(
-                                    onClick = {
-                                        val profile = current?.profile ?: return@IconButton
-                                        sessionsViewModel.create(profile, SessionFeature.SHELL)?.let { activeId = it }
-                                            ?: run { sessionLimitReached = true }
-                                    },
+                                    onClick = { if (current?.profile != null) showNewSessionDialog = true },
                                     enabled = current != null,
                                 ) { Icon(Icons.Default.Add, "新建会话") }
                                 IconButton(onClick = { togglePanel(TerminalPanel.SEARCH) }) { Icon(Icons.Default.Search, "搜索") }
@@ -426,16 +474,23 @@ fun TerminalScreen(
                                         onForwards = { current?.let { onOpenForwards(it.profile.id) } },
                                         onFont = { showFontDialog = true },
                                         onDisconnect = { current?.let { sessionsViewModel.disconnect(it.id) } },
+                                        onPersistentSessions = {
+                                            current?.let {
+                                                persistentDialogVisible = true
+                                                sessionsViewModel.refreshPersistentSessions(it.id)
+                                            }
+                                        },
+                                        persistentEnabled = current?.kind != SessionKind.SSH,
                                         onToggleExtraKeys = ::toggleExtraKeys,
                                     )
                                 }
                             },
-                            allowImageBackground = false,
                         )
                         if (hostSessions.isNotEmpty()) {
                             PrimaryScrollableTabRow(
                                 selectedTabIndex = hostSessions.indexOfFirst { it.id == activeId }.coerceAtLeast(0),
                                 edgePadding = 4.dp,
+                                containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
                             ) {
                                 hostSessions.forEach { session ->
                                     Tab(
@@ -457,15 +512,16 @@ fun TerminalScreen(
             ) { padding ->
                 Column(
                     Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
-                        .background(terminalBackground),
+                        .background(terminalContainerBackground),
                 ) {
-                    TerminalViewport(current, terminalBackground, Modifier.weight(1f).fillMaxWidth(), terminalSurface)
+                    TerminalViewport(current, terminalContainerBackground, Modifier.weight(1f).fillMaxWidth(), terminalSurface)
                     current?.let { session ->
                         when (layoutState.panel) {
                             TerminalPanel.SEARCH -> TerminalSearchBar(
                                 query = searchText,
                                 result = searchResult,
                                 caseSensitive = searchCaseSensitive,
+                                caseSensitiveSupported = caseSensitiveSearchSupported,
                                 onQueryChange = { searchText = it; controller.search(it, false, searchCaseSensitive) },
                                 onPrevious = { controller.search(searchText, true, searchCaseSensitive) },
                                 onNext = { controller.search(searchText, false, searchCaseSensitive) },
@@ -474,7 +530,7 @@ fun TerminalScreen(
                             )
                             TerminalPanel.SELECTION -> SelectionKeys(hasSelection, controller::copySelection, controller::selectAll, controller::clearSelection)
                             else -> if (!hasHwKeyboard || layoutState.extraKeysVisible) {
-                                ExtraKeys(settings.extraKeys, ctrlArmed, { sessionsViewModel.send(session.id, it) }, controller::focusAndShowKeyboard, controller::armCtrl)
+                                ExtraKeys(settings.extraKeys, ctrlArmed, controller::sendInput, controller::focusAndShowKeyboard, controller::armCtrl)
                             }
                         }
                     }
@@ -518,6 +574,7 @@ fun TerminalScreen(
         CredentialDialog(
             authType = current.credentialProfile().authType,
             subject = current.credentialSubjectLabel(),
+            rememberByDefault = current.credentialProfile().rememberCredential,
             onDismiss = { forceCredentialDialog = false; if (current.needsCredential) closeTab(current.id) },
             onConnect = { credential, remember -> forceCredentialDialog = false; sessionsViewModel.connect(current.id, credential, remember) },
         )
@@ -549,12 +606,70 @@ fun TerminalScreen(
         )
     }
 
+    if (persistentDialogVisible && current != null &&
+        current.kind != SessionKind.SSH
+    ) {
+        PersistentSessionDialog(
+            session = current,
+            onDismiss = { persistentDialogVisible = false },
+            onRefresh = { sessionsViewModel.refreshPersistentSessions(current.id) },
+            onAttach = { name ->
+                val alreadyOpen = hostSessions.firstOrNull { it.remoteSessionName == name }
+                if (alreadyOpen != null) activeId = alreadyOpen.id
+                else sessionsViewModel.attachPersistentSession(current.id, name)
+                persistentDialogVisible = false
+            },
+            onNew = { sessionsViewModel.createPersistentSession(current.id); persistentDialogVisible = false },
+            onDelete = { name -> deleteRemoteSessionName = name },
+            onFallback = { sessionsViewModel.fallbackToPlainShell(current.id); persistentDialogVisible = false },
+        )
+    }
+
+    deleteRemoteSessionName?.let { name ->
+        AlertDialog(
+            onDismissRequest = { deleteRemoteSessionName = null },
+            title = { Text("删除远端会话？") },
+            text = { Text("将终止远端会话 $name 及其中的程序，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    current?.let {
+                        sessionsViewModel.deletePersistentSession(it.id, name)
+                        persistentDialogVisible = true
+                    }
+                    deleteRemoteSessionName = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteRemoteSessionName = null }) { Text("取消") } },
+        )
+    }
+
+    if (showNewSessionDialog && current != null) {
+        SessionKindPickerDialog(
+            onDismiss = { showNewSessionDialog = false },
+            onConfirm = { kind ->
+                val profile = current.profile
+                showNewSessionDialog = false
+                val created = sessionsViewModel.create(profile, SessionFeature.SHELL, kind)
+                created?.let { activeId = it } ?: run { sessionLimitReached = true }
+            },
+        )
+    }
+
     closingSession?.let { id ->
-        val label = hostSessions.firstOrNull { it.id == id }?.displayName.orEmpty()
+        val closing = hostSessions.firstOrNull { it.id == id }
+        val label = closing?.displayName.orEmpty()
         AlertDialog(
             onDismissRequest = { closingSession = null },
             title = { Text("关闭会话？") },
-            text = { Text("将断开并关闭“$label”，终端输出也会被清除。") },
+            text = {
+                Text(
+                    if (closing?.remoteSessionName != null) {
+                        "将关闭本地标签并从 ${closing.remoteSessionName} 分离；远端会话及其中程序不会被终止。"
+                    } else {
+                        "将断开并关闭“$label”，终端输出也会被清除。"
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     closingSession = null
@@ -599,7 +714,7 @@ fun TerminalScreen(
             onDismissRequest = { immediateCommand = null },
             title = { Text("执行快捷命令？") },
             text = { Text(command, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) },
-            confirmButton = { TextButton(onClick = { activeId?.let { sessionsViewModel.send(it, (command + "\r").encodeToByteArray()) }; immediateCommand = null }) { Text("执行") } },
+            confirmButton = { TextButton(onClick = { controller.sendInput((command + "\r").encodeToByteArray()); immediateCommand = null }) { Text("执行") } },
             dismissButton = { TextButton(onClick = { immediateCommand = null }) { Text("取消") } },
         )
     }
@@ -633,6 +748,18 @@ private fun connectionLabel(state: ConnectionState): String = when (state) {
     is ConnectionState.Error -> "连接失败"
 }
 
+private fun terminalSubtitle(
+    state: ConnectionState,
+    remoteSessionName: String?,
+    remoteTitle: String,
+    remoteWorkingDirectory: String,
+): String = listOf(
+    connectionLabel(state),
+    remoteSessionName?.let { "持久会话 $it" },
+    remoteTitle.takeIf(String::isNotBlank),
+    remoteWorkingDirectory.takeIf(String::isNotBlank),
+).filterNotNull().joinToString(" · ")
+
 @Composable
 private fun TerminalViewport(
     current: ManagedSessionState?,
@@ -640,7 +767,9 @@ private fun TerminalViewport(
     modifier: Modifier,
     terminal: @Composable (Modifier) -> Unit,
 ) {
-    Box(modifier.background(background)) {
+    // Android interop children must never draw outside the terminal cell and obscure
+    // landscape Compose siblings such as the navigation/shortcut rail.
+    Box(modifier.clipToBounds().background(background)) {
         terminal(Modifier.fillMaxSize())
         if (current == null) {
             Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
@@ -655,6 +784,99 @@ private fun TerminalViewport(
 }
 
 @Composable
+private fun PersistentSessionDialog(
+    session: ManagedSessionState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onAttach: (String) -> Unit,
+    onNew: () -> Unit,
+    onDelete: (String) -> Unit,
+    onFallback: () -> Unit,
+) {
+    val state = session.multiplexerState
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${session.kind.name.lowercase()} 持久会话") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (state) {
+                    MultiplexerSessionState.Checking -> Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(22.dp))
+                        Text("正在检查远端工具和会话…")
+                    }
+                    is MultiplexerSessionState.AwaitingSelection -> {
+                        state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (session.remoteSessions.isEmpty()) {
+                            Text("远端当前没有会话。")
+                        } else {
+                            Text("选择要附加的远端会话：")
+                            LazyColumn(
+                                Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(session.remoteSessions, key = { it.name }) { remote ->
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { onAttach(remote.name) },
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Text(
+                                                if (remote.attached) "${remote.name} · ${remote.attachedClients} 个客户端已连接"
+                                                else "${remote.name} · 未附加",
+                                            )
+                                        }
+                                        TextButton(onClick = { onDelete(remote.name) }) {
+                                            Text("删除", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    is MultiplexerSessionState.FallbackPrompt -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error)
+                        Text("普通 Shell 仅用于本次连接，不会修改主机配置。")
+                    }
+                    is MultiplexerSessionState.RecoveryRequired -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error)
+                        Text("SSH transport 仍保持连接。刷新后可选择其他远端会话。")
+                    }
+                    is MultiplexerSessionState.Opening -> Text(
+                        if (state.create) "正在新建 ${state.name}…" else "正在附加 ${state.name}…",
+                    )
+                    is MultiplexerSessionState.Active -> Text("当前已附加 ${state.name}")
+                    MultiplexerSessionState.Disabled,
+                    MultiplexerSessionState.PlainShellFallback -> Text("当前使用普通 Shell。")
+                }
+            }
+        },
+        confirmButton = {
+            when (state) {
+                is MultiplexerSessionState.AwaitingSelection -> TextButton(onClick = onNew) { Text("新建") }
+                is MultiplexerSessionState.FallbackPrompt -> TextButton(onClick = onFallback) { Text("使用普通 Shell") }
+                is MultiplexerSessionState.RecoveryRequired -> TextButton(onClick = onRefresh) { Text("刷新列表") }
+                else -> Unit
+            }
+        },
+        dismissButton = {
+            Row {
+                if (state is MultiplexerSessionState.AwaitingSelection || state is MultiplexerSessionState.FallbackPrompt) {
+                    TextButton(onClick = onRefresh) { Text("重试") }
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+@Composable
 private fun LandscapeTerminalLayout(
     hostSessions: List<ManagedSessionState>,
     current: ManagedSessionState?,
@@ -665,12 +887,14 @@ private fun LandscapeTerminalLayout(
     searchText: String,
     searchResult: Pair<Int, Int>,
     searchCaseSensitive: Boolean,
+    caseSensitiveSearchSupported: Boolean,
     selectionMode: Boolean,
     hasSelection: Boolean,
     ctrlArmed: Boolean,
     renderingDelayed: Boolean,
     showMoreMenu: Boolean,
     terminalBackground: androidx.compose.ui.graphics.Color,
+    remoteStatus: String,
     statusBarHidden: Boolean,
     expandedWindow: Boolean,
     onBack: () -> Unit,
@@ -701,6 +925,7 @@ private fun LandscapeTerminalLayout(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
     terminal: @Composable (Modifier) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -730,6 +955,7 @@ private fun LandscapeTerminalLayout(
             onForwards = onForwards,
             onFont = onFont,
             onDisconnect = onDisconnect,
+            onPersistentSessions = onPersistentSessions,
         )
         if (layoutState.panel != TerminalPanel.NONE) {
             LandscapeContextPanel(
@@ -741,6 +967,7 @@ private fun LandscapeTerminalLayout(
                 searchText = searchText,
                 searchResult = searchResult,
                 searchCaseSensitive = searchCaseSensitive,
+                caseSensitiveSearchSupported = caseSensitiveSearchSupported,
                 hasSelection = hasSelection,
                 renderingDelayed = renderingDelayed,
                 onClose = { onTogglePanel(layoutState.panel) },
@@ -763,7 +990,20 @@ private fun LandscapeTerminalLayout(
                 maxWidth = if (expandedWindow) 360.dp else 300.dp,
             )
         }
-        terminal(Modifier.weight(1f).fillMaxHeight())
+        Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+            terminal(Modifier.fillMaxSize())
+            if (remoteStatus.isNotBlank()) {
+                Text(
+                    remoteStatus,
+                    Modifier.align(Alignment.TopEnd)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+            }
+        }
         if (layoutState.extraKeysVisible && current != null) {
             LandscapeExtraKeys(
                 keys = settings.extraKeys,
@@ -793,8 +1033,13 @@ private fun LandscapeTerminalRail(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
 ) {
-    Surface(Modifier.width(56.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+    Surface(
+        Modifier.width(56.dp).fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surface, StructuralSurfaceRole.NAVIGATION),
+        tonalElevation = 3.dp,
+    ) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
             Column(
@@ -828,6 +1073,8 @@ private fun LandscapeTerminalRail(
                         onForwards = onForwards,
                         onFont = onFont,
                         onDisconnect = onDisconnect,
+                        onPersistentSessions = onPersistentSessions,
+                        persistentEnabled = current?.kind != SessionKind.SSH,
                         onToggleExtraKeys = {},
                     )
                 }
@@ -872,6 +1119,7 @@ private fun LandscapeContextPanel(
     searchText: String,
     searchResult: Pair<Int, Int>,
     searchCaseSensitive: Boolean,
+    caseSensitiveSearchSupported: Boolean,
     hasSelection: Boolean,
     renderingDelayed: Boolean,
     onClose: () -> Unit,
@@ -893,7 +1141,16 @@ private fun LandscapeContextPanel(
     onCancelSelection: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp,
 ) {
-    Surface(Modifier.widthIn(min = 248.dp, max = maxWidth).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer) {
+    // 文本选择只有两三个操作，不需要和会话/搜索/快捷命令一样宽的侧栏。
+    val surfaceModifier = if (panel == TerminalPanel.SELECTION) {
+        Modifier.width(168.dp)
+    } else {
+        Modifier.widthIn(min = 248.dp, max = maxWidth)
+    }
+    Surface(
+        surfaceModifier.fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -915,7 +1172,7 @@ private fun LandscapeContextPanel(
                     onCloseSession, onReconnect, onCancelReconnect, onUnlockVault, onCredentials,
                 )
                 TerminalPanel.SEARCH -> LandscapeSearchPanel(
-                    searchText, searchResult, searchCaseSensitive, onQueryChange,
+                    searchText, searchResult, searchCaseSensitive, caseSensitiveSearchSupported, onQueryChange,
                     onSearchPrevious, onSearchNext, onCaseSensitiveChange,
                 )
                 TerminalPanel.SNIPPETS -> LandscapeSnippetsPanel(snippets, onUseSnippet, onManageSnippets)
@@ -954,7 +1211,11 @@ private fun LandscapeSessionsPanel(
         items(sessions, key = { it.id.value }) { session ->
             Surface(
                 onClick = { onSelect(session.id) },
-                color = if (session.id == activeId) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                color = if (session.id == activeId) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    structuralSurfaceColor(MaterialTheme.colorScheme.surface)
+                },
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -998,6 +1259,7 @@ private fun LandscapeSearchPanel(
     query: String,
     result: Pair<Int, Int>,
     caseSensitive: Boolean,
+    caseSensitiveSupported: Boolean,
     onQueryChange: (String) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1010,8 +1272,18 @@ private fun LandscapeSearchPanel(
             OutlinedButton(onPrevious, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("上一个") }
             OutlinedButton(onNext, Modifier.weight(1f), enabled = query.isNotEmpty()) { Text("下一个") }
         }
-        OutlinedButton(onClick = { onCaseSensitiveChange(!caseSensitive) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (caseSensitive) "区分大小写：开" else "区分大小写：关")
+        OutlinedButton(
+            onClick = { onCaseSensitiveChange(!caseSensitive) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = caseSensitiveSupported,
+        ) {
+            Text(
+                when {
+                    !caseSensitiveSupported -> "当前后端不支持区分大小写"
+                    caseSensitive -> "区分大小写：开"
+                    else -> "区分大小写：关"
+                },
+            )
         }
     }
 }
@@ -1030,7 +1302,11 @@ private fun LandscapeSnippetsPanel(
         item { TextButton(onClick = onManage, modifier = Modifier.fillMaxWidth()) { Text("管理快捷命令") } }
         if (snippets.isEmpty()) item { Text("当前主机没有可用命令", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(snippets, key = CommandSnippet::id) { snippet ->
-            Surface(onClick = { onSelect(snippet) }, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+            Surface(
+                onClick = { onSelect(snippet) },
+                shape = MaterialTheme.shapes.medium,
+                color = structuralSurfaceColor(MaterialTheme.colorScheme.surface),
+            ) {
                 Column(Modifier.fillMaxWidth().padding(10.dp)) {
                     Text(snippet.title, style = MaterialTheme.typography.titleSmall)
                     Text(snippet.command, maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
@@ -1063,7 +1339,11 @@ private fun LandscapeExtraKeys(
     onShowKeyboard: () -> Unit,
     onArmCtrl: () -> Unit,
 ) {
-    Surface(Modifier.width(160.dp).fillMaxHeight(), color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+    Surface(
+        Modifier.width(160.dp).fillMaxHeight(),
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+        tonalElevation = 2.dp,
+    ) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1168,6 +1448,7 @@ private fun TerminalSearchBar(
     query: String,
     result: Pair<Int, Int>,
     caseSensitive: Boolean,
+    caseSensitiveSupported: Boolean,
     onQueryChange: (String) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1175,7 +1456,7 @@ private fun TerminalSearchBar(
     onClose: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1183,7 +1464,10 @@ private fun TerminalSearchBar(
         Text(if (result.second == 0) "0/0" else "${result.first + 1}/${result.second}", style = MaterialTheme.typography.labelMedium)
         OutlinedButton(onClick = onPrevious, enabled = query.isNotEmpty()) { Text("↑") }
         OutlinedButton(onClick = onNext, enabled = query.isNotEmpty()) { Text("↓") }
-        OutlinedButton(onClick = { onCaseSensitiveChange(!caseSensitive) }) { Text(if (caseSensitive) "Aa✓" else "Aa") }
+        OutlinedButton(
+            onClick = { onCaseSensitiveChange(!caseSensitive) },
+            enabled = caseSensitiveSupported,
+        ) { Text(if (caseSensitiveSupported && caseSensitive) "Aa✓" else "Aa") }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, "关闭搜索") }
     }
 }
@@ -1210,7 +1494,13 @@ private fun SnippetSheet(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(snippets, key = CommandSnippet::id) { snippet ->
-                    androidx.compose.material3.Card(onClick = { onSelect(snippet) }, modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.Card(
+                        onClick = { onSelect(snippet) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                        ),
+                    ) {
                         Column(Modifier.padding(14.dp)) {
                             Text(snippet.title, style = MaterialTheme.typography.titleSmall)
                             Text("${snippet.groupName}${if (snippet.executeImmediately) " · 确认后执行" else " · 填入终端"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -1260,7 +1550,7 @@ private fun SelectionKeys(
     onCancel: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1319,7 +1609,8 @@ private fun ExtraKeys(
     onArmCtrl: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceVariant)).padding(6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { key ->
@@ -1339,6 +1630,7 @@ private fun ExtraKeys(
 internal fun CredentialDialog(
     authType: AuthType,
     subject: String = "SSH 服务器",
+    rememberByDefault: Boolean = false,
     onDismiss: () -> Unit,
     onConnect: (Credential, Boolean) -> Unit,
 ) {
@@ -1347,7 +1639,7 @@ internal fun CredentialDialog(
     var passphrase by remember { mutableStateOf("") }
     var keyBytes by remember { mutableStateOf<ByteArray?>(null) }
     var keyName by remember { mutableStateOf<String?>(null) }
-    var rememberCredential by remember { mutableStateOf(false) }
+    var rememberCredential by remember { mutableStateOf(rememberByDefault) }
     var error by remember { mutableStateOf<String?>(null) }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) runCatching {
@@ -1394,371 +1686,6 @@ internal fun CredentialDialog(
     )
 }
 
-private class TerminalController {
-    private sealed interface RenderCommand {
-        val generation: Long
-        data class Reset(override val generation: Long) : RenderCommand
-        data class Data(override val generation: Long, val bytes: ByteArray) : RenderCommand
-    }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val renderCommands = Channel<RenderCommand>(TERMINAL_RENDER_QUEUE_CAPACITY)
-    private var webView: WebView? = null
-    private var ready = false
-    private var readySignal = CompletableDeferred<Unit>()
-    private var appearance: Pair<TerminalPalette, Int>? = null
-    private var generation = 0L
-    private var nextBatchId = 0L
-    private var queuedBytes = 0
-    private var currentAcknowledgement: Triple<Long, Long, CompletableDeferred<Unit>>? = null
-    private var deferredCommand: RenderCommand? = null
-    var onSelectionStateChanged: ((Boolean, Boolean) -> Unit)? = null
-    var onCopied: ((Int) -> Unit)? = null
-    var onSearchResults: ((Int, Int) -> Unit)? = null
-    var onOpenLink: ((String) -> Unit)? = null
-    var onCtrlArmed: ((Boolean) -> Unit)? = null
-    var onRenderingDelayed: ((Boolean) -> Unit)? = null
-
-    init {
-        scope.launch { renderLoop() }
-    }
-
-    fun attach(view: WebView) {
-        if (webView !== view) {
-            currentAcknowledgement?.third?.complete(Unit)
-            currentAcknowledgement = null
-            ready = false
-            readySignal = CompletableDeferred()
-        }
-        webView = view
-    }
-
-    fun markReady() {
-        ready = true
-        readySignal.complete(Unit)
-        applyAppearance()
-    }
-
-    fun close() {
-        currentAcknowledgement?.third?.complete(Unit)
-        currentAcknowledgement = null
-        webView = null
-        ready = false
-        scope.cancel()
-    }
-
-    suspend fun write(bytes: ByteArray) {
-        val currentGeneration = generation
-        splitTerminalOutput(bytes).forEach { chunk ->
-            queuedBytes += chunk.size
-            updateRenderingDelay()
-            try {
-                renderCommands.send(RenderCommand.Data(currentGeneration, chunk))
-            } catch (error: Throwable) {
-                releaseQueuedBytes(chunk.size)
-                throw error
-            }
-        }
-    }
-
-    suspend fun reset() {
-        generation += 1
-        renderCommands.send(RenderCommand.Reset(generation))
-    }
-
-    fun paste(context: Context) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
-        writeInput(text, webView)
-    }
-
-    fun pasteText(text: String) = writeInput(text, webView)
-
-    fun setAppearance(palette: TerminalPalette, fontSize: Int) {
-        appearance = palette to fontSize
-        applyAppearance()
-    }
-
-    fun enterSelectionMode() = evaluate("window.sshTerminal.enterSelectionMode()")
-    fun selectAll() = evaluate("window.sshTerminal.selectAll()")
-    fun copySelection() = evaluate("window.sshTerminal.copySelection()")
-    fun clearSelection() = evaluate("window.sshTerminal.clearSelection()")
-    fun search(query: String, backwards: Boolean, caseSensitive: Boolean) =
-        evaluate("window.sshTerminal.search(${JSONObject.quote(query)},$backwards,$caseSensitive)")
-    fun clearSearch() = evaluate("window.sshTerminal.clearSearch()")
-    fun setImeVisible(visible: Boolean) = evaluate("window.sshTerminal.setImeVisible($visible)")
-    fun armCtrl() {
-        evaluate("window.sshTerminal.armCtrl()")
-        focusAndShowKeyboard()
-    }
-
-    fun selectionChanged(active: Boolean, hasSelection: Boolean) {
-        onSelectionStateChanged?.invoke(active, hasSelection)
-    }
-
-    fun copied(characterCount: Int) {
-        onCopied?.invoke(characterCount)
-    }
-
-    fun searchResults(index: Int, total: Int) = onSearchResults?.invoke(index, total)
-    fun openLink(uri: String) = onOpenLink?.invoke(uri)
-    fun ctrlArmed(armed: Boolean) = onCtrlArmed?.invoke(armed)
-
-    fun outputProcessed(processedGeneration: Long, batchId: Long) {
-        val acknowledgement = currentAcknowledgement ?: return
-        if (acknowledgement.first == processedGeneration && acknowledgement.second == batchId) {
-            acknowledgement.third.complete(Unit)
-        }
-    }
-
-    fun focusAndShowKeyboard() {
-        val view = webView ?: return
-        view.requestFocus(View.FOCUS_DOWN)
-        view.evaluateJavascript("window.sshTerminal && window.sshTerminal.focusForIme()", null)
-        view.postDelayed({
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                view.windowInsetsController?.show(AndroidWindowInsets.Type.ime())
-            }
-            val inputMethod = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            inputMethod.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
-        }, 80)
-    }
-
-    fun hideKeyboard() {
-        val view = webView ?: return
-        setImeVisible(false)
-        view.clearFocus()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            view.windowInsetsController?.hide(AndroidWindowInsets.Type.ime())
-        }
-        val inputMethod = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        inputMethod.hideSoftInputFromWindow(view.windowToken, 0)
-    }
-
-    private suspend fun renderLoop() {
-        while (true) {
-            val command = deferredCommand?.also { deferredCommand = null } ?: renderCommands.receive()
-            if (command.generation != generation) {
-                if (command is RenderCommand.Data) releaseQueuedBytes(command.bytes.size)
-                continue
-            }
-            when (command) {
-                is RenderCommand.Reset -> {
-                    awaitReady()
-                    val acknowledgement = CompletableDeferred<Unit>()
-                    currentAcknowledgement = Triple(command.generation, RESET_BATCH_ID, acknowledgement)
-                    webView?.evaluateJavascript("window.sshTerminal.resetOutput(${command.generation})", null)
-                    acknowledgement.await()
-                    currentAcknowledgement = null
-                }
-                is RenderCommand.Data -> renderData(command)
-            }
-        }
-    }
-
-    private suspend fun renderData(first: RenderCommand.Data) {
-        val renderGeneration = first.generation
-        delay(8)
-        if (renderGeneration != generation) {
-            releaseQueuedBytes(first.bytes.size)
-            return
-        }
-        val output = ByteArrayOutputStream(MAX_TERMINAL_RENDER_BATCH_BYTES)
-        output.write(first.bytes)
-        while (output.size() < MAX_TERMINAL_RENDER_BATCH_BYTES) {
-            val next = renderCommands.tryReceive().getOrNull() ?: break
-            if (next !is RenderCommand.Data || next.generation != generation || output.size() + next.bytes.size > MAX_TERMINAL_RENDER_BATCH_BYTES) {
-                deferredCommand = next
-                break
-            }
-            output.write(next.bytes)
-        }
-        val batch = output.toByteArray()
-        awaitReady()
-        val batchId = ++nextBatchId
-        val acknowledgement = CompletableDeferred<Unit>()
-        currentAcknowledgement = Triple(renderGeneration, batchId, acknowledgement)
-        val warning = scope.launch {
-            delay(1_000)
-            onRenderingDelayed?.invoke(true)
-        }
-        val base64 = withContext(Dispatchers.Default) { Base64.encodeToString(batch, Base64.NO_WRAP) }
-        webView?.evaluateJavascript("window.sshTerminal.writeBase64($renderGeneration,$batchId,'$base64')", null)
-        acknowledgement.await()
-        warning.cancel()
-        currentAcknowledgement = null
-        releaseQueuedBytes(batch.size)
-    }
-
-    private suspend fun awaitReady() {
-        if (!ready || webView == null) readySignal.await()
-    }
-
-    private fun releaseQueuedBytes(count: Int) {
-        queuedBytes = (queuedBytes - count).coerceAtLeast(0)
-        updateRenderingDelay()
-    }
-
-    private fun updateRenderingDelay() {
-        when {
-            queuedBytes >= TERMINAL_RENDER_WARNING_BYTES -> onRenderingDelayed?.invoke(true)
-            queuedBytes <= TERMINAL_RENDER_RECOVERED_BYTES -> onRenderingDelayed?.invoke(false)
-        }
-    }
-
-    private fun writeInput(text: String, view: WebView?) {
-        val base64 = Base64.encodeToString(text.encodeToByteArray(), Base64.NO_WRAP)
-        view?.evaluateJavascript("window.sshTerminal.pasteBase64('$base64')", null)
-    }
-
-    private fun evaluate(script: String) {
-        val view = webView ?: return
-        if (ready) view.post { view.evaluateJavascript(script, null) }
-    }
-
-    private fun applyAppearance() {
-        val view = webView ?: return
-        val (palette, fontSize) = appearance ?: return
-        view.setBackgroundColor(Color.parseColor(palette.background))
-        if (!ready) return
-        val theme = JSONObject().apply {
-            put("background", palette.background)
-            put("foreground", palette.foreground)
-            put("cursor", palette.cursor)
-            put("cursorAccent", palette.cursorAccent)
-            put("selectionBackground", palette.selectionBackground)
-            put("black", palette.black)
-            put("red", palette.red)
-            put("green", palette.green)
-            put("yellow", palette.yellow)
-            put("blue", palette.blue)
-            put("magenta", palette.magenta)
-            put("cyan", palette.cyan)
-            put("white", palette.white)
-            put("brightBlack", palette.brightBlack)
-            put("brightRed", palette.brightRed)
-            put("brightGreen", palette.brightGreen)
-            put("brightYellow", palette.brightYellow)
-            put("brightBlue", palette.brightBlue)
-            put("brightMagenta", palette.brightMagenta)
-            put("brightCyan", palette.brightCyan)
-            put("brightWhite", palette.brightWhite)
-        }
-        val payload = JSONObject().put("theme", theme).put("fontSize", fontSize)
-        view.post { view.evaluateJavascript("window.sshTerminal.setAppearance($payload)", null) }
-    }
-
-    private companion object {
-        const val RESET_BATCH_ID = -1L
-    }
-}
-
-private class TerminalBridge(
-    private val view: WebView,
-    private val controller: TerminalController,
-    private val inputCallback: (ByteArray) -> Unit,
-    private val resizeCallback: (Int, Int) -> Unit,
-) {
-    @JavascriptInterface fun onInput(base64: String) {
-        runCatching { Base64.decode(base64, Base64.DEFAULT) }.onSuccess(inputCallback)
-    }
-    @JavascriptInterface fun onResize(columns: Int, rows: Int): Unit = resizeCallback(columns, rows)
-    @JavascriptInterface fun onRequestKeyboard() {
-        view.post(controller::focusAndShowKeyboard)
-    }
-    @JavascriptInterface fun onHideKeyboard() {
-        view.post(controller::hideKeyboard)
-    }
-    @JavascriptInterface fun onSelectionChanged(active: Boolean, hasSelection: Boolean) {
-        view.post { controller.selectionChanged(active, hasSelection) }
-    }
-    @JavascriptInterface fun onCopySelection(base64: String) {
-        runCatching { Base64.decode(base64, Base64.DEFAULT).decodeToString() }
-            .onSuccess { selection ->
-                if (selection.isEmpty()) return@onSuccess
-                val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("SSH terminal", selection))
-                view.post { controller.copied(selection.length) }
-            }
-    }
-    @JavascriptInterface fun onSearchResults(index: Int, total: Int) {
-        view.post { controller.searchResults(index, total) }
-    }
-    @JavascriptInterface fun onOpenLink(uri: String) {
-        if (uri.startsWith("https://", true) || uri.startsWith("http://", true)) {
-            view.post { controller.openLink(uri) }
-        }
-    }
-    @JavascriptInterface fun onCtrlArmed(armed: Boolean) {
-        view.post { controller.ctrlArmed(armed) }
-    }
-    @JavascriptInterface fun onOutputProcessed(generation: Long, batchId: Long) {
-        view.post { controller.outputProcessed(generation, batchId) }
-    }
-    @JavascriptInterface fun onReady(columns: Int, rows: Int) {
-        view.post {
-            controller.markReady()
-            resizeCallback(columns, rows)
-        }
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun TerminalWebView(
-    controller: TerminalController,
-    initialBackground: String,
-    onInput: (ByteArray) -> Unit,
-    onResize: (Int, Int) -> Unit,
-    onSurfaceCreated: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // WebView 的 JS bridge 生命周期长于一次 Compose 重组，必须间接读取最新回调；
-    // 否则切换会话后 bridge 仍会把输入和 resize 发给旧会话。
-    val inputState = rememberUpdatedState(onInput)
-    val resizeState = rememberUpdatedState(onResize)
-    val surfaceCreatedState = rememberUpdatedState(onSurfaceCreated)
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            val assetLoader = WebViewAssetLoader.Builder()
-                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                .build()
-            WebView(context).apply {
-                // WebView 绑定时立即应用已保存的终端背景色，避免首帧深色闪烁。
-                setBackgroundColor(Color.parseColor(initialBackground))
-                isFocusable = true
-                isFocusableInTouchMode = true
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = false
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                settings.setSupportMultipleWindows(false)
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                webViewClient = object : WebViewClient() {
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                        assetLoader.shouldInterceptRequest(request.url)
-
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                        request.url.host != "appassets.androidplatform.net"
-                }
-                controller.attach(this)
-                addJavascriptInterface(
-                    TerminalBridge(
-                        this,
-                        controller,
-                        { inputState.value(it) },
-                        { columns, rows -> resizeState.value(columns, rows) },
-                    ),
-                    "AndroidTerminal",
-                )
-                post { surfaceCreatedState.value() }
-                loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
-            }
-        },
-        update = { controller.attach(it) },
-    )
-}
 
 @Composable
 private fun TerminalSystemBarsEffect(isLandscape: Boolean) {
@@ -1808,12 +1735,19 @@ private fun TerminalMoreMenuItems(
     onForwards: () -> Unit,
     onFont: () -> Unit,
     onDisconnect: () -> Unit,
+    onPersistentSessions: () -> Unit,
+    persistentEnabled: Boolean,
     onToggleExtraKeys: () -> Unit,
 ) {
     DropdownMenuItem(text = { Text("粘贴") }, onClick = { onDismiss(); onPaste() }, enabled = !selectionMode)
     DropdownMenuItem(text = { Text("选择文本") }, onClick = { onDismiss(); onSelectText() }, enabled = !selectionMode)
     DropdownMenuItem(text = { Text("端口转发") }, onClick = { onDismiss(); onForwards() })
     DropdownMenuItem(text = { Text("字体大小") }, onClick = { onDismiss(); onFont() })
+    DropdownMenuItem(
+        text = { Text("持久会话") },
+        onClick = { onDismiss(); onPersistentSessions() },
+        enabled = persistentEnabled,
+    )
     DropdownMenuItem(text = { Text("断开当前会话") }, onClick = { onDismiss(); onDisconnect() })
     if (hasHardwareKeyboard) {
         DropdownMenuItem(text = { Text(if (forceExtraKeys) "隐藏扩展键" else "显示扩展键") }, onClick = { onDismiss(); onToggleExtraKeys() })
