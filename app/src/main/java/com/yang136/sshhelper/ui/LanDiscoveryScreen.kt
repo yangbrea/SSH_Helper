@@ -308,6 +308,7 @@ private fun DiscoveryDeviceCard(
 ) {
     Card(
         modifier = Modifier.clickable(onClick = onOpenDetails),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .72f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

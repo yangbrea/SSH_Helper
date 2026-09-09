@@ -323,6 +323,7 @@ private fun PortResultCard(
     var expanded by remember(result.port) { mutableStateOf(false) }
     Card(
         modifier = Modifier.clickable { expanded = !expanded },
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
         ),

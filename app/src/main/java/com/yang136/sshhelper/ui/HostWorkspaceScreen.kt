@@ -254,7 +254,10 @@ internal fun HostWorkspaceContent(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f))) {
+            Card(
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)),
+            ) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -293,7 +296,10 @@ internal fun HostWorkspaceContent(
 
         item { SshSectionHeader("系统集成") }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) {
+            Card(
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)),
+            ) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SummaryRow("系统文件访问", if (state.documentAuthorized) "已授权" else "未授权", if (state.documentAuthorized) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
                     SummaryRow("传输", if (state.activeTransfers > 0) "${state.activeTransfers} 个进行中" else "无进行中任务", if (state.activeTransfers > 0) SshStatusTone.CONNECTING else SshStatusTone.OFFLINE)
@@ -323,6 +329,7 @@ private fun SessionCard(
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = containerColor),
     ) {
         Column(Modifier.fillMaxWidth()) {

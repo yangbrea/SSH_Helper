@@ -306,6 +306,7 @@ private fun HostsList(
                                 onClick = { onSessionClick(session.id) },
                                 onLongClick = { onDeleteArmedSession(session.id) },
                             ),
+                        shape = MaterialTheme.shapes.medium,
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f)),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {

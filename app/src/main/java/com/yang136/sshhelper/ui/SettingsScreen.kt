@@ -91,7 +91,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -574,10 +573,10 @@ private fun ImageThemeControls(
                     val entry = state.recentEntries.getOrNull(index)
                     val selected = entry?.id == state.activeId
                     Box(
-                        Modifier.weight(1f).aspectRatio(.78f).clip(RoundedCornerShape(14.dp))
+                        Modifier.weight(1f).aspectRatio(.78f).clip(MaterialTheme.shapes.large)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .then(if (entry != null) Modifier.clickable { onSelect(entry.id) } else Modifier)
-                            .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
+                            .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large),
                     ) {
                         entry?.thumbnail?.let { Image(it.asImageBitmap(), "最近背景 ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                         if (entry == null) Text("空", Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1029,11 +1028,26 @@ private fun AboutSettings(modifier: Modifier) {
             }
         }
         item { SshSectionHeader("能力") }
-        listOf(
-            Icons.Default.Terminal to ("终端与会话" to "多会话、快捷命令、搜索和 AI 助手"),
-            Icons.Default.Storage to ("文件与传输" to "SFTP、系统文件访问和安全写回"),
-            Icons.Default.Security to ("连接与安全" to "保险库、主机指纹、跳板机与代理"),
-        ).forEach { (icon, text) -> item(text.first) { Card(colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer))) { PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) } } } }
+        item {
+            val abilities = listOf(
+                Icons.Default.Terminal to ("终端与会话" to "多会话、快捷命令、搜索和 AI 助手"),
+                Icons.Default.Storage to ("文件与传输" to "SFTP、系统文件访问和安全写回"),
+                Icons.Default.Security to ("连接与安全" to "保险库、主机指纹、跳板机与代理"),
+            )
+            Card(
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    abilities.forEachIndexed { index, (icon, text) ->
+                        PreferenceAction(icon, text.first, text.second, {}) { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) }
+                        if (index < abilities.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        }
+                    }
+                }
+            }
+        }
         item { PreferenceGroup { Text("第三方组件", fontWeight = FontWeight.SemiBold); Text("Ghostty · JSch · Bouncy Castle · CommonMark", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) } }
     }
 }
