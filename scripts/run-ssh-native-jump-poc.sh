@@ -77,3 +77,28 @@ read -r target_port jump_port < "$port_file"
 echo "[ssh-native] jump custom transport POC passed"
 "$runtime_binary" "$target_port" "$jump_port"
 echo "[ssh-native] jump runtime E2E passed"
+
+hostkey_hold_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-jump-hostkey-hold.XXXXXX")"
+trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$poc_binary" "$runtime_binary" "$hostkey_hold_binary" "$port_file" "$server_err"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_handshake_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_jump_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_jump_hostkey_hold_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$hostkey_hold_binary"
+"$hostkey_hold_binary" "$target_port" "$jump_port"
+echo "[ssh-native] jump host-key hold E2E passed"

@@ -1,6 +1,7 @@
 package com.yang136.sshhelper.ssh
 
 import com.yang136.sshhelper.data.Credential
+import com.yang136.sshhelper.data.ForwardType
 import com.yang136.sshhelper.data.KnownHostDao
 import com.yang136.sshhelper.data.KnownHostEntity
 import com.yang136.sshhelper.data.ProxyType
@@ -24,6 +25,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -79,6 +82,7 @@ class Libssh2SshSession(
     private val nativeRuntime = NativeSshRuntime()
     private val terminalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sftpClients = ConcurrentHashMap.newKeySet<NativeSftpClient>()
+    private val forwardHandles = ConcurrentHashMap.newKeySet<NativeForwardHandle>()
     @Volatile private var terminalReaderJob: Job? = null
     @Volatile private var terminalChannelOpen = false
     @Volatile private var keepaliveJob: Job? = null
@@ -94,6 +98,21 @@ class Libssh2SshSession(
         val username: String?,
         val password: String,
     )
+
+    private inner class NativeForwardHandle(
+        private val nativeHandle: Long,
+        override val actualListenPort: Int,
+    ) : ForwardHandle {
+        @Volatile
+        private var closed = false
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            forwardHandles.remove(this)
+            nativeRuntime.closeForward(nativeHandle)
+        }
+    }
 
     override suspend fun connect(
         route: SshRoute,
@@ -190,6 +209,7 @@ class Libssh2SshSession(
                 hop = if (route.jump == null) DiagnosticHop.DIRECT else DiagnosticHop.TARGET,
             )
             startKeepalive()
+            if (openShell) openTerminal(TerminalTarget.PlainShell)
         } catch (error: HostKeyBlockedException) {
             nativeRuntime.close()
             persistentSessionOpen = false
@@ -353,10 +373,11 @@ class Libssh2SshSession(
     ): String {
         val hostname = route.target.hostname
         val port = route.target.port
-        val info = probeRuntimeHostKey(route, hostname, port)
+        val info = probeAndHoldRuntimeHostKey(route, hostname, port)
         val request = hostKeyRequest(hostname, port, info)
         if (request != null) {
             if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                abortPendingSession()
                 mutableHostKeyRequest.value = request
                 throw HostKeyBlockedException(request)
             }
@@ -364,18 +385,18 @@ class Libssh2SshSession(
             val accepted = awaitHostKeyDecision()
             mutableHostKeyRequest.value = null
             if (!accepted) {
+                abortPendingSession()
                 throw HostKeyBlockedException(request)
             }
             saveKnownHost(hostname, port, info)
         }
         mutableStage.value = ConnectionStage.TARGET_AUTH
-        return openPersistentSession(
-            route = route,
+        return continuePendingSession(
             username = username,
             password = password,
             privateKey = privateKey,
             passphrase = passphrase,
-            expectedFingerprint = info.fingerprint,
+            storeAsJump = false,
         )
     }
 
@@ -399,10 +420,11 @@ class Libssh2SshSession(
         val hostname = route.target.hostname
         val port = route.target.port
         mutableStage.value = ConnectionStage.TARGET_HOST_KEY
-        val info = probeJumpTargetHostKey(route, hostname, port)
+        val info = probeAndHoldJumpTargetHostKey(hostname, port)
         val request = hostKeyRequest(hostname, port, info, HostKeySubject.TARGET)
         if (request != null) {
             if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                abortPendingSession()
                 mutableHostKeyRequest.value = request
                 throw HostKeyBlockedException(request)
             }
@@ -410,19 +432,19 @@ class Libssh2SshSession(
             val accepted = awaitHostKeyDecision()
             mutableHostKeyRequest.value = null
             if (!accepted) {
+                abortPendingSession()
                 throw HostKeyBlockedException(request)
             }
             saveKnownHost(hostname, port, info)
         }
 
         mutableStage.value = ConnectionStage.TARGET_AUTH
-        return openJumpTargetPersistentSession(
-            route = route,
+        return continuePendingSession(
             username = username,
             password = password,
             privateKey = privateKey,
             passphrase = passphrase,
-            expectedFingerprint = info.fingerprint,
+            storeAsJump = false,
         )
     }
 
@@ -434,10 +456,11 @@ class Libssh2SshSession(
     ): String {
         val jump = route.jump ?: error("缺少跳板机")
         mutableStage.value = ConnectionStage.JUMP_HOST_KEY
-        val info = probeJumpRuntimeHostKey(route, jump)
+        val info = probeAndHoldJumpRuntimeHostKey(route, jump)
         val request = hostKeyRequest(jump.hostname, jump.port, info, HostKeySubject.JUMP)
         if (request != null) {
             if (request.issue == HostKeyIssue.CHANGED || !allowHostKeyPrompt) {
+                abortPendingSession()
                 mutableHostKeyRequest.value = request
                 throw HostKeyBlockedException(request)
             }
@@ -445,18 +468,19 @@ class Libssh2SshSession(
             val accepted = awaitHostKeyDecision()
             mutableHostKeyRequest.value = null
             if (!accepted) {
+                abortPendingSession()
                 throw HostKeyBlockedException(request)
             }
             saveKnownHost(jump.hostname, jump.port, info)
         }
 
         mutableStage.value = ConnectionStage.JUMP_AUTH
-        return openJumpSession(
-            route = route,
-            jumpPassword = jumpPassword,
-            jumpPrivateKey = jumpPrivateKey,
-            jumpPassphrase = jumpPassphrase,
-            expectedFingerprint = info.fingerprint,
+        return continuePendingSession(
+            username = jump.username,
+            password = jumpPassword,
+            privateKey = jumpPrivateKey,
+            passphrase = jumpPassphrase,
+            storeAsJump = true,
         )
     }
 
@@ -685,6 +709,85 @@ class Libssh2SshSession(
         return parseRuntimeTcpHandshakePayload(raw)
     }
 
+    /** Probes and holds the unauthenticated connection for a direct target. */
+    private suspend fun probeAndHoldRuntimeHostKey(
+        route: SshRoute,
+        hostname: String,
+        port: Int,
+    ): TcpHandshakeInfo {
+        mutableStage.value = ConnectionStage.TARGET_HOST_KEY
+        val proxy = targetProxy(route)
+        val raw = if (proxy != null) {
+            connectProxy(proxy, hostname, port)
+            nativeRuntime.runPendingHostKeyProbe(SSH_CONNECT_TIMEOUT_MS.toLong())
+        } else {
+            nativeRuntime.runTcpHostKeyProbe(
+                hostname,
+                port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    /** Probes and holds the unauthenticated connection for a jump host. */
+    private suspend fun probeAndHoldJumpRuntimeHostKey(
+        route: SshRoute,
+        jump: com.yang136.sshhelper.data.HostProfile,
+    ): TcpHandshakeInfo {
+        mutableStage.value = ConnectionStage.JUMP_HOST_KEY
+        val proxy = jumpProxy(route)
+        val raw = if (proxy != null) {
+            connectProxy(proxy, jump.hostname, jump.port)
+            nativeRuntime.runPendingHostKeyProbe(SSH_CONNECT_TIMEOUT_MS.toLong())
+        } else {
+            nativeRuntime.runTcpHostKeyProbe(
+                jump.hostname,
+                jump.port,
+                SSH_CONNECT_TIMEOUT_MS.toLong(),
+            )
+        }
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    /** Probes and holds the target connection tunneled through an open jump host. */
+    private suspend fun probeAndHoldJumpTargetHostKey(
+        hostname: String,
+        port: Int,
+    ): TcpHandshakeInfo {
+        mutableStage.value = ConnectionStage.TARGET_HOST_KEY
+        val raw = nativeRuntime.runOpenJumpTargetHostKeyProbe(
+            hostname,
+            port,
+            SSH_CONNECT_TIMEOUT_MS.toLong(),
+        )
+        return parseRuntimeTcpHandshakePayload(raw)
+    }
+
+    /** Authenticates the held unauthenticated session and stores it. */
+    private fun continuePendingSession(
+        username: String,
+        password: String?,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        storeAsJump: Boolean,
+    ): String {
+        val raw = nativeRuntime.runContinuePendingSession(
+            username = username,
+            password = password.orEmpty(),
+            privateKey = privateKey,
+            passphrase = passphrase,
+            storeAsJump = storeAsJump,
+            timeoutMillis = SSH_CONNECT_TIMEOUT_MS.toLong(),
+        )
+        check(raw == "session=ok") { "native continue pending session failed: $raw" }
+        return raw
+    }
+
+    private fun abortPendingSession() {
+        runCatching { nativeRuntime.runAbortPendingSession() }
+    }
+
     private fun targetProxy(route: SshRoute): TargetProxy? {
         // The target's device-side proxy applies only to a direct route. When a
         // jump host is used, the jump tunnel already replaces the device-side
@@ -803,11 +906,22 @@ class Libssh2SshSession(
         stopKeepalive()
         if (!persistentSessionOpen || closed) return
         keepaliveJob = terminalScope.launch {
-            while (persistentSessionOpen && !closed && terminalScope.isActive) {
+            var consecutiveTimeouts = 0
+            while (persistentSessionOpen && !closed && currentCoroutineContext().isActive) {
                 try {
                     nativeRuntime.runKeepalive(SSH_KEEPALIVE_INTERVAL_MS * 2L)
+                    consecutiveTimeouts = 0
                 } catch (error: Throwable) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
+                    // A single request can expire while Android suspends the app.
+                    // Retry it on the intact transport; hard I/O errors still fail immediately.
+                    if (error is NativeSshException && error.domain == "timeout" &&
+                        error.code == "keepalive_timeout" &&
+                        ++consecutiveTimeouts < SSH_KEEPALIVE_MAX_MISSES
+                    ) {
+                        delay(SSH_KEEPALIVE_INTERVAL_MS.toLong())
+                        continue
+                    }
                     if (persistentSessionOpen && mutableState.value is ConnectionState.Connected) {
                         val cause = if (error is NativeSshException) {
                             error.toDisconnectCause()
@@ -887,7 +1001,7 @@ class Libssh2SshSession(
 
     private suspend fun readShellLoop() {
         try {
-            while (terminalChannelOpen && terminalScope.isActive) {
+            while (terminalChannelOpen && currentCoroutineContext().isActive) {
                 val data = nativeRuntime.runShellRead(8192, 250L) ?: continue
                 if (data.isEmpty()) {
                     terminalChannelOpen = false
@@ -943,8 +1057,9 @@ class Libssh2SshSession(
         }
     }
 
-    override suspend fun closeTerminal() {
-        terminalReaderJob?.cancel()
+    override suspend fun closeTerminal() = withContext(Dispatchers.IO) {
+        // Wait for the bounded native read to finish before replacing its channel.
+        terminalReaderJob?.cancelAndJoin()
         terminalReaderJob = null
         if (terminalChannelOpen) {
             terminalChannelOpen = false
@@ -953,13 +1068,13 @@ class Libssh2SshSession(
         mutableTerminalState.value = TerminalChannelState.Closed
     }
 
-    override suspend fun write(data: ByteArray) {
-        if (!terminalChannelOpen || !persistentSessionOpen) return
+    override suspend fun write(data: ByteArray) = withContext(Dispatchers.IO) {
+        if (!terminalChannelOpen || !persistentSessionOpen) return@withContext
         nativeRuntime.runShellWrite(data)
     }
 
-    override suspend fun resize(columns: Int, rows: Int) {
-        if (!terminalChannelOpen || !persistentSessionOpen) return
+    override suspend fun resize(columns: Int, rows: Int) = withContext(Dispatchers.IO) {
+        if (!terminalChannelOpen || !persistentSessionOpen) return@withContext
         ptyColumns = columns
         ptyRows = rows
         nativeRuntime.runShellResize(columns, rows)
@@ -973,6 +1088,8 @@ class Libssh2SshSession(
         cancelPendingHostKey()
         sftpClients.toList().forEach(NativeSftpClient::close)
         sftpClients.clear()
+        forwardHandles.toList().forEach { it.close() }
+        forwardHandles.clear()
         nativeRuntime.close()
         persistentSessionOpen = false
         route = null
@@ -1011,9 +1128,39 @@ class Libssh2SshSession(
             .also(sftpClients::add)
     }
 
-    override suspend fun registerForward(request: ForwardRequest): ForwardHandle {
-        error("libssh2 POC 暂不支持端口转发")
-    }
+    override suspend fun registerForward(request: ForwardRequest): ForwardHandle =
+        withContext(Dispatchers.IO) {
+            check(persistentSessionOpen && !closed) { "SSH 连接不可用" }
+            when (request.type) {
+                ForwardType.LOCAL -> {
+                    val targetHost = request.targetHost ?: error("缺少目标主机")
+                    val targetPort = request.targetPort ?: error("缺少目标端口")
+                    val result = nativeRuntime.startLocalForward(
+                        bindAddress = request.bindAddress,
+                        listenPort = request.listenPort,
+                        targetHost = targetHost,
+                        targetPort = targetPort,
+                    )
+                    NativeForwardHandle(result.id, result.actualPort)
+                        .also(forwardHandles::add)
+                }
+                ForwardType.REMOTE -> {
+                    val targetHost = request.targetHost ?: error("缺少目标主机")
+                    val targetPort = request.targetPort ?: error("缺少目标端口")
+                    val result = nativeRuntime.startRemoteForward(
+                        bindAddress = request.bindAddress,
+                        listenPort = request.listenPort,
+                        targetHost = targetHost,
+                        targetPort = targetPort,
+                    )
+                    NativeForwardHandle(result.id, result.actualPort)
+                        .also(forwardHandles::add)
+                }
+                ForwardType.DYNAMIC -> {
+                    throw UnsupportedOperationException("动态转发暂未在 native 后端实现，已标记为延后")
+                }
+            }
+        }
 
     override fun close() {
         closed = true
@@ -1025,6 +1172,8 @@ class Libssh2SshSession(
         cancelPendingHostKey()
         sftpClients.toList().forEach(NativeSftpClient::close)
         sftpClients.clear()
+        forwardHandles.toList().forEach { it.close() }
+        forwardHandles.clear()
         nativeRuntime.close()
         persistentSessionOpen = false
         route = null

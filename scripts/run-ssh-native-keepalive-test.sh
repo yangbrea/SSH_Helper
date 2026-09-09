@@ -34,6 +34,7 @@ trap 'kill "$live_pid" "$die_pid" 2>/dev/null || true; rm -f "$binary" "$live_po
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_shell_operation.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_keepalive_e2e_test.cpp" \
     -lssh2 \

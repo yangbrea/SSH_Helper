@@ -71,14 +71,43 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   - native `runtime-jump-ok` E2E 覆盖 jump host-key 预检、目标认证与 persistent exec。
 - keepalive / 断线检测 / 错误映射主链路已完成：
   - native `KeepaliveOperation` 对 active session 与 jump session 周期发送 keepalive，
-    通过 socket HUP/ERR/readable 探测远端断开（近似语义，不承诺纯网络黑盒精确 timeout）；
+    使用 send-only 语义并通过 socket HUP/ERR/RDHUP 与实际 I/O 错误探测远端断开；
+    不再把 socket readable 当作心跳应答，也不等待被发送间隔限流的请求产生应答。
+    这不是带应答计数的探活，纯丢包/黑洞网络的检测时间仍取决于实际 I/O/TCP，
+    尚不等价于 JSch 的 serverAliveCountMax；
+  - keepalive 请求 deadline 只结束本次请求，不直接关闭 transport；JNI 消费 runtime
+    完成事件，避免后台恢复后用第二套超时丢弃已完成结果。Kotlin 连续 6 次发送超时
+    才断开，成功发送重置计数，明确的传输错误仍立即处理；
   - `Libssh2SshSession` 连接成功后启动 keepalive/disconnect watcher，headless session
     不再只依赖 shell reader 感知断线；
   - JNI 失败改为抛结构化 `NativeSshException`（domain/code/libssh2Code/systemErrno），
     Kotlin 映射到 `DisconnectCause` 与用户文案；
   - 错误消息经 `DiagnosticRedactor` 脱敏，控制字符/密钥/代理凭据不进入 UI；
   - `Libssh2SshSession` 接入 `DiagnosticSink`，记录 connect/connected/disconnect trace；
-  - host `keepalive-live-ok` / `keepalive-disconnect-ok` E2E 覆盖正常连接与远端关闭。
+  - host E2E 覆盖正常连接、远端关闭、Shell 读走回复后的间隔内重复调用，
+    以及过期 keepalive 请求后同一 Shell 仍可收发。后台锁屏行为仍需手机手测。
+- native 单连接 host-key 确认状态机已完成：
+  - runtime 新增 pending session 槽：握手后、认证前保持未认证连接等待 host-key 决策；
+  - `TcpHandshakeOperation` / `Libssh2HandshakeOperation` / `OpenJumpTargetHandshakeOperation`
+    支持 `hold_pending`，可把已握手未认证连接保留在 runtime；
+  - `AuthenticatePendingSessionOperation` 在同一连接上继续认证并成为 active/jump session；
+  - `AbortPendingSessionOperation` 处理拒绝/变化/超时后的连接关闭；
+  - JNI/Kotlin 已暴露 host-key hold probe、continue、abort 调用；
+  - `Libssh2SshSession` 直连、代理、跳板目标均改为“单连接探测 → 确认 → 同一连接认证”；
+  - host E2E `runtime-hostkey-hold-ok` 与 `runtime-jump-hostkey-hold-ok` 覆盖接受后认证执行
+    与拒绝后关闭。
+- native 本地/远程端口转发主链路已完成（动态转发延后）：
+  - runtime 新增 background operation 支持，用于 accept loop 与每条转发的双向数据泵；
+  - `StartLocalForwardOperation` / `LocalForwardAcceptOperation` 实现 `-L`：native 本地监听 +
+    `direct-tcpip`，支持监听端口 0 自动分配；
+  - `StartRemoteForwardOperation` / `RemoteForwardAcceptOperation` 实现 `-R`：libssh2 remote
+    forward listener + forwarded channel 回连本机目标；
+  - `CloseForwardOperation` 按 group 幂等关闭 listener 与其 child connection；
+  - JNI/Kotlin 已暴露 `nativeRunStartLocalForward` / `nativeRunStartRemoteForward` /
+    `nativeRunCloseForward`，`Libssh2SshSession.registerForward` 已接入 LOCAL/REMOTE；
+  - DYNAMIC 在 native 路径明确报“延后未实现”，能力串标记 `dynamic=deferred`；
+  - AsyncSSH test server 支持 direct-tcpip 与 remote forward，host E2E `runtime-forward-ok`
+    覆盖本地/远程 echo roundtrip、端口分配、重复安全关闭。
 - 现代算法策略 helper。
 - Step 4 的 production runtime 设计已固化在
   `docs/libssh2-step4-runtime-design.md`：定义 continuation/EAGAIN、poll、deadline、
@@ -113,7 +142,7 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
 - 生产 JNI 已移除 `nativeOpenDirectHandshake()` / `nativeDirectHostKey*` / `nativeDirectPasswordExec()` /
   `nativeDirectPrivateKeyExec()` / `nativeDirectClose()` / `nativeConnectExec*()`；
   这些 blocking POC 仍保留在 host C++ tests 中作为协议基线。
-- host-key 确认已全面切换到 runtime `TcpHandshakeOperation` + runtime direct/pending exec。
+- host-key 确认已全面切换到 runtime host-key hold + same-connection continue（旧 blocking POC 退役）。
 
 ### runtime Operation 当前覆盖（direct/proxy/exec）
 - non-blocking TCP connect
@@ -152,9 +181,8 @@ Base: `2ea89ff`（commit current workspace checkpoint 后创建）
   此前记录的“OpenSSH 非 root 无法 chown pty”不再阻塞 native Shell/PTY 测试。
 
 ## 尚未完成（按计划顺序）
-- runtime 内 UNKNOWN host-key 交互决策（首次确认状态机）。
 - Shell/PTY 真机/多路复用器（tmux/zellij）环境验收（native/JNI/Kotlin 主链路已完成）。
-- 本地/远程/动态转发 native 化。
+- 动态转发 native 化（延后）。本地/远程 native 化已完成主链路。
 - `Libssh2SshSession` 生产接入与默认切换。
 - JSch 删除与文档/notices 清理。
 - 稳定性/安全/性能验收与真机/模拟器 release 门禁。

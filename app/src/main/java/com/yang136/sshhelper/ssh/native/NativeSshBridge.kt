@@ -44,6 +44,17 @@ object NativeSshBridge {
     ): String
 
     /**
+     * Same as [nativeRunTcpHandshake] but keeps the handshaked unauthenticated
+     * connection in the runtime pending session slot for a host-key decision.
+     */
+    external fun nativeRunTcpHostKeyProbe(
+        handle: Long,
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String
+
+    /**
      * Submits a nonblocking HTTP CONNECT operation to the runtime handle and
      * waits for completion.
      */
@@ -76,6 +87,15 @@ object NativeSshBridge {
      * key fields without authenticating.
      */
     external fun nativeRunPendingTcpHandshake(
+        handle: Long,
+        timeoutMillis: Long,
+    ): String
+
+    /**
+     * Same as [nativeRunPendingTcpHandshake] but keeps the handshaked
+     * unauthenticated connection in the runtime pending session slot.
+     */
+    external fun nativeRunPendingHostKeyProbe(
         handle: Long,
         timeoutMillis: Long,
     ): String
@@ -179,6 +199,17 @@ object NativeSshBridge {
     ): String
 
     /**
+     * Same as [nativeRunOpenJumpTargetHandshake] but keeps the handshaked target
+     * connection in the runtime pending session slot for a host-key decision.
+     */
+    external fun nativeRunOpenJumpTargetHostKeyProbe(
+        handle: Long,
+        targetHost: String,
+        targetPort: Int,
+        timeoutMillis: Long,
+    ): String
+
+    /**
      * Uses the already-open jump session to open a direct-tcpip tunnel to the
      * target, then authenticates the target over that tunnel and stores it as
      * the active persistent SSH session.
@@ -193,6 +224,25 @@ object NativeSshBridge {
         passphrase: String?,
         expectedFingerprint: String,
         timeoutMillis: Long,
+    ): String
+
+    /**
+     * Continues a held unauthenticated SSH session after a positive host-key
+     * decision, authenticating on the same connection and making it active.
+     */
+    external fun nativeRunContinuePendingSession(
+        handle: Long,
+        username: String,
+        password: String,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        storeAsJump: Boolean,
+        timeoutMillis: Long,
+    ): String
+
+    /** Closes a held unauthenticated SSH session after reject/timeout/change. */
+    external fun nativeRunAbortPendingSession(
+        handle: Long,
     ): String
 
     /** Sends an SSH keepalive on active/jump sessions and waits for a readable reply. */
@@ -247,6 +297,30 @@ object NativeSshBridge {
     /** Closes the active shell channel while leaving the SSH session open. */
     external fun nativeRunCloseShell(
         handle: Long,
+    ): String
+
+    /** Starts a native local (-L) port-forwarding listener. */
+    external fun nativeRunStartLocalForward(
+        handle: Long,
+        bindAddress: String,
+        listenPort: Int,
+        targetHost: String,
+        targetPort: Int,
+    ): String
+
+    /** Starts a native remote (-R) port-forwarding listener. */
+    external fun nativeRunStartRemoteForward(
+        handle: Long,
+        bindAddress: String,
+        listenPort: Int,
+        targetHost: String,
+        targetPort: Int,
+    ): String
+
+    /** Closes a native forwarding listener and its child connections. */
+    external fun nativeRunCloseForward(
+        handle: Long,
+        forwardHandle: Long,
     ): String
 
     /** Runs an SFTP metadata/path command on the active authenticated session. */

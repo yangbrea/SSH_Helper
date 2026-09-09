@@ -93,6 +93,8 @@ public:
     virtual void forceClose() noexcept = 0;
 };
 
+class Operation;
+
 class LoopContext {
 public:
     SessionState state() const noexcept;
@@ -115,6 +117,17 @@ public:
     // Returns the active SSH session resource, or nullptr if none is stored.
     RuntimeResource* activeSession() const noexcept;
 
+    // Stores a handshaked but unauthenticated SSH session resource while the
+    // host-key decision is pending. Only one pending session may exist at a
+    // time. The pending session is not visible through [activeSession].
+    void storePendingSession(std::unique_ptr<RuntimeResource> session);
+    // Returns the pending session resource, or nullptr if none is stored.
+    RuntimeResource* pendingSession() const noexcept;
+    // Transfers ownership of the pending session out of the runtime.
+    std::unique_ptr<RuntimeResource> takePendingSession();
+    // Closes and clears the pending session without exposing it to operations.
+    void closePendingSession() noexcept;
+
     // Stores an authenticated jump SSH session resource that is kept alive as
     // the route's auxiliary session while the active session is the target.
     void storeJumpSession(std::unique_ptr<RuntimeResource> session);
@@ -130,6 +143,20 @@ public:
     // resource remains owned by the runtime until shutdown.
     void clearActiveChannel() noexcept;
 
+    // Registers a long-lived background operation on the owner thread. The
+    // returned id is unique among foreground and background operations and may
+    // be used as a forwarding group id. Background operations do not emit
+    // completion events.
+    RequestId spawnBackground(std::unique_ptr<Operation> operation);
+
+    // Registers a background operation that belongs to an existing forwarding
+    // [group_id]. Child connections are cancelled together with their listener.
+    RequestId spawnBackground(std::unique_ptr<Operation> operation, uint64_t group_id);
+
+    // Cancels every active background operation in [group_id]. Used by
+    // forwarding close operations to stop an accept loop and its children.
+    bool cancelBackgroundGroup(uint64_t group_id);
+
 private:
     friend class SshNativeSession;
     struct Access;
@@ -143,6 +170,20 @@ public:
     virtual StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) = 0;
     virtual CancelScope cancelScope() const noexcept { return CancelScope::kRequest; }
     virtual void onCancel(LoopContext&) noexcept {}
+
+    // Background operations are driven by the same event-loop scheduler as
+    // foreground requests but never produce completion events or consume
+    // completion-obligation slots. They are used for long-lived forwarding
+    // accept loops and per-connection data pumps.
+    virtual bool isBackground() const noexcept { return false; }
+
+    // Non-zero groups let a foreground close operation cancel all background
+    // operations belonging to one forwarding listener.
+    void setBackgroundGroup(uint64_t group_id) noexcept { background_group_ = group_id; }
+    uint64_t backgroundGroup() const noexcept { return background_group_; }
+
+private:
+    uint64_t background_group_ = 0;
 };
 
 class Clock {
@@ -234,6 +275,10 @@ public:
     SubmitResult submit(std::unique_ptr<Operation> operation, RequestOptions options = {});
     bool cancel(RequestId request_id);
     bool waitEvent(RuntimeEvent* event, std::chrono::milliseconds timeout);
+    // Consume only this request's completion; other callers' events stay queued.
+    // Do not mix with an unfiltered waitEvent consumer for the same requests.
+    bool waitCompletion(RequestId request_id, RuntimeEvent* event,
+                        std::chrono::milliseconds timeout);
     SessionState state() const noexcept;
     bool acceptingCommands() const noexcept;
     std::thread::id ownerThreadId() const noexcept;

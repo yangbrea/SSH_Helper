@@ -24,6 +24,7 @@
 #include "ssh_proxy_operation.h"
 #include "ssh_socks5_operation.h"
 #include "ssh_error.h"
+#include "ssh_forward_operation.h"
 #include "ssh_handshake_operation.h"
 #include "ssh_jump_operation.h"
 #include "ssh_keepalive_operation.h"
@@ -103,6 +104,8 @@ std::string capabilitiesString() {
     capabilities += currentAbi();
     capabilities += ";crypto_backend=openssl";
     capabilities += ";legacy_algorithms=false";
+    capabilities += ";forward=local,remote";
+    capabilities += ";dynamic=deferred";
     return capabilities;
 }
 
@@ -142,11 +145,8 @@ std::string awaitRuntimeCompletion(
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
         sshnative::RuntimeEvent event;
-        if (!session->waitEvent(&event, std::chrono::milliseconds(100))) continue;
-        if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
-            event.request_id != submit.request_id) {
-            continue;
-        }
+        if (!session->waitCompletion(submit.request_id, &event,
+                                     std::chrono::milliseconds(100))) continue;
         if (event.completion == sshnative::CompletionKind::kSucceeded) {
             return std::move(event.payload);
         }
@@ -168,33 +168,26 @@ std::string awaitRuntimeCompletion(
     return {};
 }
 
-// Like awaitRuntimeCompletion, but a deadline timeout returns false with no
-// Java exception. Used by shell reads so a blocked reader can be polled and
-// stopped without needing to cancel the native read request from Kotlin.
-bool awaitRuntimeCompletionWithDeadline(
+// The runtime owns the read deadline. Always consume its completion, including
+// timeout/cancellation, before starting another read. A separate JNI deadline
+// could abandon an already completed read and lose its output.
+bool awaitRuntimeReadCompletion(
     JNIEnv* env,
     const std::shared_ptr<sshnative::SshNativeSession>& session,
     sshnative::SubmitResult submit,
-    std::chrono::milliseconds timeout,
     std::string* out) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        sshnative::RuntimeEvent event;
-        if (!session->waitEvent(&event, std::chrono::milliseconds(50))) continue;
-        if (event.kind != sshnative::RuntimeEventKind::kCompletion ||
-            event.request_id != submit.request_id) {
-            continue;
-        }
-        if (event.completion == sshnative::CompletionKind::kSucceeded) {
-            *out = std::move(event.payload);
-            return true;
-        }
-        if (event.error.domain == sshnative::ErrorDomain::kTimeout) {
-            return false;
-        }
-        throwNativeRuntimeError(env, event.error);
+    sshnative::RuntimeEvent event;
+    if (!session->waitCompletion(submit.request_id, &event,
+                                 std::chrono::milliseconds(-1))) {
+        throwIllegalState(env, "runtime closed before shell read completed");
         return false;
     }
+    if (event.completion == sshnative::CompletionKind::kSucceeded) {
+        *out = std::move(event.payload);
+        return true;
+    }
+    if (event.error.domain == sshnative::ErrorDomain::kTimeout) return false;
+    throwNativeRuntimeError(env, event.error);
     return false;
 }
 
@@ -496,6 +489,51 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunTcpHandshake(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunTcpHostKeyProbe(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jhost,
+    jint jport,
+    jlong timeout_millis) {
+    try {
+        const std::string host = jstringToString(env, jhost);
+        if (host.empty()) throw std::invalid_argument("host must not be empty");
+        if (jport <= 0 || jport > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::TcpHandshakeOperation>(
+            host, static_cast<uint16_t>(jport),
+            std::chrono::milliseconds(timeout_millis),
+            /*hold_pending=*/true);
+        const auto submit = session->submit(std::move(operation));
+        if (!submit) {
+            throw std::runtime_error("failed to submit tcp host key probe");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunTcpHostKeyProbe failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunPendingTcpHandshake(
     JNIEnv* env,
     jobject /* thiz */,
@@ -532,6 +570,48 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunPendingTcpHandsha
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunPendingTcpHandshake failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunPendingHostKeyProbe(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong timeout_millis) {
+    try {
+        if (timeout_millis <= 0) {
+            throw std::invalid_argument("invalid timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::Libssh2HandshakeOperation>(
+            -1, /*hold_pending=*/true);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit pending host key probe");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunPendingHostKeyProbe failed");
         return nullptr;
     }
 }
@@ -957,6 +1037,55 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetHan
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetHostKeyProbe(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jtarget_host,
+    jint jtarget_port,
+    jlong timeout_millis) {
+    try {
+        const std::string target_host = jstringToString(env, jtarget_host);
+        if (target_host.empty()) {
+            throw std::invalid_argument("target host must not be empty");
+        }
+        if (jtarget_port <= 0 || jtarget_port > 65535 || timeout_millis <= 0) {
+            throw std::invalid_argument("invalid target port/timeout");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::OpenJumpTargetHandshakeOperation>(
+            target_host, static_cast<uint16_t>(jtarget_port),
+            /*hold_pending=*/true);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit open jump target host key probe");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        jclass exceptionClass = env->FindClass("java/lang/IllegalStateException");
+        if (exceptionClass != nullptr) {
+            env->ThrowNew(exceptionClass, error.what());
+        }
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunOpenJumpTargetHostKeyProbe failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetSession(
     JNIEnv* env,
     jobject /* thiz */,
@@ -1017,6 +1146,83 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunOpenJumpTargetSes
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunContinuePendingSession(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jusername,
+    jstring jpassword,
+    jbyteArray jprivateKey,
+    jstring jpassphrase,
+    jboolean jstore_as_jump,
+    jlong timeout_millis) {
+    try {
+        const std::string username = jstringToString(env, jusername);
+        const std::string password = jstringToString(env, jpassword);
+        const std::string private_key = jbyteArrayToString(env, jprivateKey);
+        const std::string passphrase = jstringToString(env, jpassphrase);
+        if (username.empty() || (password.empty() && private_key.empty())) {
+            throw std::invalid_argument("username/credential must not be empty");
+        }
+        if (timeout_millis <= 0) throw std::invalid_argument("invalid timeout");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::AuthenticatePendingSessionOperation>(
+            username, password, private_key, passphrase, jstore_as_jump == JNI_TRUE);
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() +
+            std::chrono::milliseconds(timeout_millis);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) {
+            throw std::runtime_error("failed to submit continue pending session");
+        }
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunContinuePendingSession failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunAbortPendingSession(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle) {
+    try {
+        const auto session = gSshRegistry.get(handle);
+        if (!session) return env->NewStringUTF("closed");
+        auto operation = std::make_unique<sshnative::AbortPendingSessionOperation>();
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(5);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) return env->NewStringUTF("closed");
+        const std::string result = awaitRuntimeCompletion(env, session, submit);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunAbortPendingSession failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunKeepalive(
     JNIEnv* env,
     jobject /* thiz */,
@@ -1038,9 +1244,22 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunKeepalive(
         if (!submit) {
             throw std::runtime_error("failed to submit keepalive");
         }
-        const std::string result = awaitRuntimeCompletion(env, session, submit);
-        if (env->ExceptionCheck()) return nullptr;
-        return env->NewStringUTF(result.c_str());
+        // Consume the runtime's bounded result even after a background pause;
+        // a second JNI wall-clock deadline can discard an already queued success.
+        sshnative::RuntimeEvent event;
+        if (!session->waitCompletion(submit.request_id, &event, std::chrono::milliseconds(-1))) {
+            throwIllegalState(env, "runtime closed before keepalive completed");
+            return nullptr;
+        }
+        if (event.completion != sshnative::CompletionKind::kSucceeded) {
+            if (event.error.domain == sshnative::ErrorDomain::kTimeout) {
+                event.error.code = "keepalive_timeout";
+                event.error.message = "SSH keepalive send timed out";
+            }
+            throwNativeRuntimeError(env, event.error);
+            return nullptr;
+        }
+        return env->NewStringUTF(event.payload.c_str());
     } catch (const std::bad_alloc&) {
         throwOutOfMemory(env);
         return nullptr;
@@ -1253,9 +1472,7 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunShellRead(
             throw std::runtime_error("failed to submit shell read");
         }
         std::string result;
-        const bool completed = awaitRuntimeCompletionWithDeadline(
-            env, session, submit, std::chrono::milliseconds(timeout_millis),
-            &result);
+        const bool completed = awaitRuntimeReadCompletion(env, session, submit, &result);
         if (env->ExceptionCheck()) return nullptr;
         if (!completed) return nullptr;
         return stringToJByteArray(env, result);
@@ -1345,6 +1562,132 @@ Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunCloseShell(
         return nullptr;
     } catch (...) {
         throwIllegalState(env, "nativeRunCloseShell failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunStartLocalForward(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jbind_address,
+    jint jlisten_port,
+    jstring jtarget_host,
+    jint jtarget_port) {
+    try {
+        const std::string bind_address = jstringToString(env, jbind_address);
+        const std::string target_host = jstringToString(env, jtarget_host);
+        if (bind_address.empty() || target_host.empty()) {
+            throw std::invalid_argument("bind/target host must not be empty");
+        }
+        if (jlisten_port < 0 || jlisten_port > 65535 ||
+            jtarget_port <= 0 || jtarget_port > 65535) {
+            throw std::invalid_argument("invalid local forward port");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::StartLocalForwardOperation>(
+            bind_address, static_cast<uint16_t>(jlisten_port),
+            target_host, static_cast<uint16_t>(jtarget_port));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit local forward");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunStartLocalForward failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunStartRemoteForward(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jstring jbind_address,
+    jint jlisten_port,
+    jstring jtarget_host,
+    jint jtarget_port) {
+    try {
+        const std::string bind_address = jstringToString(env, jbind_address);
+        const std::string target_host = jstringToString(env, jtarget_host);
+        if (bind_address.empty() || target_host.empty()) {
+            throw std::invalid_argument("bind/target host must not be empty");
+        }
+        if (jlisten_port <= 0 || jlisten_port > 65535 ||
+            jtarget_port <= 0 || jtarget_port > 65535) {
+            throw std::invalid_argument("invalid remote forward port");
+        }
+        const auto session = gSshRegistry.get(handle);
+        if (!session) {
+            throwIllegalState(env, "SSH native handle is closed");
+            return nullptr;
+        }
+        auto operation = std::make_unique<sshnative::StartRemoteForwardOperation>(
+            bind_address, static_cast<uint16_t>(jlisten_port),
+            target_host, static_cast<uint16_t>(jtarget_port));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(15);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) throw std::runtime_error("failed to submit remote forward");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunStartRemoteForward failed");
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_yang136_sshhelper_ssh_native_NativeSshBridge_nativeRunCloseForward(
+    JNIEnv* env,
+    jobject /* thiz */,
+    jlong handle,
+    jlong forward_handle) {
+    try {
+        if (forward_handle <= 0) return env->NewStringUTF("closed");
+        const auto session = gSshRegistry.get(handle);
+        if (!session) return env->NewStringUTF("closed");
+        auto operation = std::make_unique<sshnative::CloseForwardOperation>(
+            static_cast<uint64_t>(forward_handle));
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() + std::chrono::seconds(5);
+        const auto submit = session->submit(std::move(operation), options);
+        if (!submit) return env->NewStringUTF("closed");
+        const std::string result = awaitRuntimeCompletion(
+            env, session, submit, false, true);
+        if (env->ExceptionCheck()) return nullptr;
+        return env->NewStringUTF(result.c_str());
+    } catch (const std::bad_alloc&) {
+        throwOutOfMemory(env);
+        return nullptr;
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) throwIllegalState(env, error.what());
+        return nullptr;
+    } catch (...) {
+        throwIllegalState(env, "nativeRunCloseForward failed");
         return nullptr;
     }
 }

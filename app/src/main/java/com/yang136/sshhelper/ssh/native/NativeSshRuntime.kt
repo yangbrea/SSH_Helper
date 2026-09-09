@@ -1,5 +1,11 @@
 package com.yang136.sshhelper.ssh.native
 
+/** Result of starting a native forwarding listener. */
+data class NativeForwardStartResult(
+    val id: Long,
+    val actualPort: Int,
+)
+
 /**
  * Small lifecycle wrapper around one native SSH runtime handle.
  *
@@ -107,6 +113,37 @@ class NativeSshRuntime {
         )
     }
 
+    fun runOpenJumpTargetHostKeyProbe(
+        targetHost: String,
+        targetPort: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunOpenJumpTargetHostKeyProbe(
+            handle, targetHost, targetPort, timeoutMillis,
+        )
+    }
+
+    fun runContinuePendingSession(
+        username: String,
+        password: String,
+        privateKey: ByteArray?,
+        passphrase: String?,
+        storeAsJump: Boolean,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunContinuePendingSession(
+            handle, username, password, privateKey, passphrase, storeAsJump,
+            timeoutMillis,
+        )
+    }
+
+    fun runAbortPendingSession(): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunAbortPendingSession(handle)
+    }
+
     fun runKeepalive(timeoutMillis: Long): String {
         ensureCreated()
         return NativeSshBridge.nativeRunKeepalive(handle, timeoutMillis)
@@ -158,6 +195,39 @@ class NativeSshRuntime {
     fun runCloseShell(): String {
         ensureCreated()
         return NativeSshBridge.nativeRunCloseShell(handle)
+    }
+
+    fun startLocalForward(
+        bindAddress: String,
+        listenPort: Int,
+        targetHost: String,
+        targetPort: Int,
+    ): NativeForwardStartResult {
+        ensureCreated()
+        return parseNativeForwardStartResult(
+            NativeSshBridge.nativeRunStartLocalForward(
+                handle, bindAddress, listenPort, targetHost, targetPort,
+            ),
+        )
+    }
+
+    fun startRemoteForward(
+        bindAddress: String,
+        listenPort: Int,
+        targetHost: String,
+        targetPort: Int,
+    ): NativeForwardStartResult {
+        ensureCreated()
+        return parseNativeForwardStartResult(
+            NativeSshBridge.nativeRunStartRemoteForward(
+                handle, bindAddress, listenPort, targetHost, targetPort,
+            ),
+        )
+    }
+
+    fun closeForward(forwardHandle: Long) {
+        if (forwardHandle == 0L || handle == 0L) return
+        NativeSshBridge.nativeRunCloseForward(handle, forwardHandle)
     }
 
     fun createSftpClient(): Long {
@@ -219,6 +289,15 @@ class NativeSshRuntime {
     ): String {
         ensureCreated()
         return NativeSshBridge.nativeRunPendingTcpHandshake(
+            handle, timeoutMillis,
+        )
+    }
+
+    fun runPendingHostKeyProbe(
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunPendingHostKeyProbe(
             handle, timeoutMillis,
         )
     }
@@ -312,6 +391,17 @@ class NativeSshRuntime {
         )
     }
 
+    fun runTcpHostKeyProbe(
+        host: String,
+        port: Int,
+        timeoutMillis: Long,
+    ): String {
+        ensureCreated()
+        return NativeSshBridge.nativeRunTcpHostKeyProbe(
+            handle, host, port, timeoutMillis,
+        )
+    }
+
     fun runHttpProxyConnect(
         proxyHost: String,
         proxyPort: Int,
@@ -351,4 +441,18 @@ class NativeSshRuntime {
             NativeSshBridge.nativeClose(current)
         }
     }
+}
+
+internal fun parseNativeForwardStartResult(raw: String): NativeForwardStartResult {
+    var id = 0L
+    var port = 0
+    for (line in raw.lineSequence()) {
+        if (line.startsWith("id=")) {
+            id = line.removePrefix("id=").toLongOrNull() ?: 0L
+        } else if (line.startsWith("port=")) {
+            port = line.removePrefix("port=").toIntOrNull() ?: 0
+        }
+    }
+    check(id != 0L) { "native forwarding start payload missing id: $raw" }
+    return NativeForwardStartResult(id, port)
 }

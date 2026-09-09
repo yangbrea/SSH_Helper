@@ -17,6 +17,8 @@ public:
 
     Libssh2Session(const Libssh2Session&) = delete;
     Libssh2Session& operator=(const Libssh2Session&) = delete;
+    Libssh2Session(Libssh2Session&& other) noexcept;
+    Libssh2Session& operator=(Libssh2Session&& other) noexcept;
 
     LIBSSH2_SESSION* get() const { return session_; }
 

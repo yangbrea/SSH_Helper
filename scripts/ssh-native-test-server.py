@@ -81,6 +81,15 @@ class Server(asyncssh.SSHServer):
     def validate_public_key(self, username, key):
         return username == "test"
 
+    def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
+        # Accept direct-tcpip channels used by local (-L) forwarding.
+        return True
+
+    def server_requested(self, listen_host, listen_port):
+        # Accept remote (-R) forwarding requests; AsyncSSH owns the remote
+        # listener and sends forwarded channels back to the client.
+        return True
+
     def session_requested(self):
         return ExecSession()
 

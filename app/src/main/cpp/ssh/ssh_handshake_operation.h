@@ -17,7 +17,8 @@ public:
     TcpHandshakeOperation(
         std::string host,
         uint16_t port,
-        std::chrono::milliseconds connect_timeout);
+        std::chrono::milliseconds connect_timeout,
+        bool hold_pending = false);
     ~TcpHandshakeOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -38,6 +39,7 @@ private:
     Libssh2Session session_;
     bool handshake_started_ = false;
     bool handshake_done_ = false;
+    bool hold_pending_ = false;
 };
 
 } // namespace sshnative

@@ -15,8 +15,10 @@ namespace sshnative {
 class Libssh2HandshakeOperation final : public Operation {
 public:
     // Pass -1 to take an established transport socket previously stored by
-    // TcpConnectOperation or a proxy CONNECT operation.
-    explicit Libssh2HandshakeOperation(int socket_fd = -1);
+    // TcpConnectOperation or a proxy CONNECT operation. When [hold_pending] is
+    // true the handshaked unauthenticated session is stored as the runtime's
+    // pending session instead of being closed on completion.
+    explicit Libssh2HandshakeOperation(int socket_fd = -1, bool hold_pending = false);
     ~Libssh2HandshakeOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -25,6 +27,7 @@ private:
     int fd_ = -1;
     Libssh2Session session_;
     bool handshake_started_ = false;
+    bool hold_pending_ = false;
 };
 
 // Performs a nonblocking handshake followed by plain password authentication on

@@ -184,6 +184,66 @@ private:
 } // namespace
 
 int main() {
+    // Waiting for a later request must not discard an earlier completion.
+    {
+        sshnative::SshNativeSession session;
+        auto write = session.submit(std::make_unique<ImmediateOperation>(nullptr, nullptr, "written=1"));
+        auto read = session.submit(std::make_unique<ImmediateOperation>(nullptr, nullptr, "a"));
+        sshnative::RuntimeEvent event;
+        assert(session.waitCompletion(read.request_id, &event, 2s));
+        assert(event.payload == "a");
+        assert(session.waitCompletion(write.request_id, &event, 2s));
+        assert(event.payload == "written=1");
+        assert(!session.waitCompletion(write.request_id, &event, 0ms));
+        session.shutdown();
+    }
+
+    // Independent JNI-style waiters receive their own results under contention.
+    {
+        sshnative::SshNativeSession session;
+        std::vector<std::thread> callers;
+        for (int caller = 0; caller < 4; ++caller) {
+            callers.emplace_back([&session, caller] {
+                for (int i = 0; i < 100; ++i) {
+                    const auto payload = std::to_string(caller) + ":" + std::to_string(i);
+                    auto request = session.submit(
+                        std::make_unique<ImmediateOperation>(nullptr, nullptr, payload));
+                    assert(request);
+                    sshnative::RuntimeEvent event;
+                    assert(session.waitCompletion(request.request_id, &event, 2s));
+                    assert(event.request_id == request.request_id);
+                    assert(event.payload == payload);
+                }
+            });
+        }
+        for (auto& caller : callers) caller.join();
+        session.shutdown();
+    }
+
+    // A timed-out wait does not consume another request. Runtime deadlines and
+    // shutdown both deliver completions to a reader with no separate JNI timer.
+    {
+        sshnative::SshNativeSession session;
+        sshnative::RequestOptions options;
+        options.deadline = sshnative::MonoClock::now() + 30ms;
+        auto read = session.submit(std::make_unique<TimerOperation>(), options);
+        auto write = session.submit(std::make_unique<ImmediateOperation>());
+        sshnative::RuntimeEvent event;
+        assert(!session.waitCompletion(read.request_id, &event, 0ms));
+        assert(session.waitCompletion(write.request_id, &event, 2s));
+        assert(session.waitCompletion(read.request_id, &event, -1ms));
+        assert(event.error.domain == sshnative::ErrorDomain::kTimeout);
+        auto pending = session.submit(std::make_unique<TimerOperation>());
+        std::thread reader([&] {
+            sshnative::RuntimeEvent cancelled;
+            assert(session.waitCompletion(pending.request_id, &cancelled, -1ms));
+            assert(cancelled.completion == sshnative::CompletionKind::kCancelled);
+        });
+        session.shutdown();
+        reader.join();
+        assert(!session.waitCompletion(pending.request_id, &event, -1ms));
+    }
+
     // Owner-thread serialization, immutable completion payload and real poll wakeup.
     {
         sshnative::SshNativeSession session;

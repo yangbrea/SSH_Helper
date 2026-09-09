@@ -15,6 +15,7 @@
 #include "ssh_error.h"
 #include "ssh_hostkey.h"
 #include "ssh_libssh2_nonblocking.h"
+#include "ssh_persistent_session.h"
 #include "ssh_socket.h"
 
 namespace sshnative {
@@ -33,10 +34,12 @@ void setNonBlocking(int fd) {
 TcpHandshakeOperation::TcpHandshakeOperation(
     std::string host,
     uint16_t port,
-    std::chrono::milliseconds connect_timeout)
+    std::chrono::milliseconds connect_timeout,
+    bool hold_pending)
     : host_(std::move(host)),
       port_(port),
-      deadline_(MonoClock::now() + connect_timeout) {
+      deadline_(MonoClock::now() + connect_timeout),
+      hold_pending_(hold_pending) {
     if (host_.empty()) throw std::invalid_argument("host must not be empty");
     if (port_ == 0) throw std::invalid_argument("port must not be zero");
     if (connect_timeout.count() <= 0) {
@@ -78,7 +81,7 @@ void TcpHandshakeOperation::advanceToNextAddress() noexcept {
 }
 
 StepResult TcpHandshakeOperation::step(
-    LoopContext&,
+    LoopContext& context,
     const ReadySet& ready,
     MonoTime now) {
     while (!connected_) {
@@ -174,6 +177,14 @@ StepResult TcpHandshakeOperation::step(
         error.code = "host_key_unavailable";
         error.message = "handshake succeeded but host key was not available";
         return StepResult::failed(std::move(error));
+    }
+    if (hold_pending_) {
+        auto held_session = std::make_unique<Libssh2Session>(std::move(session_));
+        auto resource = std::make_unique<SshSessionResource>(
+            std::move(held_session), fd_, ResourceKind::kLibssh2Session,
+            /*owns_fd=*/true);
+        fd_ = -1;
+        context.storePendingSession(std::move(resource));
     }
     return StepResult::complete(
         "fingerprint=" + hostKeySha256Fingerprint(blob) +

@@ -703,6 +703,8 @@ channel 单独维护 `Opening / Active / EOF / Closing / Closed / Failed`。
 
 ## Step 11：完整迁移本地、远程和动态转发
 
+> 当前执行顺序：先完成本地/远程 native 化；动态转发标记为延后，不在本阶段实现。
+
 ### 目标
 
 替换 JSch 内建 forwarding 和当前直接依赖 JSch channel 的 `Socks5Server`。

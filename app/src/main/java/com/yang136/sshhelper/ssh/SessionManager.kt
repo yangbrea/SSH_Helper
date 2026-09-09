@@ -137,7 +137,7 @@ class DefaultSessionManager(
     private val hostRepository: HostRepository,
     private val knownHostDao: KnownHostDao,
     private val diagnosticSink: DiagnosticSink = NoOpDiagnosticSink,
-    private val sessionFactory: SshSessionFactory = SshSessionFactory { JschSshSession(knownHostDao, diagnostics = diagnosticSink) },
+    private val sessionFactory: SshSessionFactory = SshSessionFactory { Libssh2SshSession(knownHostDao, diagnostics = diagnosticSink) },
     private val credentialVault: CredentialVault? = null,
     private val settings: SettingsRepository? = null,
 ) : SessionManager {

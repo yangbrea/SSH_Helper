@@ -82,6 +82,22 @@ void Libssh2Session::setCustomIo(
         reinterpret_cast<libssh2_cb_generic*>(recv_callback));
 }
 
+Libssh2Session::Libssh2Session(Libssh2Session&& other) noexcept
+    : session_(other.session_) {
+    other.session_ = nullptr;
+}
+
+Libssh2Session& Libssh2Session::operator=(Libssh2Session&& other) noexcept {
+    if (this != &other) {
+        if (session_ != nullptr) {
+            libssh2_session_free(session_);
+        }
+        session_ = other.session_;
+        other.session_ = nullptr;
+    }
+    return *this;
+}
+
 Libssh2Session::~Libssh2Session() {
     if (session_ != nullptr) {
         libssh2_session_free(session_);

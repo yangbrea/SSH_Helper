@@ -53,6 +53,7 @@ add_library(sshhelper_ssh SHARED
     ssh/ssh_hostkey.cpp
     ssh/ssh_handshake_operation.cpp
     ssh/ssh_http_proxy.cpp
+    ssh/ssh_forward_operation.cpp
     ssh/ssh_jni.cpp
     ssh/ssh_jump_operation.cpp
     ssh/ssh_keepalive_operation.cpp

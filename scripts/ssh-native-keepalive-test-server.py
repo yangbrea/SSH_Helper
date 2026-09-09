@@ -41,6 +41,15 @@ class Session(asyncssh.SSHServerSession):
     def exec_requested(self, command):
         return True
 
+    def pty_requested(self, term_type, term_size, term_modes):
+        return True
+
+    def shell_requested(self):
+        return True
+
+    def data_received(self, data, datatype):
+        self._chan.write(data)
+
     def session_started(self):
         pass
 

@@ -10,12 +10,13 @@
 #include "ssh_error.h"
 #include "ssh_hostkey.h"
 #include "ssh_libssh2_nonblocking.h"
+#include "ssh_persistent_session.h"
 #include "ssh_socket.h"
 
 namespace sshnative {
 
-Libssh2HandshakeOperation::Libssh2HandshakeOperation(int socket_fd)
-    : fd_(socket_fd) {
+Libssh2HandshakeOperation::Libssh2HandshakeOperation(int socket_fd, bool hold_pending)
+    : fd_(socket_fd), hold_pending_(hold_pending) {
     if (fd_ < -1) throw std::invalid_argument("socket fd must not be negative");
 }
 
@@ -67,6 +68,14 @@ StepResult Libssh2HandshakeOperation::step(
     }
     const std::string fingerprint = hostKeySha256Fingerprint(blob);
     const std::string key_type_name = hostKeyTypeName(key_type);
+    if (hold_pending_) {
+        auto held_session = std::make_unique<Libssh2Session>(std::move(session_));
+        auto resource = std::make_unique<SshSessionResource>(
+            std::move(held_session), fd_, ResourceKind::kLibssh2Session,
+            /*owns_fd=*/true);
+        fd_ = -1;
+        context.storePendingSession(std::move(resource));
+    }
     return StepResult::complete(
         "fingerprint=" + fingerprint +
         "\nkeyType=" + key_type_name +

@@ -43,6 +43,7 @@ public:
     Libssh2Session* session() const noexcept { return session_.get(); }
     int fd() const noexcept { return fd_; }
     bool ownsFd() const noexcept { return owns_fd_; }
+    void setResourceKind(ResourceKind kind) noexcept { kind_ = kind; }
     void setJumpTunnel(std::shared_ptr<JumpTunnelTransport> tunnel);
     std::shared_ptr<JumpTunnelTransport> jumpTunnel() const noexcept { return tunnel_; }
 
@@ -91,6 +92,44 @@ private:
     bool use_keyboard_interactive_ = false;
     bool auth_started_ = false;
     bool auth_done_ = false;
+};
+
+// Consumes a handshaked-but-unauthenticated pending SSH session, performs
+// password or in-memory private-key authentication on the same connection, and
+// stores it as the active SSH session.
+class AuthenticatePendingSessionOperation final : public Operation {
+public:
+    AuthenticatePendingSessionOperation(
+        std::string username,
+        std::string password,
+        std::string private_key,
+        std::string passphrase,
+        bool store_as_jump = false);
+    ~AuthenticatePendingSessionOperation() override;
+
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
+
+private:
+    bool usePrivateKey() const noexcept { return !private_key_.empty(); }
+
+    std::unique_ptr<RuntimeResource> pending_;
+    std::string username_;
+    std::string password_;
+    std::string private_key_;
+    std::string passphrase_;
+    bool store_as_jump_ = false;
+    bool auth_method_decided_ = false;
+    bool use_keyboard_interactive_ = false;
+    bool auth_started_ = false;
+    bool auth_done_ = false;
+};
+
+// Closes and clears a pending unauthenticated SSH session after a rejected,
+// changed, cancelled, or timed-out host-key decision.
+class AbortPendingSessionOperation final : public Operation {
+public:
+    AbortPendingSessionOperation() = default;
+    StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
 };
 
 // Runs one exec on the active authenticated SSH session. The session remains

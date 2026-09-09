@@ -30,6 +30,11 @@ class NativeSshBridgeSmokeTest {
             capabilities.contains("crypto_backend=openssl") &&
                 capabilities.contains("legacy_algorithms=false"),
         )
+        assertTrue(
+            "capabilities should advertise local/remote forwarding and dynamic deferred: $capabilities",
+            capabilities.contains("forward=local,remote") &&
+                capabilities.contains("dynamic=deferred"),
+        )
     }
 
     @Test

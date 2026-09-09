@@ -540,12 +540,13 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         // A terminal has no editable document for autocorrect/prediction. Without
         // these flags, some IMEs keep English hardware-key input indefinitely as
         // composing text, while Chinese appears to work only when a candidate is
-        // confirmed through commitText.
+        // confirmed through commitText. Use a normal text variation, not a password
+        // variation: password fields make several IMEs open a "secure keyboard" and
+        // disable Chinese pinyin/IME input.
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
             EditorInfo.IME_FLAG_NO_EXTRACT_UI or
             EditorInfo.IME_FLAG_NO_FULLSCREEN
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         return object : BaseInputConnection(this, true) {
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {

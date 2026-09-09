@@ -52,11 +52,42 @@ void keyboardInteractiveCallback(
     responses[0].length = static_cast<unsigned int>(password->size());
 }
 
+void jumpPendingKeyboardInteractiveCallback(
+    const char* /* name */,
+    int /* name_len */,
+    const char* /* instruction */,
+    int /* instruction_len */,
+    int num_prompts,
+    const LIBSSH2_USERAUTH_KBDINT_PROMPT* /* prompts */,
+    LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses,
+    void** abstract) {
+    if (num_prompts != 1 || abstract == nullptr || *abstract == nullptr) {
+        return;
+    }
+    auto* tunnel = static_cast<JumpTunnelTransport*>(*abstract);
+    if (tunnel->keyboard_password == nullptr) return;
+    const std::string* password = tunnel->keyboard_password;
+    char* copy = static_cast<char*>(std::malloc(password->size() + 1));
+    if (copy == nullptr) return;
+    std::memcpy(copy, password->data(), password->size());
+    copy[password->size()] = '\0';
+    responses[0].text = copy;
+    responses[0].length = static_cast<unsigned int>(password->size());
+}
+
 SshError noSessionError() {
     SshError error;
     error.domain = ErrorDomain::kInternal;
     error.code = "no_active_session";
     error.message = "no active authenticated SSH session";
+    return error;
+}
+
+SshError noPendingSessionError() {
+    SshError error;
+    error.domain = ErrorDomain::kInternal;
+    error.code = "no_pending_session";
+    error.message = "no pending unauthenticated SSH session";
     return error;
 }
 
@@ -291,6 +322,169 @@ StepResult OpenAuthenticatedSessionOperation::step(
     }
 
     return StepResult::noProgress();
+}
+
+AuthenticatePendingSessionOperation::AuthenticatePendingSessionOperation(
+    std::string username,
+    std::string password,
+    std::string private_key,
+    std::string passphrase,
+    bool store_as_jump)
+    : username_(std::move(username)),
+      password_(std::move(password)),
+      private_key_(std::move(private_key)),
+      passphrase_(std::move(passphrase)),
+      store_as_jump_(store_as_jump) {
+    if (username_.empty()) {
+        throw std::invalid_argument("username must not be empty");
+    }
+    if (password_.empty() && private_key_.empty()) {
+        throw std::invalid_argument("password or private key must not be empty");
+    }
+}
+
+AuthenticatePendingSessionOperation::~AuthenticatePendingSessionOperation() = default;
+
+StepResult AuthenticatePendingSessionOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    if (!pending_) {
+        pending_ = context.takePendingSession();
+        if (!pending_) {
+            return StepResult::failed(noPendingSessionError());
+        }
+    }
+
+    auto* session_resource = static_cast<SshSessionResource*>(pending_.get());
+    LIBSSH2_SESSION* session = session_resource->session()->get();
+    const int fd = session_resource->fd();
+    if (session == nullptr || fd < 0) {
+        return StepResult::failed(noPendingSessionError());
+    }
+
+    if (!auth_done_) {
+        if (usePrivateKey()) {
+            if (!auth_started_) auth_started_ = true;
+            const int result = libssh2_userauth_publickey_frommemory(
+                session,
+                username_.c_str(),
+                static_cast<unsigned int>(username_.size()),
+                nullptr,
+                0,
+                private_key_.data(),
+                private_key_.size(),
+                passphrase_.empty() ? nullptr : passphrase_.c_str());
+            Libssh2CallResult translated = classifyLibssh2Int(
+                session, fd, result, ErrorDomain::kAuth,
+                "userauth_publickey_frommemory");
+            switch (translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    return StepResult::waitIo(std::move(translated.interest));
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    auth_done_ = true;
+                    break;
+            }
+        } else {
+            auto* tunnel = session_resource->jumpTunnel().get();
+            if (!auth_method_decided_) {
+                Libssh2CallResult methods_result = classifyLibssh2Pointer(
+                    session, fd,
+                    libssh2_userauth_list(
+                        session, username_.c_str(),
+                        static_cast<unsigned int>(username_.size())),
+                    ErrorDomain::kAuth, "userauth_list");
+                switch (methods_result.kind) {
+                    case Libssh2CallKind::kWouldBlock:
+                        return StepResult::waitIo(
+                            std::move(methods_result.interest));
+                    case Libssh2CallKind::kFailed:
+                        return StepResult::failed(
+                            std::move(methods_result.error));
+                    case Libssh2CallKind::kSucceeded:
+                        break;
+                }
+                const char* methods =
+                    static_cast<const char*>(methods_result.pointer);
+                auth_method_decided_ = true;
+                if (hasAuthMethod(methods, "password")) {
+                    use_keyboard_interactive_ = false;
+                } else if (hasAuthMethod(methods, "keyboard-interactive")) {
+                    use_keyboard_interactive_ = true;
+                } else {
+                    SshError error;
+                    error.domain = ErrorDomain::kAuth;
+                    error.code = "no_supported_password_method";
+                    error.message = "server does not offer password or keyboard-interactive";
+                    return StepResult::failed(std::move(error));
+                }
+            }
+
+            if (!auth_started_) {
+                auth_started_ = true;
+                if (use_keyboard_interactive_) {
+                    if (tunnel != nullptr) {
+                        tunnel->keyboard_password = &password_;
+                    } else {
+                        void** abstract_slot = libssh2_session_abstract(session);
+                        if (abstract_slot != nullptr) {
+                            *abstract_slot = const_cast<std::string*>(&password_);
+                        }
+                    }
+                }
+            }
+
+            const int result = use_keyboard_interactive_
+                ? libssh2_userauth_keyboard_interactive(
+                      session, username_.c_str(),
+                      tunnel != nullptr ? jumpPendingKeyboardInteractiveCallback
+                                        : keyboardInteractiveCallback)
+                : libssh2_userauth_password(
+                      session, username_.c_str(), password_.c_str());
+            Libssh2CallResult translated = classifyLibssh2Int(
+                session, fd, result, ErrorDomain::kAuth,
+                use_keyboard_interactive_ ? "userauth_keyboard_interactive"
+                                          : "userauth_password");
+            if (translated.kind == Libssh2CallKind::kFailed ||
+                translated.kind == Libssh2CallKind::kSucceeded) {
+                if (tunnel != nullptr) {
+                    tunnel->keyboard_password = nullptr;
+                }
+            }
+            switch (translated.kind) {
+                case Libssh2CallKind::kWouldBlock:
+                    return StepResult::waitIo(std::move(translated.interest));
+                case Libssh2CallKind::kFailed:
+                    return StepResult::failed(std::move(translated.error));
+                case Libssh2CallKind::kSucceeded:
+                    auth_done_ = true;
+                    break;
+            }
+        }
+    }
+
+    if (auth_done_) {
+        auto* session_resource = static_cast<SshSessionResource*>(pending_.get());
+        if (store_as_jump_) {
+            session_resource->setResourceKind(ResourceKind::kJumpSession);
+            context.storeJumpSession(std::move(pending_));
+        } else {
+            context.storeActiveSession(std::move(pending_));
+        }
+        return StepResult::complete("session=ok");
+    }
+
+    return StepResult::noProgress();
+}
+
+StepResult AbortPendingSessionOperation::step(
+    LoopContext& context,
+    const ReadySet&,
+    MonoTime) {
+    context.closePendingSession();
+    return StepResult::complete("closed");
 }
 
 PersistentExecOperation::PersistentExecOperation(

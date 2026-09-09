@@ -309,8 +309,11 @@ StepResult OpenJumpTargetSessionOperation::step(
 
 OpenJumpTargetHandshakeOperation::OpenJumpTargetHandshakeOperation(
     std::string target_host,
-    uint16_t target_port)
-    : target_host_(std::move(target_host)), target_port_(target_port) {
+    uint16_t target_port,
+    bool hold_pending)
+    : target_host_(std::move(target_host)),
+      target_port_(target_port),
+      hold_pending_(hold_pending) {
     if (target_host_.empty() || target_port_ == 0) {
         throw std::invalid_argument("target host/port must not be empty");
     }
@@ -391,6 +394,16 @@ StepResult OpenJumpTargetHandshakeOperation::step(
             error.code = "host_key_unavailable";
             error.message = "handshake succeeded but host key was not available";
             return StepResult::failed(std::move(error));
+        }
+        if (hold_pending_) {
+            auto resource = std::make_unique<SshSessionResource>(
+                std::move(session_), jump_fd_,
+                ResourceKind::kLibssh2Session,
+                /*owns_fd=*/false);
+            resource->setJumpTunnel(tunnel_);
+            channel_ = nullptr;
+            tunnel_.reset();
+            context.storePendingSession(std::move(resource));
         }
         return StepResult::complete(
             "fingerprint=" + hostKeySha256Fingerprint(blob) +

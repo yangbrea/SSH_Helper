@@ -252,11 +252,19 @@ struct LoopContext::Access {
     virtual int takeTransport() = 0;
     virtual void storeSession(std::unique_ptr<RuntimeResource> session) = 0;
     virtual RuntimeResource* getActiveSession() noexcept = 0;
+    virtual void storePending(std::unique_ptr<RuntimeResource> session) = 0;
+    virtual RuntimeResource* getPendingSession() noexcept = 0;
+    virtual std::unique_ptr<RuntimeResource> takePending() = 0;
+    virtual void closePending() noexcept = 0;
     virtual void storeJump(std::unique_ptr<RuntimeResource> session) = 0;
     virtual RuntimeResource* getJumpSession() noexcept = 0;
     virtual void storeChannel(std::unique_ptr<RuntimeResource> channel) = 0;
     virtual RuntimeResource* getActiveChannel() noexcept = 0;
     virtual void clearChannel() noexcept = 0;
+    virtual RequestId spawnBackground(std::unique_ptr<Operation> operation) = 0;
+    virtual RequestId spawnBackground(std::unique_ptr<Operation> operation,
+                                      uint64_t group_id) = 0;
+    virtual bool cancelBackgroundGroup(uint64_t group_id) = 0;
 };
 
 SessionState LoopContext::state() const noexcept { return access_->getState(); }
@@ -295,6 +303,23 @@ RuntimeResource* LoopContext::activeSession() const noexcept {
     return access_->getActiveSession();
 }
 
+void LoopContext::storePendingSession(std::unique_ptr<RuntimeResource> session) {
+    if (!session) throw std::invalid_argument("pending session resource is null");
+    access_->storePending(std::move(session));
+}
+
+RuntimeResource* LoopContext::pendingSession() const noexcept {
+    return access_->getPendingSession();
+}
+
+std::unique_ptr<RuntimeResource> LoopContext::takePendingSession() {
+    return access_->takePending();
+}
+
+void LoopContext::closePendingSession() noexcept {
+    access_->closePending();
+}
+
 void LoopContext::storeJumpSession(std::unique_ptr<RuntimeResource> session) {
     if (!session) throw std::invalid_argument("jump session resource is null");
     access_->storeJump(std::move(session));
@@ -315,6 +340,21 @@ RuntimeResource* LoopContext::activeChannel() const noexcept {
 
 void LoopContext::clearActiveChannel() noexcept {
     access_->clearChannel();
+}
+
+RequestId LoopContext::spawnBackground(std::unique_ptr<Operation> operation) {
+    if (!operation) throw std::invalid_argument("background operation is null");
+    return access_->spawnBackground(std::move(operation));
+}
+
+RequestId LoopContext::spawnBackground(std::unique_ptr<Operation> operation,
+                                       uint64_t group_id) {
+    if (!operation) throw std::invalid_argument("background operation is null");
+    return access_->spawnBackground(std::move(operation), group_id);
+}
+
+bool LoopContext::cancelBackgroundGroup(uint64_t group_id) {
+    return access_->cancelBackgroundGroup(group_id);
 }
 
 class SshNativeSession::Impl final : public LoopContext::Access {
@@ -382,6 +422,29 @@ public:
         if (event->kind == RuntimeEventKind::kCompletion) {
             completion_obligations_.fetch_sub(1, std::memory_order_release);
         }
+        return true;
+    }
+
+    bool waitCompletion(RequestId request_id, RuntimeEvent* event,
+                        std::chrono::milliseconds timeout) {
+        if (request_id == 0 || event == nullptr) return false;
+        std::unique_lock<std::mutex> lock(event_mutex_);
+        const auto findCompletion = [&] {
+            return std::find_if(events_.begin(), events_.end(), [request_id](const RuntimeEvent& e) {
+                return e.kind == RuntimeEventKind::kCompletion && e.request_id == request_id;
+            });
+        };
+        const auto ready = [&] { return findCompletion() != events_.end() || loop_exited_; };
+        if (timeout.count() < 0) {
+            event_cv_.wait(lock, ready);
+        } else if (!event_cv_.wait_for(lock, timeout, ready)) {
+            return false;
+        }
+        const auto found = findCompletion();
+        if (found == events_.end()) return false;
+        *event = std::move(*found);
+        events_.erase(found);
+        completion_obligations_.fetch_sub(1, std::memory_order_release);
         return true;
     }
 
@@ -480,6 +543,32 @@ public:
         return active_session_;
     }
 
+    void storePending(std::unique_ptr<RuntimeResource> session) override {
+        assertOwner();
+        if (!session) throw std::invalid_argument("pending session resource is null");
+        if (pending_session_ != nullptr) {
+            throw std::logic_error("pending SSH session already exists");
+        }
+        pending_session_ = std::move(session);
+    }
+
+    RuntimeResource* getPendingSession() noexcept override {
+        return pending_session_.get();
+    }
+
+    std::unique_ptr<RuntimeResource> takePending() override {
+        assertOwner();
+        return std::move(pending_session_);
+    }
+
+    void closePending() noexcept override {
+        assertOwner();
+        if (pending_session_) {
+            pending_session_->forceClose();
+            pending_session_.reset();
+        }
+    }
+
     void storeJump(std::unique_ptr<RuntimeResource> session) override {
         assertOwner();
         if (!session) throw std::invalid_argument("jump session resource is null");
@@ -511,6 +600,35 @@ public:
     void clearChannel() noexcept override {
         assertOwner();
         active_channel_ = nullptr;
+    }
+
+    RequestId spawnBackground(std::unique_ptr<Operation> operation) override {
+        return spawnBackgroundWithGroup(std::move(operation), 0, true);
+    }
+
+    RequestId spawnBackground(std::unique_ptr<Operation> operation,
+                              uint64_t group_id) override {
+        return spawnBackgroundWithGroup(std::move(operation), group_id, false);
+    }
+
+    bool cancelBackgroundGroup(uint64_t group_id) override {
+        assertOwner();
+        if (group_id == 0) return false;
+        std::vector<RequestId> ids;
+        for (const auto& item : active_) {
+            if (item.second->operation->isBackground() &&
+                item.second->operation->backgroundGroup() == group_id) {
+                ids.push_back(item.first);
+            }
+        }
+        if (ids.empty()) return false;
+        for (RequestId id : ids) {
+            auto found = active_.find(id);
+            if (found == active_.end()) continue;
+            found->second->operation->onCancel(context_);
+            completeBackground(id, CompletionKind::kCancelled, {}, cancelledError());
+        }
+        return true;
     }
 
 private:
@@ -637,9 +755,14 @@ private:
             auto found = active_.find(id);
             if (found == active_.end()) continue;
             const CancelScope scope = found->second->operation->cancelScope();
+            const bool background = found->second->operation->isBackground();
             found->second->operation->onCancel(context_);
-            complete(id, CompletionKind::kCancelled, {}, cancelledError());
-            if (scope == CancelScope::kTransport) {
+            if (background) {
+                completeBackground(id, CompletionKind::kCancelled, {}, cancelledError());
+            } else {
+                complete(id, CompletionKind::kCancelled, {}, cancelledError());
+            }
+            if (!background && scope == CancelScope::kTransport) {
                 accepting_.store(false, std::memory_order_release);
                 close_requested_.store(true, std::memory_order_release);
             }
@@ -658,10 +781,16 @@ private:
             auto found = active_.find(id);
             if (found == active_.end()) continue;
             const CancelScope scope = found->second->operation->cancelScope();
+            const bool background = found->second->operation->isBackground();
             found->second->operation->onCancel(context_);
-            complete(id, CompletionKind::kFailed, {},
-                     makeError(ErrorDomain::kTimeout, "deadline_exceeded", "request deadline exceeded"));
-            if (scope == CancelScope::kTransport) {
+            const SshError error = makeError(
+                ErrorDomain::kTimeout, "deadline_exceeded", "request deadline exceeded");
+            if (background) {
+                completeBackground(id, CompletionKind::kFailed, {}, error);
+            } else {
+                complete(id, CompletionKind::kFailed, {}, error);
+            }
+            if (!background && scope == CancelScope::kTransport) {
                 accepting_.store(false, std::memory_order_release);
                 close_requested_.store(true, std::memory_order_release);
             }
@@ -728,16 +857,27 @@ private:
         auto found = active_.find(id);
         if (found == active_.end()) return;
         Record& record = *found->second;
+        const bool background = record.operation->isBackground();
         switch (result.kind) {
             case StepKind::kComplete:
-                complete(id, CompletionKind::kSucceeded, std::move(result.payload), {});
+                if (background) {
+                    completeBackground(id, CompletionKind::kSucceeded,
+                                       std::move(result.payload), {});
+                } else {
+                    complete(id, CompletionKind::kSucceeded, std::move(result.payload), {});
+                }
                 return;
             case StepKind::kFailed:
                 if (!result.error) {
                     result.error = makeError(ErrorDomain::kInternal, "operation_failed",
                                              "operation failed without an error");
                 }
-                complete(id, CompletionKind::kFailed, {}, std::move(result.error));
+                if (background) {
+                    completeBackground(id, CompletionKind::kFailed, {},
+                                       std::move(result.error));
+                } else {
+                    complete(id, CompletionKind::kFailed, {}, std::move(result.error));
+                }
                 return;
             case StepKind::kProgress:
                 record.empty_interest_count = 0;
@@ -756,9 +896,14 @@ private:
             case StepKind::kWaitIo:
                 if (result.interest.empty()) {
                     if (++record.empty_interest_count > 1) {
-                        complete(id, CompletionKind::kFailed, {},
-                                 makeError(ErrorDomain::kInternal, "empty_io_interest",
-                                           "operation returned EAGAIN without poll directions"));
+                        const SshError error = makeError(
+                            ErrorDomain::kInternal, "empty_io_interest",
+                            "operation returned EAGAIN without poll directions");
+                        if (background) {
+                            completeBackground(id, CompletionKind::kFailed, {}, error);
+                        } else {
+                            complete(id, CompletionKind::kFailed, {}, error);
+                        }
                     } else {
                         record.state = RecordState::kRunnable;
                         enqueue(id);
@@ -817,6 +962,21 @@ private:
         pushEvent(std::move(event));
     }
 
+    void completeBackground(RequestId id, CompletionKind kind, std::string payload,
+                            SshError error) {
+        (void)kind;
+        (void)payload;
+        (void)error;
+        active_.erase(id);
+        {
+            std::lock_guard<std::mutex> lock(control_mutex_);
+            known_requests_.erase(id);
+            cancellations_.erase(id);
+        }
+        // No RuntimeEvent is published and no completion obligation is released
+        // because background operations were never counted as obligations.
+    }
+
     void beginClose(MonoTime now) {
         closing_started_ = true;
         accepting_.store(false, std::memory_order_release);
@@ -843,6 +1003,7 @@ private:
             completeForClose(id);
         }
 
+        closePending();
         closePendingTransport();
 
         std::stable_sort(resources_.begin(), resources_.end(),
@@ -853,6 +1014,17 @@ private:
     }
 
     void completeForClose(RequestId id) {
+        auto found = active_.find(id);
+        const bool background = found != active_.end() &&
+            found->second->operation->isBackground();
+        if (background) {
+            if (fatal_error_) {
+                completeBackground(id, CompletionKind::kFailed, {}, *fatal_error_);
+            } else {
+                completeBackground(id, CompletionKind::kCancelled, {}, cancelledError());
+            }
+            return;
+        }
         if (fatal_error_) {
             complete(id, CompletionKind::kFailed, {}, *fatal_error_);
         } else {
@@ -928,6 +1100,7 @@ private:
         for (auto iterator = resources_.rbegin(); iterator != resources_.rend(); ++iterator) {
             (*iterator)->forceClose();
         }
+        closePending();
         closePendingTransport();
     }
 
@@ -1003,6 +1176,31 @@ private:
         return makeError(ErrorDomain::kCancelled, "cancelled", "request cancelled");
     }
 
+    RequestId spawnBackgroundWithGroup(std::unique_ptr<Operation> operation,
+                                       uint64_t group_id, bool self_group) {
+        assertOwner();
+        if (!operation) throw std::invalid_argument("background operation is null");
+        RequestId id;
+        {
+            std::lock_guard<std::mutex> lock(control_mutex_);
+            id = next_request_id_++;
+            if (next_request_id_ == 0) next_request_id_ = 1;
+            while (id == 0 || known_requests_.count(id) != 0) {
+                id = next_request_id_++;
+                if (next_request_id_ == 0) next_request_id_ = 1;
+            }
+            known_requests_.insert(id);
+        }
+        if (self_group) group_id = id;
+        operation->setBackgroundGroup(group_id);
+        auto record = std::make_unique<Record>();
+        record->id = id;
+        record->operation = std::move(operation);
+        active_.emplace(id, std::move(record));
+        enqueue(id);
+        return id;
+    }
+
     RuntimeLimits limits_;
     std::shared_ptr<Clock> clock_;
     std::shared_ptr<Poller> poller_;
@@ -1040,6 +1238,7 @@ private:
     RuntimeResource* active_session_ = nullptr;
     RuntimeResource* jump_session_ = nullptr;
     RuntimeResource* active_channel_ = nullptr;
+    std::unique_ptr<RuntimeResource> pending_session_;
     int pending_transport_fd_ = -1;
     bool closing_started_ = false;
     size_t close_index_ = 0;
@@ -1062,6 +1261,11 @@ bool SshNativeSession::cancel(RequestId request_id) { return impl_->cancel(reque
 
 bool SshNativeSession::waitEvent(RuntimeEvent* event, std::chrono::milliseconds timeout) {
     return impl_->waitEvent(event, timeout);
+}
+
+bool SshNativeSession::waitCompletion(RequestId request_id, RuntimeEvent* event,
+                                     std::chrono::milliseconds timeout) {
+    return impl_->waitCompletion(request_id, event, timeout);
 }
 
 SessionState SshNativeSession::state() const noexcept { return impl_->getState(); }

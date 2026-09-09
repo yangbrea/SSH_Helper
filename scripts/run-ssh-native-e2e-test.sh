@@ -98,6 +98,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_operations.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_handshake_e2e_test.cpp" \
@@ -117,6 +118,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     -I"$project_dir/app/src/main/cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_handshake_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
@@ -142,6 +144,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_operations.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_password_auth_e2e_test.cpp" \
@@ -164,6 +167,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_operations.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_private_key_auth_e2e_test.cpp" \
@@ -186,6 +190,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_operations.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_password_exec_e2e_test.cpp" \
@@ -319,6 +324,7 @@ trap 'kill "$server_pid" 2>/dev/null || true; rm -f "$test_binary" "$gate_binary
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_operations.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
     "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
     "$project_dir/app/src/test/cpp/ssh_runtime_hostkey_match_e2e_test.cpp" \
@@ -582,6 +588,53 @@ trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$test_
     -lcrypto \
     -o "$runtime_direct_kbdint_binary"
 "$runtime_direct_kbdint_binary" "$kbdint_port"
+
+runtime_forward_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-forward.XXXXXX")"
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$runtime_forward_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_connect_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_forward_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_forward_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$runtime_forward_binary"
+"$runtime_forward_binary" "$port"
+
+runtime_hostkey_hold_binary="$(mktemp "${TMPDIR:-/tmp}/ssh-native-runtime-hostkey-hold.XXXXXX")"
+trap 'kill "$server_pid" "$kbdint_server_pid" 2>/dev/null || true; rm -f "$runtime_forward_binary" "$runtime_hostkey_hold_binary" "$port_file" "$server_err" "$key_file" "$kbdint_port_file" "$kbdint_server_err"' EXIT
+"${CXX:-c++}" \
+    -std=c++17 \
+    -pthread \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -I"$project_dir/app/src/main/cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_error.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_handshake_operation.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_persistent_session.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_hostkey.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_libssh2_nonblocking.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_runtime.cpp" \
+    "$project_dir/app/src/main/cpp/ssh/ssh_socket.cpp" \
+    "$project_dir/app/src/test/cpp/ssh_runtime_hostkey_hold_e2e_test.cpp" \
+    -lssh2 \
+    -lcrypto \
+    -o "$runtime_hostkey_hold_binary"
+"$runtime_hostkey_hold_binary" "$port"
 
 "$project_dir/scripts/run-ssh-native-persistent-e2e-test.sh"
 

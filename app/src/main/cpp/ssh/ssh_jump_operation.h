@@ -61,7 +61,8 @@ class OpenJumpTargetHandshakeOperation final : public Operation {
 public:
     OpenJumpTargetHandshakeOperation(
         std::string target_host,
-        uint16_t target_port);
+        uint16_t target_port,
+        bool hold_pending = false);
     ~OpenJumpTargetHandshakeOperation() override;
 
     StepResult step(LoopContext& context, const ReadySet& ready, MonoTime now) override;
@@ -76,6 +77,7 @@ private:
     std::shared_ptr<JumpTunnelTransport> tunnel_;
     std::unique_ptr<Libssh2Session> session_;
     bool handshake_done_ = false;
+    bool hold_pending_ = false;
 };
 
 } // namespace sshnative
