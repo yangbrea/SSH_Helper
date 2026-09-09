@@ -255,10 +255,14 @@ fun PreferenceSwitch(
 
 @Composable
 fun PreferenceGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
-        contentColor = imageAwareContentColor(),
-    )) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+            contentColor = imageAwareContentColor(),
+        ),
+    ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { content() }
     }
 }
@@ -268,6 +272,7 @@ fun SshHostCard(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Co
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
             contentColor = imageAwareContentColor(),
@@ -287,10 +292,15 @@ fun SshSessionRow(modifier: Modifier = Modifier, content: @Composable RowScope.(
 
 @Composable
 fun SshActionTile(icon: ImageVector, title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(
-        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerHigh),
-        contentColor = imageAwareContentColor(),
-    )) {
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(
+            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentColor = imageAwareContentColor(),
+        ),
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
             Text(title, style = MaterialTheme.typography.labelLarge)

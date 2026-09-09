@@ -30,7 +30,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -364,7 +363,7 @@ private fun SheetDragHandle(
         Box(
             Modifier
                 .size(width = 36.dp, height = 4.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
+                .background(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall),
         )
     }
 }
