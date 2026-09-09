@@ -266,11 +266,11 @@ private val SshTypography = Typography(
 )
 
 private val SshShapes = Shapes(
-    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-    small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-    large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
 )
 
 @Composable
