@@ -1,7 +1,5 @@
 package com.yang136.sshhelper.sftp
 
-import com.jcraft.jsch.ChannelSftp
-import com.jcraft.jsch.JSch
 import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory
@@ -18,7 +16,7 @@ import org.junit.Test
 class SftpSearchTest {
     private lateinit var server: SshServer
     private lateinit var root: java.nio.file.Path
-    private lateinit var client: JschSftpClient
+    private lateinit var client: SftpClient
 
     @Before fun startServer() {
         root = Files.createTempDirectory("ssh-helper-sftp-search")
@@ -30,14 +28,8 @@ class SftpSearchTest {
             fileSystemFactory = VirtualFileSystemFactory(root)
             start()
         }
-        val jschSession = JSch().getSession("test", "127.0.0.1", server.port).apply {
-            setPassword("secret")
-            setConfig("StrictHostKeyChecking", "no")
-            connect(5_000)
-        }
-        client = JschSftpClient((jschSession.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
+        client = openMinaSftp(server.port)
     }
-
     @After fun stopServer() {
         runCatching { client.close() }
         runCatching { server.stop(true) }

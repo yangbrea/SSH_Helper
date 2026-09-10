@@ -1,7 +1,5 @@
 package com.yang136.sshhelper.sftp
 
-import com.jcraft.jsch.ChannelSftp
-import com.jcraft.jsch.JSch
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
@@ -23,8 +21,7 @@ import kotlin.system.measureTimeMillis
 class EmbeddedSftpIntegrationTest {
     private lateinit var server: SshServer
     private lateinit var root: java.nio.file.Path
-    private lateinit var client: JschSftpClient
-    private lateinit var jschSession: com.jcraft.jsch.Session
+    private lateinit var client: MinaSftpClientAdapter
 
     @Before fun startServer() {
         root = Files.createTempDirectory("ssh-helper-sftp-test")
@@ -37,17 +34,11 @@ class EmbeddedSftpIntegrationTest {
             fileSystemFactory = VirtualFileSystemFactory(root)
             start()
         }
-        jschSession = JSch().getSession("test", "127.0.0.1", server.port).apply {
-            setPassword("secret")
-            setConfig("StrictHostKeyChecking", "no")
-            connect(5_000)
-        }
-        client = JschSftpClient((jschSession.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
+        client = openMinaSftp(server.port)
     }
 
     @After fun stopServer() {
         runCatching { client.close() }
-        runCatching { jschSession.disconnect() }
         runCatching { server.stop(true) }
         root.toFile().deleteRecursively()
     }
@@ -109,7 +100,7 @@ class EmbeddedSftpIntegrationTest {
         assertTrue("关闭后读取应在 1s 内返回，实际 ${elapsed}ms", elapsed < 1_000)
         // The aborted channel is deliberately discarded (never reused). The SSH session must
         // survive: opening a fresh channel proves the seek/abort did not kill the connection.
-        val fresh = JschSftpClient((jschSession.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
+        val fresh = client.openSiblingChannel()
         try {
             assertTrue(fresh.list(".").any { it.name == "big.bin" })
         } finally {

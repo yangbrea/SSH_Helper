@@ -1,9 +1,8 @@
 package com.yang136.sshhelper.preview
 
 import androidx.media3.common.C
-import com.jcraft.jsch.ChannelSftp
-import com.jcraft.jsch.JSch
-import com.yang136.sshhelper.sftp.JschSftpClient
+import com.yang136.sshhelper.sftp.MinaSftpClientAdapter
+import com.yang136.sshhelper.sftp.openMinaSftp
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
@@ -50,14 +49,7 @@ class SftpDataSourceTest {
         root.toFile().deleteRecursively()
     }
 
-    private fun newClient(): JschSftpClient {
-        val session = JSch().getSession("test", "127.0.0.1", server.port).apply {
-            setPassword("secret")
-            setConfig("StrictHostKeyChecking", "no")
-            connect(5_000)
-        }
-        return JschSftpClient((session.openChannel("sftp") as ChannelSftp).apply { connect(5_000) })
-    }
+    private fun newClient(): MinaSftpClientAdapter = openMinaSftp(server.port)
 
     private fun drain(source: SftpDataSource): ByteArray {
         val out = ByteArrayOutputStream()
