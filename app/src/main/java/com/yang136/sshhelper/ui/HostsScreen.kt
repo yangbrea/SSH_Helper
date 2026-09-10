@@ -2,6 +2,7 @@ package com.yang136.sshhelper.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -14,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,7 +95,7 @@ fun HostsScreen(
         topBar = {
             SshTopAppBar(
                 title = "主机",
-                subtitle = "${hosts.size} 台主机 · ${sessions.size} 个活动会话",
+                subtitle = "${hosts.size} 台 · ${sessions.size} 个会话",
                 actions = {
                     IconButton(onClick = onVaultClick) { Icon(vaultIcon(vaultState), vaultDescription(vaultState)) }
                     IconButton(onClick = onSnippets) { Icon(Icons.Default.Terminal, "快捷命令") }
@@ -102,7 +104,9 @@ fun HostsScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (!adaptive.useNavigationRail) ExtendedFloatingActionButton(onClick = onAdd, icon = { Icon(Icons.Default.Add, "添加主机") }, text = { Text("添加主机") })
+            if (!adaptive.useNavigationRail) FloatingActionButton(onClick = onAdd) {
+                Icon(Icons.Default.Add, "添加主机")
+            }
         },
     ) { padding ->
         if (adaptive.useHostListDetail) {
@@ -278,13 +282,15 @@ private fun HostsList(
 ) {
     SshCenteredList(
         modifier = modifier,
-        contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 88.dp),
+        verticalArrangement = Arrangement.Top,
     ) {
         item {
             OutlinedTextField(
-                query, onQueryChange, Modifier.fillMaxWidth(), singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, null) }, label = { Text("搜索名称、地址或用户") },
+                query, onQueryChange, Modifier.fillMaxWidth().padding(bottom = 14.dp), singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                placeholder = { Text("名称、地址或用户") },
+                shape = MaterialTheme.shapes.small,
                 trailingIcon = onAdd?.let { add -> { IconButton(onClick = add) { Icon(Icons.Default.Add, "添加主机") } } },
             )
         }
@@ -292,6 +298,7 @@ private fun HostsList(
             item {
                 SshSectionHeader(
                     title = "活动会话",
+                    modifier = Modifier.padding(start = 2.dp, top = 10.dp, end = 2.dp, bottom = 8.dp),
                     summary = "${sessions.size}/8",
                     onClick = onToggleSessions,
                     expanded = sessionsExpanded,
@@ -299,31 +306,31 @@ private fun HostsList(
             }
             if (sessionsExpanded) {
                 items(sessions.take(3), key = { "session-${it.id.value}" }) { session ->
-                    Card(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow))
                             .combinedClickable(
                                 onClick = { onSessionClick(session.id) },
                                 onLongClick = { onDeleteArmedSession(session.id) },
                             ),
-                        shape = MaterialTheme.shapes.medium,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f)),
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 if (SessionFeature.SFTP in session.features) Icons.Default.Folder
                                 else if (session.features == setOf(SessionFeature.PORT_FORWARD)) Icons.Default.Public
                                 else Icons.Default.Terminal,
                                 null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(session.displayName, fontWeight = FontWeight.SemiBold)
-                                    if (SessionFeature.SFTP in session.features) SshStatusBadge("文件", SshStatusTone.CONNECTED)
-                                    if (SessionFeature.PORT_FORWARD in session.features) SshStatusBadge("转发", SshStatusTone.CONNECTING)
-                                }
-                                Text(session.profile.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(session.displayName, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    sessionDescriptor(session),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontFamily = FontFamily.Monospace,
+                                )
                             }
                             val presentation = session.connection.presentation()
                             SshStatusBadge(presentation.first, presentation.second)
@@ -337,25 +344,47 @@ private fun HostsList(
                             }
                             IconButton(onClick = { onAskCloseSession(session) }) { Icon(Icons.Default.Close, "关闭会话") }
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
                     }
                 }
             }
         }
-        item { SshSectionHeader(if (query.isBlank()) "所有主机" else "搜索结果", summary = "${visibleHosts.size}") }
+        item {
+            SshSectionHeader(
+                if (query.isBlank()) "所有主机" else "搜索结果",
+                modifier = Modifier.padding(start = 2.dp, top = 18.dp, end = 2.dp, bottom = 8.dp),
+                summary = "${visibleHosts.size}",
+            )
+        }
         if (visibleHosts.isEmpty()) {
             item { Box(Modifier.fillParentMaxHeight(.55f), contentAlignment = Alignment.Center) {
                 SshEmptyState(Icons.Default.Computer, if (totalHosts == 0) "还没有主机" else "没有匹配的主机", if (totalHosts == 0) "添加 SSH 主机后即可开始连接" else "尝试缩短关键词或检查拼写")
             } }
         } else items(visibleHosts, key = { it.id }) { host ->
+            val activeSessions = sessions.filter { it.profile.id == host.id }
+            val connection = activeSessions.firstOrNull()?.connection?.presentation()
+                ?: ("离线" to SshStatusTone.OFFLINE)
             SshHostCard(onClick = { onOpenHost(host) }) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (host.authType == AuthType.PASSWORD) Icons.Default.Lock else Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary)
-                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                        Text(host.name, style = MaterialTheme.typography.titleMedium)
-                        Text("${host.username}@${host.hostname}:${host.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        host.jumpHostId?.let { Text("经跳板机连接", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                    Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(host.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            SshStatusBadge(connection.first, connection.second)
+                        }
+                        Text(
+                            "${host.username}@${host.hostname}:${host.port}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        Text(
+                            hostMetadata(host, activeSessions.size),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
-                    IconButton(onClick = { onQuickNewSession(host) }) { Icon(Icons.Default.Add, "新建会话") }
+                    TextButton(onClick = { onQuickNewSession(host) }) { Text("连接") }
                     Box {
                         IconButton(onClick = { onHostMenu(host.id) }) { Icon(Icons.Default.MoreVert, "更多操作") }
                         DropdownMenu(expanded = hostMenu == host.id, onDismissRequest = { onHostMenu(null) }) {
@@ -369,6 +398,20 @@ private fun HostsList(
         }
     }
 }
+
+private fun sessionDescriptor(session: ManagedSessionState): String = buildList {
+    add(session.profile.name)
+    if (SessionFeature.SHELL in session.features) add("SHELL")
+    if (SessionFeature.SFTP in session.features) add("SFTP")
+    if (SessionFeature.PORT_FORWARD in session.features) add("FORWARD")
+}.joinToString("  ·  ")
+
+private fun hostMetadata(host: HostProfile, activeSessions: Int): String = buildList {
+    add(if (host.authType == AuthType.PASSWORD) "PASSWORD" else "KEY")
+    if (host.jumpHostId != null) add("JUMP")
+    if (host.proxyType != null) add(host.proxyType.name)
+    if (activeSessions > 0) add("$activeSessions ACTIVE")
+}.joinToString("  ·  ")
 
 private fun vaultIcon(state: VaultState) = when (state) {
     VaultState.Locked -> Icons.Default.Lock

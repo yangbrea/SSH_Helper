@@ -29,11 +29,11 @@ import com.yang136.sshhelper.ui.design.SshMotion
 import com.yang136.sshhelper.ui.design.SshSpacing
 import com.yang136.sshhelper.ui.design.SshStatusColors
 
-val Navy950 = Color(0xFF07131F)
-val Navy900 = Color(0xFF0B1D2B)
-val Navy800 = Color(0xFF102B3D)
-val Cyan400 = Color(0xFF22D3EE)
-val Teal400 = Color(0xFF2DD4BF)
+val Navy950 = Color(0xFF090C0E)
+val Navy900 = Color(0xFF101416)
+val Navy800 = Color(0xFF1A2024)
+val Cyan400 = Color(0xFF66D49A)
+val Teal400 = Color(0xFF91A59A)
 
 /** 终端画布背景恒为纯黑，不随应用浅色/深色模式或预设变化。 */
 internal const val TERMINAL_BLACK = "#000000"
@@ -131,32 +131,32 @@ private val OceanDark = presetColorScheme(
     dark = true,
     primary = Cyan400,
     secondary = Teal400,
-    tertiary = Color(0xFF8CB4FF),
+    tertiary = Color(0xFFD1B56F),
     background = Navy950,
     surface = Navy900,
     surfaceVariant = Navy800,
     onPrimary = Navy950,
-    onBackground = Color(0xFFE6F7FA),
-    onSurfaceVariant = Color(0xFFB5CBD1),
-    outline = Color(0xFF73909A),
-    surfaceContainer = Color(0xFF102533),
-    surfaceContainerHigh = Color(0xFF173241),
+    onBackground = Color(0xFFE8ECEA),
+    onSurfaceVariant = Color(0xFFA4AEA9),
+    outline = Color(0xFF52605A),
+    surfaceContainer = Color(0xFF14191B),
+    surfaceContainerHigh = Color(0xFF1D2426),
 )
 
 private val OceanLight = presetColorScheme(
     dark = false,
-    primary = Color(0xFF007C91),
-    secondary = Color(0xFF00796B),
-    tertiary = Color(0xFF365E9D),
-    background = Color(0xFFF4FAFB),
-    surface = Color.White,
-    surfaceVariant = Color(0xFFDCEEF1),
+    primary = Color(0xFF176B4C),
+    secondary = Color(0xFF596A61),
+    tertiary = Color(0xFF7C5D1D),
+    background = Color(0xFFF1F3F0),
+    surface = Color(0xFFFAFBF9),
+    surfaceVariant = Color(0xFFE1E6E1),
     onPrimary = Color.White,
-    onBackground = Color(0xFF15242B),
-    onSurfaceVariant = Color(0xFF455E65),
-    outline = Color(0xFF657A80),
-    surfaceContainer = Color(0xFFEAF3F5),
-    surfaceContainerHigh = Color(0xFFDDEBED),
+    onBackground = Color(0xFF19201C),
+    onSurfaceVariant = Color(0xFF536059),
+    outline = Color(0xFF6A766F),
+    surfaceContainer = Color(0xFFE9ECE8),
+    surfaceContainerHigh = Color(0xFFDDE2DD),
 )
 
 private val EmeraldDark = presetColorScheme(
@@ -268,9 +268,9 @@ private val SshTypography = Typography(
 private val SshShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
     small = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-    large = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
 )
 
 @Composable

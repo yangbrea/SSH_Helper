@@ -1,5 +1,6 @@
 package com.yang136.sshhelper.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,14 +23,13 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -254,14 +255,20 @@ internal fun HostWorkspaceContent(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Card(
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)),
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)),
             ) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("连接工作区", style = MaterialTheme.typography.titleLarge)
+                            Text("CONNECTION", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+                            Text(
+                                "${host.username}@${host.hostname}:${host.port}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontFamily = FontFamily.Monospace,
+                            )
                             Text(routeSummary(host), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         val status = state.sessions.firstOrNull()?.connection?.presentation() ?: ("离线" to SshStatusTone.OFFLINE)
@@ -296,9 +303,10 @@ internal fun HostWorkspaceContent(
 
         item { SshSectionHeader("系统集成") }
         item {
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)),
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)),
             ) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SummaryRow("系统文件访问", if (state.documentAuthorized) "已授权" else "未授权", if (state.documentAuthorized) SshStatusTone.CONNECTED else SshStatusTone.OFFLINE)
@@ -322,15 +330,11 @@ private fun SessionCard(
 ) {
     val pureForward = isPureForward(session)
     val isPersistent = session.kind != SessionKind.SSH
-    val containerColor = when {
-        pureForward -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .55f)
-        isPersistent -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .45f)
-        else -> structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
-    }
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = MaterialTheme.shapes.small,
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)),
     ) {
         Column(Modifier.fillMaxWidth()) {
             Row(
@@ -348,11 +352,7 @@ private fun SessionCard(
                         else -> Icons.Default.Terminal
                     },
                     null,
-                    tint = when {
-                        pureForward -> MaterialTheme.colorScheme.secondary
-                        isPersistent -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.primary
-                    },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(session.displayName, fontWeight = FontWeight.Medium)

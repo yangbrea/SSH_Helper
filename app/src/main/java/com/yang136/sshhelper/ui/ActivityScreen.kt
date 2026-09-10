@@ -2,6 +2,7 @@ package com.yang136.sshhelper.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,8 +21,6 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -82,23 +81,30 @@ fun ActivityScreen(
         modifier = modifier,
         containerColor = imageAwareScaffoldColor(),
         contentColor = imageAwareContentColor(),
-        topBar = { SshTopAppBar("活动", subtitle = "会话、传输与隧道的实时状态") },
+        topBar = {
+            SshTopAppBar(
+                "活动",
+                subtitle = "${state.sessions.size} 会话 · ${state.activeTransfers.size} 传输 · ${state.activeForwards.size} 转发",
+            )
+        },
     ) { padding ->
         SshCenteredList(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 28.dp),
+            verticalArrangement = Arrangement.Top,
         ) {
             if (state.attention.isNotEmpty()) {
-                item { SshSectionHeader("需要处理", summary = "${state.attention.sumOf { it.count }}") }
+                item { SshSectionHeader("需要处理", Modifier.padding(top = 12.dp, bottom = 8.dp), summary = "${state.attention.sumOf { it.count }}") }
                 items(state.attention, key = { it.kind }) { attention ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = .24f))
+                            .clickable {
                             if (attention.kind == ActivityAttentionKind.WRITEBACK) onOpenDocuments()
                         },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = .55f)),
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
                             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                 Text(attention.title, fontWeight = FontWeight.SemiBold)
@@ -106,11 +112,12 @@ fun ActivityScreen(
                             }
                             SshStatusBadge("处理", SshStatusTone.ERROR)
                         }
+                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.error.copy(alpha = .28f))
                     }
                 }
             }
             if (state.sessions.isNotEmpty()) {
-                item { SshSectionHeader("活动会话", summary = "${state.sessions.size}") }
+                item { SshSectionHeader("活动会话", Modifier.padding(top = 16.dp, bottom = 8.dp), summary = "${state.sessions.size}") }
                 items(state.sessions, key = { it.id.value }) { session ->
                     ActivityRow(
                         icon = if (SessionFeature.SFTP in session.features) Icons.Default.Folder
@@ -130,13 +137,13 @@ fun ActivityScreen(
                 }
             }
             if (state.activeForwards.isNotEmpty()) {
-                item { SshSectionHeader("运行中的转发", summary = "${state.activeForwards.size}") }
+                item { SshSectionHeader("运行中的转发", Modifier.padding(top = 16.dp, bottom = 8.dp), summary = "${state.activeForwards.size}") }
                 items(state.activeForwards, key = { it.first.id }) { (rule, runtime) ->
                     ActivityRow(Icons.Default.Sync, rule.name, hostNames[rule.hostId] ?: "主机 ${rule.hostId}", runtime.presentation()) { onOpenForwards(rule.hostId) }
                 }
             }
             if (state.activeTransfers.isNotEmpty()) {
-                item { SshSectionHeader("进行中的传输", summary = "${state.activeTransfers.size}") }
+                item { SshSectionHeader("进行中的传输", Modifier.padding(top = 16.dp, bottom = 8.dp), summary = "${state.activeTransfers.size}") }
                 items(state.activeTransfers, key = { it.id }) { transfer ->
                     ActivityRow(
                         Icons.Default.Sync,
@@ -147,7 +154,7 @@ fun ActivityScreen(
                 }
             }
             if (state.recentTransfers.isNotEmpty()) {
-                item { SshSectionHeader("最近传输", summary = "最近 ${state.recentTransfers.size} 条") }
+                item { SshSectionHeader("最近传输", Modifier.padding(top = 16.dp, bottom = 8.dp), summary = "最近 ${state.recentTransfers.size} 条") }
                 items(state.recentTransfers, key = { "recent-${it.id}" }) { transfer ->
                     ActivityRow(Icons.Default.Folder, File(transfer.source).name.ifBlank { transfer.source }, hostNames[transfer.hostId] ?: "主机 ${transfer.hostId}", transfer.status.presentation()) { onOpenHost(transfer.hostId) }
                 }
@@ -192,26 +199,19 @@ private fun ActivityRow(
     onDelete: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    if (onLongClick != null) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(
-                containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
-            ),
-        ) {
-            ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
-        }
+    val interactionModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
     } else {
-        Card(
-            onClick = onClick,
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)),
-        ) {
-            ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
-        }
+        Modifier.clickable(onClick = onClick)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow))
+            .then(interactionModifier),
+    ) {
+        ActivityRowContent(icon, title, summary, badge, deleteArmed, onDelete)
+        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
     }
 }
 
@@ -224,8 +224,8 @@ private fun ActivityRowContent(
     deleteArmed: Boolean = false,
     onDelete: (() -> Unit)? = null,
 ) {
-    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

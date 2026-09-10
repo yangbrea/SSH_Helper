@@ -315,7 +315,7 @@ fun SettingsScreen(
         topBar = {
             SshTopAppBar(
                 title = if (adaptive.useTwoPane) "设置" else selected?.title ?: "设置",
-                subtitle = if (adaptive.useTwoPane) selected?.title else selected?.let { "SSH Helper 偏好设置" },
+                subtitle = if (adaptive.useTwoPane) selected?.title else null,
                 navigationIcon = {
                     if ((!adaptive.useTwoPane && selected != null) || showRootBack) IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
@@ -397,22 +397,49 @@ private fun SettingsHome(
     selected: SettingsDestination? = null,
     onDestination: (SettingsDestination) -> Unit,
 ) {
-    SettingsPage(modifier) {
+    SshCenteredList(
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 10.dp, 16.dp, 32.dp),
+        verticalArrangement = Arrangement.Top,
+    ) {
         item {
-            Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp)) {
-                Text("控制你的工作环境", style = MaterialTheme.typography.headlineSmall)
-                Text("外观、连接、安全与工具都集中在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(
+                "PREFERENCES / SSH HELPER",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp, end = 4.dp, bottom = 10.dp),
+            )
         }
         state.categories.forEach { category ->
             item(category.destination.id) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+                Column(
+                    modifier = Modifier.background(
+                        structuralSurfaceColor(
+                            if (selected == category.destination) MaterialTheme.colorScheme.surfaceContainerHigh
+                            else MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
                     ),
-                    border = if (selected == category.destination) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                 ) {
-                    PreferenceAction(category.destination.icon, category.destination.title, category.summary, { onDestination(category.destination) })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .width(3.dp)
+                                .height(40.dp)
+                                .background(
+                                    if (selected == category.destination) MaterialTheme.colorScheme.primary
+                                    else Color.Transparent,
+                                ),
+                        )
+                        PreferenceAction(
+                            icon = category.destination.icon,
+                            title = category.destination.title,
+                            summary = category.summary,
+                            onClick = { onDestination(category.destination) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
                 }
             }
         }

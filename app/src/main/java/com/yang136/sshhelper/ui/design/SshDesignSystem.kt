@@ -1,7 +1,10 @@
 package com.yang136.sshhelper.ui.design
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -23,8 +26,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -115,39 +117,48 @@ fun SshTopAppBar(
     actions: @Composable RowScope.() -> Unit = {},
     allowImageBackground: Boolean = true,
 ) {
-    TopAppBar(
-        modifier = modifier,
-        title = {
-            Column {
-                Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            }
-        },
-        navigationIcon = navigationIcon,
-        actions = actions,
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = if (allowImageBackground) {
-                structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer, StructuralSurfaceRole.NAVIGATION)
-            } else {
-                MaterialTheme.colorScheme.surface
+    Column(modifier) {
+        TopAppBar(
+            modifier = Modifier.fillMaxWidth(),
+            title = {
+                Column {
+                    Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
             },
-            navigationIconContentColor = imageAwareContentColor(),
-            titleContentColor = imageAwareContentColor(),
-            actionIconContentColor = imageAwareContentColor(),
-        ),
-    )
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = if (allowImageBackground) {
+                    structuralSurfaceColor(MaterialTheme.colorScheme.surface, StructuralSurfaceRole.NAVIGATION)
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                navigationIconContentColor = imageAwareContentColor(),
+                titleContentColor = imageAwareContentColor(),
+                actionIconContentColor = imageAwareContentColor(),
+            ),
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
+    }
 }
 
 @Composable
 fun SshStatusBadge(label: String, tone: SshStatusTone, modifier: Modifier = Modifier) {
     val color = SshTheme.status.color(tone)
-    Text(
-        label,
-        modifier.background(color.copy(alpha = .14f), MaterialTheme.shapes.small).padding(horizontal = 9.dp, vertical = 4.dp),
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = color,
-    )
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(6.dp).background(color, CircleShape))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+        )
+    }
 }
 
 /**
@@ -165,7 +176,7 @@ fun SshSectionHeader(
         modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         summary?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (onClick != null) {
             Spacer(Modifier.width(8.dp))
@@ -181,7 +192,7 @@ fun SshSectionHeader(
 @Composable
 fun SshEmptyState(icon: ImageVector, title: String, description: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -223,7 +234,7 @@ fun PreferenceAction(
         modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -255,13 +266,12 @@ fun PreferenceSwitch(
 
 @Composable
 fun PreferenceGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(
+    Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
-            contentColor = imageAwareContentColor(),
-        ),
+        shape = MaterialTheme.shapes.small,
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow),
+        contentColor = imageAwareContentColor(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { content() }
     }
@@ -269,15 +279,15 @@ fun PreferenceGroup(modifier: Modifier = Modifier, content: @Composable () -> Un
 
 @Composable
 fun SshHostCard(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
-            contentColor = imageAwareContentColor(),
-        ),
-    ) { Column(Modifier.fillMaxWidth().padding(16.dp)) { content() } }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow))
+            .clickable(onClick = onClick),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) { content() }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
+    }
 }
 
 @Composable
@@ -292,17 +302,16 @@ fun SshSessionRow(modifier: Modifier = Modifier, content: @Composable RowScope.(
 
 @Composable
 fun SshActionTile(icon: ImageVector, title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
+    Surface(
         onClick = onClick,
         modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerHigh),
-            contentColor = imageAwareContentColor(),
-        ),
+        shape = MaterialTheme.shapes.small,
+        color = structuralSurfaceColor(MaterialTheme.colorScheme.surfaceContainerLow),
+        contentColor = imageAwareContentColor(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.labelLarge)
         }
     }
