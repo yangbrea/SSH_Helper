@@ -65,15 +65,18 @@ jobs:
       - name: Build pinned OpenSSL/libssh2
         run: ./scripts/build-libssh2-android.sh
 
-      - name: Install host test dependencies
-        # run-ssh-native-host-tests.sh compiles with `-lssh2`, so the *host* needs libssh2
-        # headers and a shared library. The step above only builds libssh2 for the Android
-        # ABIs via the NDK, which the host compiler cannot use. Note this means the host
-        # tests link the distro's libssh2 rather than the commit pinned in
-        # toolchains/ssh-native.lock.
+      - name: Build pinned libssh2 for the host
+        # run-ssh-native-host-tests.sh compiles its libssh2 cases with `-lssh2`, and the
+        # host needs headers plus a library the host compiler can use. The NDK build above
+        # only produces Android-ABI artifacts, so it cannot serve that.
+        #
+        # The distro package is not a substitute either: the sources call
+        # libssh2_session_callback_set2, added in libssh2 1.11.1, while Ubuntu 24.04 ships
+        # 1.11.0 and fails to compile. Building the lock-pinned source also means the host
+        # tests finally exercise the same libssh2 the APK ships.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libssh2-1-dev
+          ./scripts/build-libssh2-host.sh
+          echo "SSH_NATIVE_HOST_LIBSSH2_PREFIX=$PWD/app/build/ssh-native/host-prefix" >> "$GITHUB_ENV"
 
       - name: Run host and JVM tests
         run: |

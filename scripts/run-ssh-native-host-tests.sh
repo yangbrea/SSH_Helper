@@ -14,6 +14,20 @@ case "${SSH_NATIVE_SANITIZER:-}" in
     *) echo "unsupported SSH_NATIVE_SANITIZER: $SSH_NATIVE_SANITIZER" >&2; exit 2 ;;
 esac
 
+# libssh2-backed cases link `-lssh2`. Point that at the lock-pinned build from
+# build-libssh2-host.sh when it is available: the sources use
+# libssh2_session_callback_set2, which only exists from libssh2 1.11.1, while e.g.
+# Ubuntu 24.04 ships 1.11.0 and fails to compile. Without this variable the system
+# library is used, which is what a developer with a new-enough distro package gets.
+libssh2_flags=()
+if [[ -n "${SSH_NATIVE_HOST_LIBSSH2_PREFIX:-}" ]]; then
+    libssh2_prefix="$(cd -- "${SSH_NATIVE_HOST_LIBSSH2_PREFIX}" && pwd)"
+    libssh2_flags+=(-I"$libssh2_prefix/include" -L"$libssh2_prefix/lib")
+    echo "[ssh-native] libssh2: $libssh2_prefix"
+else
+    echo "[ssh-native] libssh2: 系统库（未设置 SSH_NATIVE_HOST_LIBSSH2_PREFIX）"
+fi
+
 compile_and_run() {
     local name="$1"
     shift
@@ -50,6 +64,7 @@ compile_and_run_libssh2() {
         -Werror \
         "${sanitizer_flags[@]}" \
         -I"$project_dir/app/src/main/cpp" \
+        "${libssh2_flags[@]}" \
         "$@" \
         -lssh2 \
         -lcrypto \
