@@ -53,15 +53,16 @@ jobs:
             ls -la "$sdk_root/ndk" >&2 || true
             exit 1
           }
+          # Publish the resolved path for later steps. The `env` context cannot be used
+          # for this: it only sees variables defined in this workflow, not the ones the
+          # runner image exports, so it expands to empty and the build steps would look
+          # for "/ndk/29.0.14206865".
+          echo "ANDROID_NDK_HOME=$sdk_root/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Build pinned libghostty-vt
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
         run: ./scripts/build-libghostty-android.sh
 
       - name: Build pinned OpenSSL/libssh2
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
         run: ./scripts/build-libssh2-android.sh
 
       - name: Run host and JVM tests
