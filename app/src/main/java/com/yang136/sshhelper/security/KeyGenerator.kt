@@ -21,8 +21,8 @@ data class GeneratedKeyPair(
 /**
  * Generates an ed25519 SSH key pair using BouncyCastle's lightweight API (provider-free, stable
  * across Android API levels). The private key is emitted as an OpenSSH `openssh-key-v1` PEM, the
- * format JSch loads natively. Storage-layer encryption (the credential vault) protects the key at
- * rest, so no second passphrase is baked into the file.
+ * format the native libssh2 backend loads. Storage-layer encryption (the credential vault) protects
+ * the key at rest, so no second passphrase is baked into the file.
  */
 object KeyGenerator {
 

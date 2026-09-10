@@ -139,7 +139,6 @@ dependencies {
     implementation("androidx.palette:palette:1.0.0")
     implementation("androidx.work:work-runtime-ktx:2.11.2")
 
-    implementation("com.github.mwiede:jsch:2.28.0")
     implementation("org.bouncycastle:bcprov-jdk18on:1.81")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")

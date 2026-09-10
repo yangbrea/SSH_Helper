@@ -58,8 +58,25 @@ import org.junit.Test
  * Backend-neutral SSH contract tests.
  *
  * Concrete subclasses supply a backend-specific [createSession]; the tests only
- * depend on the public `SshSession` contract. JSch runs this suite today;
- * libssh2 will enable the same suite once `Libssh2SshSession` exists.
+ * depend on the public `SshSession` contract.
+ *
+ * ## This suite currently has no subclass, so it does not run
+ *
+ * `JschBackendContractTest` used to be its only concrete subclass. It was removed along with
+ * the JSch backend, and the native backend cannot take its place here: `Libssh2SshSession`
+ * drives `libsshhelper_ssh.so` through JNI, so it cannot be instantiated in a JVM unit test.
+ *
+ * Running this against the native backend needs an instrumentation test, and that in turn
+ * needs an SSH server that can actually talk to libssh2 from inside an Android app process.
+ * Apache MINA SSHD — the server this suite already embeds — cannot: it aborts its own KEX
+ * proposal there with "getKexProposal() no resolved signatures available", which libssh2
+ * reports as "Unable to exchange encryption keys". The native backend itself was verified to
+ * work on-device against `scripts/ssh-native-test-server.py` (AsyncSSH) over the emulator's
+ * host-loopback alias, so what is missing is a harness, not a working backend.
+ *
+ * The suite is kept because it is the written specification of the `SshSession` contract and
+ * becomes useful again the moment an on-device server is available. Until then it is dormant
+ * by construction: an abstract class with no subclass cannot silently report green.
  */
 abstract class SshBackendContractTest {
     protected lateinit var server: SshServer
