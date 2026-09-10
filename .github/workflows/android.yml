@@ -65,6 +65,16 @@ jobs:
       - name: Build pinned OpenSSL/libssh2
         run: ./scripts/build-libssh2-android.sh
 
+      - name: Install host test dependencies
+        # run-ssh-native-host-tests.sh compiles with `-lssh2`, so the *host* needs libssh2
+        # headers and a shared library. The step above only builds libssh2 for the Android
+        # ABIs via the NDK, which the host compiler cannot use. Note this means the host
+        # tests link the distro's libssh2 rather than the commit pinned in
+        # toolchains/ssh-native.lock.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libssh2-1-dev
+
       - name: Run host and JVM tests
         run: |
           ./scripts/run-ghostty-host-tests.sh
