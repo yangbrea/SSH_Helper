@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yang136.sshhelper.SshHelperApplication
 import com.yang136.sshhelper.data.HostProfile
+import com.yang136.sshhelper.ssh.ConnectionState
 import com.yang136.sshhelper.ssh.ManagedSessionState
 import com.yang136.sshhelper.ssh.MultiplexerSessionState
 import com.yang136.sshhelper.ssh.SessionFeature
@@ -68,6 +69,7 @@ fun HostWorkspaceScreen(
     onNewSession: (HostProfile, SessionKind) -> SessionId?,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
     onRenameSession: (SessionId, String) -> Unit,
     onForwards: (Long) -> Unit,
     onDiagnostics: (Long) -> Unit,
@@ -94,6 +96,7 @@ fun HostWorkspaceScreen(
             onNewSession = onNewSession,
             onOpenTerminal = onOpenTerminal,
             onOpenFiles = onOpenFiles,
+            onReconnect = onReconnect,
             onRenameSession = onRenameSession,
             onForwards = onForwards,
             onDiagnostics = onDiagnostics,
@@ -115,6 +118,7 @@ internal fun HostWorkspacePane(
     onNewSession: (HostProfile, SessionKind) -> SessionId?,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
     onRenameSession: (SessionId, String) -> Unit,
     onForwards: (Long) -> Unit,
     onDiagnostics: (Long) -> Unit,
@@ -173,6 +177,7 @@ internal fun HostWorkspacePane(
         onCreateSession = { showNewSessionKindDialog = true },
         onOpenTerminal = onOpenTerminal,
         onOpenFiles = onOpenFiles,
+        onReconnect = onReconnect,
         onRename = { renameSession = it },
         onClose = { closeSession = it },
         onForwards = onForwards,
@@ -243,6 +248,7 @@ internal fun HostWorkspaceContent(
     onCreateSession: () -> Unit,
     onOpenTerminal: (SessionId) -> Unit,
     onOpenFiles: (SessionId) -> Unit,
+    onReconnect: (SessionId) -> Unit,
     onRename: (ManagedSessionState) -> Unit,
     onClose: (ManagedSessionState) -> Unit,
     onForwards: (Long) -> Unit,
@@ -296,6 +302,7 @@ internal fun HostWorkspaceContent(
                 onExpand = { onExpandSession(session.id) },
                 onOpenTerminal = { onOpenTerminal(session.id) },
                 onOpenFiles = { onOpenFiles(session.id) },
+                onReconnect = { onReconnect(session.id) },
                 onRename = { onRename(session) },
                 onClose = { onClose(session) },
             )
@@ -325,6 +332,7 @@ private fun SessionCard(
     onExpand: () -> Unit,
     onOpenTerminal: () -> Unit,
     onOpenFiles: () -> Unit,
+    onReconnect: () -> Unit,
     onRename: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -416,6 +424,11 @@ private fun SessionCard(
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // 连接建立中（含自动重连的每次尝试）禁用，避免重入发起第二条 transport。
+                        TextButton(
+                            onClick = onReconnect,
+                            enabled = session.connection !is ConnectionState.Connecting,
+                        ) { Text("重新连接") }
                         TextButton(onClick = onRename) { Text("重命名") }
                         TextButton(onClick = onClose) { Text("关闭会话", color = MaterialTheme.colorScheme.error) }
                     }

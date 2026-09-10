@@ -197,6 +197,7 @@ class MainActivity : FragmentActivity() {
                                     }
                                 },
                                 onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                onReconnect = sessionsViewModel::reconnect,
                                 onRenameSession = sessionsViewModel::rename,
                                 sessions = sessions,
                                 onOpenSession = { id ->
@@ -455,6 +456,7 @@ class MainActivity : FragmentActivity() {
                                         }
                                     },
                                     onOpenFiles = { id -> navController.navigate("files/${id.value}") },
+                                    onReconnect = sessionsViewModel::reconnect,
                                     onRenameSession = sessionsViewModel::rename,
                                     onForwards = { navController.navigate("forwards/$it") },
                                     onDiagnostics = { navController.navigate(networkDiagnosticsRoute(it)) },
