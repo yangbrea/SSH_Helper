@@ -33,7 +33,26 @@ jobs:
           version: 0.16.0
 
       - name: Install pinned Android NDK
-        run: sdkmanager "ndk;29.0.14206865"
+        run: |
+          # The runner image no longer guarantees `sdkmanager` on PATH (it exited 127),
+          # so derive it from the SDK root instead of trusting PATH.
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:?Android SDK root is not set}}"
+          sdkmanager="$(find "$sdk_root" -maxdepth 4 -type f -name sdkmanager 2>/dev/null | sort | head -1)"
+          if [[ -z "$sdkmanager" ]]; then
+            echo "sdkmanager not found under $sdk_root" >&2
+            ls -la "$sdk_root" >&2 || true
+            exit 1
+          fi
+          echo "Using $sdkmanager"
+          # sdkmanager may prompt for licence acceptance for a new package.
+          yes | "$sdkmanager" --sdk_root="$sdk_root" "ndk;29.0.14206865"
+          # The native build scripts resolve the NDK as <sdk>/ndk/<version>; fail here
+          # rather than several steps later if it landed somewhere else.
+          test -d "$sdk_root/ndk/29.0.14206865" || {
+            echo "NDK 29.0.14206865 not found under $sdk_root/ndk" >&2
+            ls -la "$sdk_root/ndk" >&2 || true
+            exit 1
+          }
 
       - name: Build pinned libghostty-vt
         env:
