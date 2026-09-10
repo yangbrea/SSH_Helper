@@ -124,7 +124,12 @@ if [[ -n "$apk" ]]; then
     temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ssh-native-apk.XXXXXX")"
     trap 'rm -rf "$temp_dir"' EXIT
 
-    forbidden="$(unzip -Z1 "$apk" | grep -E '^lib/[^/]+/lib(crypto|ssl|ssh2)\.so$' || true)"
+    # Read the complete listing before querying it. With `pipefail`, piping
+    # `unzip -Z1` into `grep -q` can turn a successful match into status 141:
+    # grep exits early and unzip receives SIGPIPE.
+    apk_entries="$(unzip -Z1 "$apk")"
+
+    forbidden="$(grep -E '^lib/[^/]+/lib(crypto|ssl|ssh2)\.so$' <<< "$apk_entries" || true)"
     if [[ -n "$forbidden" ]]; then
         echo "错误：APK 包含不应单独分发的 native 依赖：" >&2
         echo "$forbidden" >&2
@@ -133,7 +138,7 @@ if [[ -n "$apk" ]]; then
 
     for abi in "${abi_list[@]}"; do
         entry="lib/$abi/libsshhelper_ssh.so"
-        if unzip -Z1 "$apk" | grep -Fxq "$entry"; then
+        if grep -Fxq "$entry" <<< "$apk_entries"; then
             unzip -p "$apk" "$entry" > "$temp_dir/$abi.so"
             [[ -s "$temp_dir/$abi.so" ]] || { echo "错误：$entry 解压为空" >&2; exit 1; }
 

@@ -11,10 +11,21 @@ else
     apk="$project_dir/app/build/outputs/apk/release/app-release.apk"
 fi
 ndk_version="$(awk -F= '$1 == "android_ndk_version" { print $2 }' "$project_dir/toolchains/ghostty.lock")"
-sdk_dir="$(sed -n 's/^sdk.dir=//p' "$project_dir/local.properties" 2>/dev/null | head -1)"
-sdk_dir="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$sdk_dir}}"
+# local.properties 是本机文件（.gitignore 里），CI 上不存在。必须先判存在再读：在
+# `set -o pipefail` 下，缺文件时 sed 的退出码 2 会让整条管道返回 2，`set -e` 随即
+# 终止脚本——而 2>/dev/null 又把原因吞掉了，最终表现为"零输出 + exit 2"。
+sdk_dir=""
+if [[ -n "${ANDROID_HOME:-}" ]]; then
+    sdk_dir="$ANDROID_HOME"
+elif [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+    sdk_dir="$ANDROID_SDK_ROOT"
+elif [[ -f "$project_dir/local.properties" ]]; then
+    sdk_dir="$(sed -n 's/^sdk.dir=//p' "$project_dir/local.properties" | head -1)"
+fi
 toolchain="$sdk_dir/ndk/$ndk_version/toolchains/llvm/prebuilt/linux-x86_64/bin"
 readelf_bin="${READELF:-$toolchain/llvm-readelf}"
+
+[[ -n "$sdk_dir" ]] || { echo "无法确定 Android SDK 路径（ANDROID_HOME/ANDROID_SDK_ROOT/local.properties 均不可用）" >&2; exit 1; }
 
 [[ -f "$apk" ]] || { echo "APK 不存在：$apk" >&2; exit 1; }
 [[ -x "$readelf_bin" ]] || { echo "找不到 llvm-readelf：$readelf_bin" >&2; exit 1; }
